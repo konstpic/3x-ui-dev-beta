@@ -260,7 +260,7 @@ func (a *ServerController) getDb(c *gin.Context) {
 		return
 	}
 
-	filename := "x-ui.db"
+	filename := "x-ui-db-backup.sql"
 
 	if !isValidFilename(filename) {
 		c.AbortWithError(http.StatusBadRequest, fmt.Errorf("invalid filename"))
@@ -268,7 +268,7 @@ func (a *ServerController) getDb(c *gin.Context) {
 	}
 
 	// Set the headers for the response
-	c.Header("Content-Type", "application/octet-stream")
+	c.Header("Content-Type", "application/sql")
 	c.Header("Content-Disposition", "attachment; filename="+filename)
 
 	// Write the file contents to the response

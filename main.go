@@ -45,7 +45,7 @@ func runWebServer() {
 
 	godotenv.Load()
 
-	err := database.InitDB(config.GetDBPath())
+	err := database.InitDB(config.GetDBConnectionString())
 	if err != nil {
 		log.Fatalf("Error initializing database: %v", err)
 	}
@@ -131,7 +131,7 @@ func runWebServer() {
 
 // resetSetting resets all panel settings to their default values.
 func resetSetting() {
-	err := database.InitDB(config.GetDBPath())
+	err := database.InitDB(config.GetDBConnectionString())
 	if err != nil {
 		fmt.Println("Failed to initialize database:", err)
 		return
@@ -218,7 +218,7 @@ func updateTgbotEnableSts(status bool) {
 
 // updateTgbotSetting updates Telegram bot settings including token, chat ID, and runtime schedule.
 func updateTgbotSetting(tgBotToken string, tgBotChatid string, tgBotRuntime string) {
-	err := database.InitDB(config.GetDBPath())
+	err := database.InitDB(config.GetDBConnectionString())
 	if err != nil {
 		fmt.Println("Error initializing database:", err)
 		return
@@ -256,7 +256,7 @@ func updateTgbotSetting(tgBotToken string, tgBotChatid string, tgBotRuntime stri
 
 // updateSetting updates various panel settings including port, credentials, base path, listen IP, and two-factor authentication.
 func updateSetting(port int, username string, password string, webBasePath string, listenIP string, resetTwoFactor bool) {
-	err := database.InitDB(config.GetDBPath())
+	err := database.InitDB(config.GetDBConnectionString())
 	if err != nil {
 		fmt.Println("Database initialization failed:", err)
 		return
@@ -315,7 +315,7 @@ func updateSetting(port int, username string, password string, webBasePath strin
 
 // updateCert updates the SSL certificate files for the panel.
 func updateCert(publicKey string, privateKey string) {
-	err := database.InitDB(config.GetDBPath())
+	err := database.InitDB(config.GetDBConnectionString())
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -392,7 +392,7 @@ func GetListenIP(getListen bool) {
 func migrateDb() {
 	inboundService := service.InboundService{}
 
-	err := database.InitDB(config.GetDBPath())
+	err := database.InitDB(config.GetDBConnectionString())
 	if err != nil {
 		log.Fatal(err)
 	}

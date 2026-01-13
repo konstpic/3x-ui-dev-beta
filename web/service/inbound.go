@@ -2129,9 +2129,8 @@ func (s *InboundService) MigrationRequirements() {
 	defer func() {
 		if err == nil {
 			tx.Commit()
-			if dbErr := db.Exec(`VACUUM "main"`).Error; dbErr != nil {
-				logger.Warningf("VACUUM failed: %v", dbErr)
-			}
+			// VACUUM is optional for PostgreSQL, removed for performance reasons
+			// PostgreSQL automatically handles vacuum operations via autovacuum
 		} else {
 			tx.Rollback()
 		}
@@ -2140,16 +2139,16 @@ func (s *InboundService) MigrationRequirements() {
 	// Calculate and backfill all_time from up+down for inbounds and clients
 	err = tx.Exec(`
 		UPDATE inbounds
-		SET all_time = IFNULL(up, 0) + IFNULL(down, 0)
-		WHERE IFNULL(all_time, 0) = 0 AND (IFNULL(up, 0) + IFNULL(down, 0)) > 0
+		SET all_time = COALESCE(up, 0) + COALESCE(down, 0)
+		WHERE COALESCE(all_time, 0) = 0 AND (COALESCE(up, 0) + COALESCE(down, 0)) > 0
 	`).Error
 	if err != nil {
 		return
 	}
 	err = tx.Exec(`
 		UPDATE client_traffics
-		SET all_time = IFNULL(up, 0) + IFNULL(down, 0)
-		WHERE IFNULL(all_time, 0) = 0 AND (IFNULL(up, 0) + IFNULL(down, 0)) > 0
+		SET all_time = COALESCE(up, 0) + COALESCE(down, 0)
+		WHERE COALESCE(all_time, 0) = 0 AND (COALESCE(up, 0) + COALESCE(down, 0)) > 0
 	`).Error
 
 	if err != nil {

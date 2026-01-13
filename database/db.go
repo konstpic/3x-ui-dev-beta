@@ -1,15 +1,9 @@
 // Package database provides database initialization, migration, and management utilities
-// for the 3x-ui panel using GORM with SQLite.
+// for the 3x-ui panel using GORM with PostgreSQL.
 package database
 
 import (
-	"bytes"
-	"errors"
-	"io"
-	"io/fs"
 	"log"
-	"os"
-	"path"
 	"slices"
 
 	"github.com/mhsanaei/3x-ui/v2/config"
@@ -17,7 +11,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v2/util/crypto"
 	"github.com/mhsanaei/3x-ui/v2/xray"
 
-	"gorm.io/driver/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -127,13 +121,9 @@ func isTableEmpty(tableName string) (bool, error) {
 }
 
 // InitDB sets up the database connection, migrates models, and runs seeders.
-func InitDB(dbPath string) error {
-	dir := path.Dir(dbPath)
-	err := os.MkdirAll(dir, fs.ModePerm)
-	if err != nil {
-		return err
-	}
-
+// dbConnectionString should be a PostgreSQL connection string in the format:
+// postgres://user:password@host:port/dbname?sslmode=mode
+func InitDB(dbConnectionString string) error {
 	var gormLogger logger.Interface
 
 	if config.IsDebug() {
@@ -145,7 +135,9 @@ func InitDB(dbPath string) error {
 	c := &gorm.Config{
 		Logger: gormLogger,
 	}
-	db, err = gorm.Open(sqlite.Open(dbPath), c)
+
+	var err error
+	db, err = gorm.Open(postgres.Open(dbConnectionString), c)
 	if err != nil {
 		return err
 	}
@@ -185,51 +177,4 @@ func GetDB() *gorm.DB {
 // IsNotFound checks if the given error is a GORM record not found error.
 func IsNotFound(err error) bool {
 	return err == gorm.ErrRecordNotFound
-}
-
-// IsSQLiteDB checks if the given file is a valid SQLite database by reading its signature.
-func IsSQLiteDB(file io.ReaderAt) (bool, error) {
-	signature := []byte("SQLite format 3\x00")
-	buf := make([]byte, len(signature))
-	_, err := file.ReadAt(buf, 0)
-	if err != nil {
-		return false, err
-	}
-	return bytes.Equal(buf, signature), nil
-}
-
-// Checkpoint performs a WAL checkpoint on the SQLite database to ensure data consistency.
-func Checkpoint() error {
-	// Update WAL
-	err := db.Exec("PRAGMA wal_checkpoint;").Error
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// ValidateSQLiteDB opens the provided sqlite DB path with a throw-away connection
-// and runs a PRAGMA integrity_check to ensure the file is structurally sound.
-// It does not mutate global state or run migrations.
-func ValidateSQLiteDB(dbPath string) error {
-	if _, err := os.Stat(dbPath); err != nil { // file must exist
-		return err
-	}
-	gdb, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		return err
-	}
-	sqlDB, err := gdb.DB()
-	if err != nil {
-		return err
-	}
-	defer sqlDB.Close()
-	var res string
-	if err := gdb.Raw("PRAGMA integrity_check;").Scan(&res).Error; err != nil {
-		return err
-	}
-	if res != "ok" {
-		return errors.New("sqlite integrity check failed: " + res)
-	}
-	return nil
 }

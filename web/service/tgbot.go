@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"embed"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,7 +22,6 @@ import (
 	"time"
 
 	"github.com/mhsanaei/3x-ui/v2/config"
-	"github.com/mhsanaei/3x-ui/v2/database"
 	"github.com/mhsanaei/3x-ui/v2/database/model"
 	"github.com/mhsanaei/3x-ui/v2/logger"
 	"github.com/mhsanaei/3x-ui/v2/util/common"
@@ -3534,30 +3535,77 @@ func (t *Tgbot) sendBackup(chatId int64) {
 	output := t.I18nBot("tgbot.messages.backupTime", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
 	t.SendMsgToTgbot(chatId, output)
 
-	// Update by manually trigger a checkpoint operation
-	err := database.Checkpoint()
+	// Create a temporary file for the database backup
+	tempFile, err := os.CreateTemp("", "x-ui-db-backup-*.sql")
 	if err != nil {
-		logger.Error("Error in trigger a checkpoint operation: ", err)
+		logger.Error("Error creating temporary backup file: ", err)
+		return
+	}
+	tempPath := tempFile.Name()
+	defer func() {
+		tempFile.Close()
+		os.Remove(tempPath)
+	}()
+
+	// Get database connection parameters
+	host := config.GetDBHost()
+	port := config.GetDBPort()
+	user := config.GetDBUser()
+	password := config.GetDBPassword()
+	dbname := config.GetDBName()
+
+	// Set PGPASSWORD environment variable for pg_dump
+	env := os.Environ()
+	env = append(env, fmt.Sprintf("PGPASSWORD=%s", password))
+
+	// Use pg_dump to create a backup
+	cmd := exec.Command("pg_dump",
+		"-h", host,
+		"-p", strconv.Itoa(port),
+		"-U", user,
+		"-d", dbname,
+		"--format=plain",
+		"--no-owner",
+		"--no-privileges",
+	)
+	cmd.Env = env
+	cmd.Stdout = tempFile
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	if err != nil {
+		logger.Errorf("Error in pg_dump backup: %v, stderr: %s", err, stderr.String())
+		return
 	}
 
-	file, err := os.Open(config.GetDBPath())
-	if err == nil {
-		document := tu.Document(
-			tu.ID(chatId),
-			tu.File(file),
-		)
-		_, err = bot.SendDocument(context.Background(), document)
-		if err != nil {
-			logger.Error("Error in uploading backup: ", err)
-		}
-	} else {
-		logger.Error("Error in opening db file for backup: ", err)
+	// Close the file before sending
+	if err = tempFile.Close(); err != nil {
+		logger.Error("Error closing temporary backup file: ", err)
+		return
+	}
+
+	// Read the file content and send it
+	fileBytes, err := os.ReadFile(tempPath)
+	if err != nil {
+		logger.Error("Error reading backup file: ", err)
+		return
+	}
+
+	document := tu.Document(
+		tu.ID(chatId),
+		tu.FileFromBytes(fileBytes, "x-ui-db-backup.sql"),
+	)
+	_, err = bot.SendDocument(context.Background(), document)
+	if err != nil {
+		logger.Error("Error in uploading backup: ", err)
 	}
 
 	// Check if multi-node mode is enabled before trying to open config.json
 	multiMode, err := t.settingService.GetMultiNodeMode()
 	if err == nil && !multiMode {
-		file, err = os.Open(xray.GetConfigPath())
+		file, err := os.Open(xray.GetConfigPath())
 		if err == nil {
 			document := tu.Document(
 				tu.ID(chatId),

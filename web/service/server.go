@@ -983,58 +983,55 @@ func (s *ServerService) GetConfigJson() (any, error) {
 }
 
 func (s *ServerService) GetDb() ([]byte, error) {
-	// Update by manually trigger a checkpoint operation
-	err := database.Checkpoint()
+	// Use pg_dump to export PostgreSQL database
+	// Parse connection string to extract individual parameters for pg_dump
+	host := config.GetDBHost()
+	port := config.GetDBPort()
+	user := config.GetDBUser()
+	password := config.GetDBPassword()
+	dbname := config.GetDBName()
+	
+	// Set PGPASSWORD environment variable for pg_dump
+	env := os.Environ()
+	env = append(env, fmt.Sprintf("PGPASSWORD=%s", password))
+	
+	// Build pg_dump command
+	cmd := exec.Command("pg_dump", 
+		"-h", host,
+		"-p", strconv.Itoa(port),
+		"-U", user,
+		"-d", dbname,
+		"--format=plain",
+		"--no-owner",
+		"--no-privileges",
+	)
+	cmd.Env = env
+	
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	
+	err := cmd.Run()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("pg_dump failed: %v, stderr: %s", err, stderr.String())
 	}
-	// Open the file for reading
-	file, err := os.Open(config.GetDBPath())
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	// Read the file contents
-	fileContents, err := io.ReadAll(file)
-	if err != nil {
-		return nil, err
-	}
-
-	return fileContents, nil
+	
+	return stdout.Bytes(), nil
 }
 
 func (s *ServerService) ImportDB(file multipart.File) error {
-	// Check if the file is a SQLite database
-	isValidDb, err := database.IsSQLiteDB(file)
-	if err != nil {
-		return common.NewErrorf("Error checking db file format: %v", err)
-	}
-	if !isValidDb {
-		return common.NewError("Invalid db file format")
-	}
-
 	// Reset the file reader to the beginning
-	_, err = file.Seek(0, 0)
+	_, err := file.Seek(0, 0)
 	if err != nil {
 		return common.NewErrorf("Error resetting file reader: %v", err)
 	}
 
-	// Save the file as a temporary file
-	tempPath := fmt.Sprintf("%s.temp", config.GetDBPath())
-
-	// Remove the existing temporary file (if any)
-	if _, err := os.Stat(tempPath); err == nil {
-		if errRemove := os.Remove(tempPath); errRemove != nil {
-			return common.NewErrorf("Error removing existing temporary db file: %v", errRemove)
-		}
-	}
-
-	// Create the temporary file
-	tempFile, err := os.Create(tempPath)
+	// Create a temporary file to store the SQL dump
+	tempFile, err := os.CreateTemp("", "x-ui-db-import-*.sql")
 	if err != nil {
-		return common.NewErrorf("Error creating temporary db file: %v", err)
+		return common.NewErrorf("Error creating temporary SQL file: %v", err)
 	}
+	tempPath := tempFile.Name()
 
 	// Robust deferred cleanup for the temporary file
 	defer func() {
@@ -1050,73 +1047,63 @@ func (s *ServerService) ImportDB(file multipart.File) error {
 		}
 	}()
 
-	// Save uploaded file to temporary file
+	// Save uploaded SQL dump to temporary file
 	if _, err = io.Copy(tempFile, file); err != nil {
-		return common.NewErrorf("Error saving db: %v", err)
+		return common.NewErrorf("Error saving SQL dump: %v", err)
 	}
 
-	// Close temp file before opening via sqlite
+	// Close temp file before importing
 	if err = tempFile.Close(); err != nil {
-		return common.NewErrorf("Error closing temporary db file: %v", err)
+		return common.NewErrorf("Error closing temporary SQL file: %v", err)
 	}
 	tempFile = nil
-
-	// Validate integrity (no migrations / side effects)
-	if err = database.ValidateSQLiteDB(tempPath); err != nil {
-		return common.NewErrorf("Invalid or corrupt db file: %v", err)
-	}
 
 	// Stop Xray (ignore error but log)
 	if errStop := s.StopXrayService(); errStop != nil {
 		logger.Warningf("Failed to stop Xray before DB import: %v", errStop)
 	}
 
-	// Close existing DB to release file locks (especially on Windows)
+	// Close existing DB connection
 	if errClose := database.CloseDB(); errClose != nil {
-		logger.Warningf("Failed to close existing DB before replacement: %v", errClose)
+		logger.Warningf("Failed to close existing DB before import: %v", errClose)
 	}
 
-	// Backup the current database for fallback
-	fallbackPath := fmt.Sprintf("%s.backup", config.GetDBPath())
+	// Get database connection parameters
+	host := config.GetDBHost()
+	port := config.GetDBPort()
+	user := config.GetDBUser()
+	password := config.GetDBPassword()
+	dbname := config.GetDBName()
 
-	// Remove the existing fallback file (if any)
-	if _, err := os.Stat(fallbackPath); err == nil {
-		if errRemove := os.Remove(fallbackPath); errRemove != nil {
-			return common.NewErrorf("Error removing existing fallback db file: %v", errRemove)
-		}
+	// Set PGPASSWORD environment variable for psql
+	env := os.Environ()
+	env = append(env, fmt.Sprintf("PGPASSWORD=%s", password))
+
+	// Use psql to import the SQL dump
+	cmd := exec.Command("psql",
+		"-h", host,
+		"-p", strconv.Itoa(port),
+		"-U", user,
+		"-d", dbname,
+		"-f", tempPath,
+		"--quiet",
+	)
+	cmd.Env = env
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	if err != nil {
+		return common.NewErrorf("psql import failed: %v, stderr: %s", err, stderr.String())
 	}
 
-	// Move the current database to the fallback location
-	if err = os.Rename(config.GetDBPath(), fallbackPath); err != nil {
-		return common.NewErrorf("Error backing up current db file: %v", err)
+	// Reconnect to database
+	if err = database.InitDB(config.GetDBConnectionString()); err != nil {
+		return common.NewErrorf("Error reconnecting to database after import: %v", err)
 	}
 
-	// Defer fallback cleanup ONLY if everything goes well
-	defer func() {
-		if _, err := os.Stat(fallbackPath); err == nil {
-			if rerr := os.Remove(fallbackPath); rerr != nil {
-				logger.Warningf("Warning: failed to remove fallback file: %v", rerr)
-			}
-		}
-	}()
-
-	// Move temp to DB path
-	if err = os.Rename(tempPath, config.GetDBPath()); err != nil {
-		// Restore from fallback
-		if errRename := os.Rename(fallbackPath, config.GetDBPath()); errRename != nil {
-			return common.NewErrorf("Error moving db file and restoring fallback: %v", errRename)
-		}
-		return common.NewErrorf("Error moving db file: %v", err)
-	}
-
-	// Open & migrate new DB
-	if err = database.InitDB(config.GetDBPath()); err != nil {
-		if errRename := os.Rename(fallbackPath, config.GetDBPath()); errRename != nil {
-			return common.NewErrorf("Error migrating db and restoring fallback: %v", errRename)
-		}
-		return common.NewErrorf("Error migrating db: %v", err)
-	}
-
+	// Run migrations
 	s.inboundService.MigrateDB()
 
 	// Start Xray
