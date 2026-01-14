@@ -11,30 +11,30 @@
 tmp/
 *.tar.gz
 
-# Ignore build and distribution directories
-backup/
-bin/
-dist/
-release/
-node_modules/
+# # Ignore build and distribution directories
+# backup/
+# bin/
+# dist/
+# release/
+# node_modules/
 
-# Ignore compiled binaries
-main
+# # Ignore compiled binaries
+# main
 
-# Ignore script and executable files
-/release.sh
-/x-ui
+# # Ignore script and executable files
+# /release.sh
+# /x-ui
 
-# Ignore OS specific files
-.DS_Store
-Thumbs.db
+# # Ignore OS specific files
+# .DS_Store
+# Thumbs.db
 
-# Ignore Go build files
-*.exe
-x-ui.db
+# # Ignore Go build files
+# *.exe
+# x-ui.db
 
-# Ignore Docker specific files
-docker-compose.override.yml
+# # Ignore Docker specific files
+# docker-compose.override.yml
 
-# Ignore .env (Environment Variables) file
-.env
+# # Ignore .env (Environment Variables) file
+# .env
