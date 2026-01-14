@@ -76,7 +76,7 @@
                 </a-radio-group>
               </div>
               <a-table :columns="isMobile ? mobileColumns : columns" :row-key="client => client.id"
-                :data-source="searchedClients" :scroll="isMobile ? {} : { x: 1000 }"
+                :data-source="searchedClients" :scroll="isMobile ? {} : { x: 1150 }"
                 :pagination="false"
                 :style="{ marginTop: '10px' }"
                 class="clients-table"
@@ -167,6 +167,10 @@
                   </svg>
                 </a-tag>
               </template>
+              <template slot="comment" slot-scope="text, client">
+                <span v-if="client.comment" :style="{ maxWidth: '150px', display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }" :title="client.comment">[[ client.comment ]]</span>
+                <span v-else style="color: #999;">-</span>
+              </template>
             </a-table>
             </a-space>
           </a-card>
@@ -229,6 +233,11 @@
     align: 'left',
     width: 120,
     scopedSlots: { customRender: 'expiryTime' },
+  }, {
+    title: '{{ i18n "pages.clients.comment" }}',
+    align: 'left',
+    width: 150,
+    scopedSlots: { customRender: 'comment' },
   }, {
     title: '{{ i18n "pages.clients.enable" }}',
     align: 'center',

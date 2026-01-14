@@ -121,10 +121,10 @@ func (a *MigrationController) executeMigration(c *gin.Context) {
 		return
 	}
 
-	// Restart panel after successful migration to apply new settings
+	// Restart container after successful migration to apply new settings
 	if result.Success {
-		if err := a.panelService.RestartPanel(time.Second * 3); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("Failed to restart panel: %v", err))
+		if err := a.panelService.RestartContainer(time.Second * 3); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("Failed to restart container: %v", err))
 		}
 	}
 

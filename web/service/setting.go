@@ -280,6 +280,14 @@ func (s *SettingService) getBool(key string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	// If the string is empty, treat it as missing and use default value
+	if str == "" {
+		defaultValue, ok := defaultValueMap[key]
+		if !ok {
+			return false, common.NewErrorf("key <%v> not in defaultValueMap", key)
+		}
+		return strconv.ParseBool(defaultValue)
+	}
 	return strconv.ParseBool(str)
 }
 
@@ -291,6 +299,14 @@ func (s *SettingService) getInt(key string) (int, error) {
 	str, err := s.getString(key)
 	if err != nil {
 		return 0, err
+	}
+	// If the string is empty, treat it as missing and use default value
+	if str == "" {
+		defaultValue, ok := defaultValueMap[key]
+		if !ok {
+			return 0, common.NewErrorf("key <%v> not in defaultValueMap", key)
+		}
+		return strconv.Atoi(defaultValue)
 	}
 	return strconv.Atoi(str)
 }
