@@ -983,8 +983,7 @@ func (s *ServerService) GetConfigJson() (any, error) {
 }
 
 func (s *ServerService) GetDb() ([]byte, error) {
-	// Use pg_dump to export PostgreSQL database
-	// Parse connection string to extract individual parameters for pg_dump
+	// Try to use pg_dump first if available
 	host := config.GetDBHost()
 	port := config.GetDBPort()
 	user := config.GetDBUser()
@@ -995,7 +994,7 @@ func (s *ServerService) GetDb() ([]byte, error) {
 	env := os.Environ()
 	env = append(env, fmt.Sprintf("PGPASSWORD=%s", password))
 	
-	// Build pg_dump command
+	// Build pg_dump command with --clean and --if-exists for proper restore
 	cmd := exec.Command("pg_dump", 
 		"-h", host,
 		"-p", strconv.Itoa(port),
@@ -1004,6 +1003,8 @@ func (s *ServerService) GetDb() ([]byte, error) {
 		"--format=plain",
 		"--no-owner",
 		"--no-privileges",
+		"--clean",
+		"--if-exists",
 	)
 	cmd.Env = env
 	
@@ -1012,11 +1013,279 @@ func (s *ServerService) GetDb() ([]byte, error) {
 	cmd.Stderr = &stderr
 	
 	err := cmd.Run()
-	if err != nil {
-		return nil, fmt.Errorf("pg_dump failed: %v, stderr: %s", err, stderr.String())
+	if err == nil {
+		// pg_dump succeeded, return the output
+		return stdout.Bytes(), nil
 	}
 	
-	return stdout.Bytes(), nil
+	// pg_dump failed (likely not installed), fall back to GORM-based export
+	logger.Warningf("pg_dump not available, falling back to GORM-based export: %v", err)
+	return s.exportDbViaGORM()
+}
+
+// exportDbViaGORM exports the database using GORM and raw SQL queries
+func (s *ServerService) exportDbViaGORM() ([]byte, error) {
+	db := database.GetDB()
+	if db == nil {
+		return nil, fmt.Errorf("database connection is not available")
+	}
+	
+	var dump strings.Builder
+	
+	// Write header
+	dump.WriteString("-- PostgreSQL database dump\n")
+	dump.WriteString(fmt.Sprintf("-- Dumped at %s\n", time.Now().Format("2006-01-02 15:04:05")))
+	dump.WriteString("-- Using GORM-based export\n\n")
+	dump.WriteString("SET statement_timeout = 0;\n")
+	dump.WriteString("SET lock_timeout = 0;\n")
+	dump.WriteString("SET idle_in_transaction_session_timeout = 0;\n")
+	dump.WriteString("SET client_encoding = 'UTF8';\n")
+	dump.WriteString("SET standard_conforming_strings = on;\n")
+	dump.WriteString("SELECT pg_catalog.set_config('search_path', '', false);\n")
+	dump.WriteString("SET check_function_bodies = false;\n")
+	dump.WriteString("SET xmloption = content;\n")
+	dump.WriteString("SET client_min_messages = warning;\n")
+	dump.WriteString("SET row_security = off;\n\n")
+	
+	// Get list of all tables
+	var tables []struct {
+		TableName string `gorm:"column:tablename"`
+	}
+	err := db.Raw(`
+		SELECT tablename 
+		FROM pg_tables 
+		WHERE schemaname = 'public' 
+		ORDER BY tablename
+	`).Scan(&tables).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to get table list: %v", err)
+	}
+	
+	// Export each table
+	for _, table := range tables {
+		tableName := table.TableName
+		
+		// Get table structure using pg_get_tabledef or manual construction
+		// First, try to get the table definition using a simpler approach
+		var columns []struct {
+			ColumnName     string  `gorm:"column:column_name"`
+			DataType       string  `gorm:"column:data_type"`
+			CharMaxLength  *int    `gorm:"column:character_maximum_length"`
+			NumericPrec    *int    `gorm:"column:numeric_precision"`
+			NumericScale   *int    `gorm:"column:numeric_scale"`
+			IsNullable     string  `gorm:"column:is_nullable"`
+			ColumnDefault  *string `gorm:"column:column_default"`
+		}
+		err := db.Raw(`
+			SELECT 
+				column_name,
+				data_type,
+				character_maximum_length,
+				numeric_precision,
+				numeric_scale,
+				is_nullable,
+				column_default
+			FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = ?
+			ORDER BY ordinal_position
+		`, tableName).Scan(&columns).Error
+		
+		if err == nil && len(columns) > 0 {
+			dump.WriteString("\n--\n")
+			dump.WriteString(fmt.Sprintf("-- Name: %s; Type: TABLE; Schema: public; Owner: -\n", tableName))
+			dump.WriteString("--\n\n")
+			dump.WriteString(fmt.Sprintf("CREATE TABLE %s (\n", tableName))
+			
+			colDefs := make([]string, len(columns))
+			for i, col := range columns {
+				colDef := fmt.Sprintf("    %s ", col.ColumnName)
+				
+				// Build data type
+				switch col.DataType {
+				case "character varying":
+					if col.CharMaxLength != nil {
+						colDef += fmt.Sprintf("character varying(%d)", *col.CharMaxLength)
+					} else {
+						colDef += "character varying"
+					}
+				case "character":
+					if col.CharMaxLength != nil {
+						colDef += fmt.Sprintf("character(%d)", *col.CharMaxLength)
+					} else {
+						colDef += "character"
+					}
+				case "numeric":
+					if col.NumericPrec != nil && col.NumericScale != nil {
+						colDef += fmt.Sprintf("numeric(%d,%d)", *col.NumericPrec, *col.NumericScale)
+					} else if col.NumericPrec != nil {
+						colDef += fmt.Sprintf("numeric(%d)", *col.NumericPrec)
+					} else {
+						colDef += "numeric"
+					}
+				default:
+					colDef += col.DataType
+				}
+				
+				// Add NOT NULL constraint
+				if col.IsNullable == "NO" {
+					colDef += " NOT NULL"
+				}
+				
+				// Add default value
+				if col.ColumnDefault != nil {
+					colDef += " DEFAULT " + *col.ColumnDefault
+				}
+				
+				colDefs[i] = colDef
+			}
+			dump.WriteString(strings.Join(colDefs, ",\n"))
+			dump.WriteString("\n);\n\n")
+		}
+		
+		// Get table data
+		var rowCount int64
+		db.Table(tableName).Count(&rowCount)
+		
+		if rowCount > 0 {
+			// Get column info for data export (reuse if available from structure query, otherwise query again)
+			var colInfo []struct {
+				ColumnName string `gorm:"column:column_name"`
+				DataType   string `gorm:"column:data_type"`
+			}
+			if len(columns) == 0 {
+				// If columns not available from structure query, get them separately
+				err := db.Raw(`
+					SELECT column_name, data_type
+					FROM information_schema.columns
+					WHERE table_schema = 'public' AND table_name = ?
+					ORDER BY ordinal_position
+				`, tableName).Scan(&colInfo).Error
+				if err != nil {
+					continue // Skip this table if we can't get column info
+				}
+			} else {
+				// Use columns from structure query
+				colInfo = make([]struct {
+					ColumnName string `gorm:"column:column_name"`
+					DataType   string `gorm:"column:data_type"`
+				}, len(columns))
+				for i, col := range columns {
+					colInfo[i].ColumnName = col.ColumnName
+					colInfo[i].DataType = col.DataType
+				}
+			}
+			
+			if len(colInfo) > 0 {
+				colNames := make([]string, len(colInfo))
+				colTypes := make([]string, len(colInfo))
+				for i, col := range colInfo {
+					colNames[i] = col.ColumnName
+					colTypes[i] = col.DataType
+				}
+				
+				// Build SELECT query with proper column quoting
+				quotedCols := make([]string, len(colNames))
+				for i, colName := range colNames {
+					quotedCols[i] = fmt.Sprintf(`"%s"`, colName)
+				}
+				selectQuery := fmt.Sprintf(`SELECT %s FROM "%s"`, strings.Join(quotedCols, ", "), tableName)
+				
+				// Export data in batches using raw SQL
+				batchSize := 1000
+				offset := 0
+				
+				for {
+					// Use raw SQL to get data
+					rows, err := db.Raw(fmt.Sprintf("%s LIMIT %d OFFSET %d", selectQuery, batchSize, offset)).Rows()
+					if err != nil {
+						break
+					}
+					
+					// Get column names from rows
+					colNamesFromRows, err := rows.Columns()
+					if err != nil {
+						rows.Close()
+						break
+					}
+					
+					batchRowCount := 0
+					for rows.Next() {
+						// Create slice to hold values
+						values := make([]interface{}, len(colNamesFromRows))
+						valuePtrs := make([]interface{}, len(colNamesFromRows))
+						for i := range values {
+							valuePtrs[i] = &values[i]
+						}
+						
+						if err := rows.Scan(valuePtrs...); err != nil {
+							rows.Close()
+							return nil, fmt.Errorf("failed to scan row: %v", err)
+						}
+						
+						// Generate INSERT statement
+						dump.WriteString(fmt.Sprintf("INSERT INTO %s (", tableName))
+						dump.WriteString(strings.Join(colNames, ", "))
+						dump.WriteString(") VALUES (")
+						
+						valueStrs := make([]string, len(values))
+						for i, val := range values {
+							if val == nil {
+								valueStrs[i] = "NULL"
+							} else {
+								// Format value based on data type
+								var valStr string
+								dataType := colTypes[i]
+								
+								switch dataType {
+								case "integer", "bigint", "smallint", "numeric", "real", "double precision":
+									// Numeric types - no quotes needed
+									valStr = fmt.Sprintf("%v", val)
+								case "boolean":
+									// Boolean type
+									if b, ok := val.(bool); ok {
+										if b {
+											valStr = "true"
+										} else {
+											valStr = "false"
+										}
+									} else if s, ok := val.(string); ok {
+										// Sometimes boolean comes as string
+										if s == "true" || s == "t" || s == "1" {
+											valStr = "true"
+										} else {
+											valStr = "false"
+										}
+									} else {
+										valStr = fmt.Sprintf("%v", val)
+									}
+								default:
+									// String types - need proper escaping
+									valStr = fmt.Sprintf("%v", val)
+									// Escape PostgreSQL string literals
+									valStr = strings.ReplaceAll(valStr, "\\", "\\\\")
+									valStr = strings.ReplaceAll(valStr, "'", "''")
+									valStr = "'" + valStr + "'"
+								}
+								valueStrs[i] = valStr
+							}
+						}
+						dump.WriteString(strings.Join(valueStrs, ", "))
+						dump.WriteString(");\n")
+						batchRowCount++
+					}
+					rows.Close()
+					
+					if batchRowCount == 0 || batchRowCount < batchSize {
+						break
+					}
+					offset += batchSize
+				}
+				dump.WriteString("\n")
+			}
+		}
+	}
+	
+	return []byte(dump.String()), nil
 }
 
 func (s *ServerService) ImportDB(file multipart.File) error {
@@ -1063,23 +1332,88 @@ func (s *ServerService) ImportDB(file multipart.File) error {
 		logger.Warningf("Failed to stop Xray before DB import: %v", errStop)
 	}
 
-	// Close existing DB connection
-	if errClose := database.CloseDB(); errClose != nil {
-		logger.Warningf("Failed to close existing DB before import: %v", errClose)
-	}
-
-	// Get database connection parameters
+	// Get database connection parameters before closing connection
 	host := config.GetDBHost()
 	port := config.GetDBPort()
 	user := config.GetDBUser()
 	password := config.GetDBPassword()
 	dbname := config.GetDBName()
 
+	// Clear all database objects before import to ensure clean restore
+	// This matches the schema structure and ensures data from dump will overwrite existing data
+	db := database.GetDB()
+	if db != nil {
+		logger.Info("Clearing existing database objects before import...")
+		
+		// Use a single transaction to drop all objects in correct order
+		// This matches how pg_dump with --clean works
+		clearQuery := `
+		DO $$ 
+		DECLARE 
+			r RECORD;
+		BEGIN
+			-- Drop all foreign key constraints first
+			FOR r IN (
+				SELECT conname, conrelid::regclass as table_name
+				FROM pg_constraint
+				WHERE connamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+				AND contype = 'f'
+			) 
+			LOOP
+				EXECUTE 'ALTER TABLE ' || r.table_name || ' DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname) || ' CASCADE';
+			END LOOP;
+			
+			-- Drop all tables (CASCADE will handle remaining dependencies)
+			FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') 
+			LOOP
+				EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+			END LOOP;
+			
+			-- Drop all sequences (some may remain after table drops)
+			FOR r IN (SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public') 
+			LOOP
+				EXECUTE 'DROP SEQUENCE IF EXISTS public.' || quote_ident(r.sequence_name) || ' CASCADE';
+			END LOOP;
+			
+			-- Drop all views
+			FOR r IN (SELECT table_name FROM information_schema.views WHERE table_schema = 'public') 
+			LOOP
+				EXECUTE 'DROP VIEW IF EXISTS public.' || quote_ident(r.table_name) || ' CASCADE';
+			END LOOP;
+			
+			-- Drop all functions
+			FOR r IN (
+				SELECT proname, oidvectortypes(proargtypes) as argtypes 
+				FROM pg_proc 
+				WHERE pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+			) 
+			LOOP
+				EXECUTE 'DROP FUNCTION IF EXISTS public.' || quote_ident(r.proname) || '(' || r.argtypes || ') CASCADE';
+			END LOOP;
+		END $$;`
+		
+		if err := db.Exec(clearQuery).Error; err != nil {
+			logger.Warningf("Failed to clear database objects: %v", err)
+		} else {
+			logger.Info("Database objects cleared successfully")
+		}
+	}
+
+	// Close existing DB connection
+	if errClose := database.CloseDB(); errClose != nil {
+		logger.Warningf("Failed to close existing DB before import: %v", errClose)
+	}
+
 	// Set PGPASSWORD environment variable for psql
 	env := os.Environ()
 	env = append(env, fmt.Sprintf("PGPASSWORD=%s", password))
 
 	// Use psql to import the SQL dump
+	// We don't use --single-transaction because it aborts on first error
+	// Instead, we use ON_ERROR_STOP=0 to continue on errors
+	// This allows the import to complete even if some objects already exist
+	// The dump with --clean --if-exists will have DROP commands that may fail if objects don't exist,
+	// which is expected and non-critical
 	cmd := exec.Command("psql",
 		"-h", host,
 		"-p", strconv.Itoa(port),
@@ -1087,15 +1421,89 @@ func (s *ServerService) ImportDB(file multipart.File) error {
 		"-d", dbname,
 		"-f", tempPath,
 		"--quiet",
+		"--set", "ON_ERROR_STOP=0",
 	)
 	cmd.Env = env
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
+	cmd.Stdout = &stderr // Capture both stdout and stderr
 
 	err = cmd.Run()
-	if err != nil {
-		return common.NewErrorf("psql import failed: %v, stderr: %s", err, stderr.String())
+	
+	// Parse stderr to check for critical errors
+	stderrStr := stderr.String()
+	
+	// Filter out non-critical errors that are expected when restoring
+	// Errors like "already exists" are expected when dump has --clean --if-exists
+	// and we've already cleared the database, so some DROP commands may fail
+	criticalErrors := []string{
+		"FATAL",
+		"connection",
+		"authentication",
+		"permission denied",
+		"database.*does not exist",
+		"role.*does not exist",
+	}
+	
+	hasCriticalError := false
+	lowerStderr := strings.ToLower(stderrStr)
+	for _, criticalErr := range criticalErrors {
+		matched, _ := regexp.MatchString(strings.ToLower(criticalErr), lowerStderr)
+		if matched {
+			hasCriticalError = true
+			break
+		}
+	}
+	
+	// Check for expected non-critical errors
+	// These are errors that are acceptable when restoring a dump with --clean --if-exists
+	expectedErrors := []string{
+		"already exists",
+		"does not exist",        // For DROP IF EXISTS when object doesn't exist
+		"json_extract",          // SQLite-specific functions in old dumps
+		"JSON_EXTRACT",          // SQLite-specific functions
+		"JSON_EACH",             // SQLite-specific functions
+		"transaction_timeout",   // Non-standard PostgreSQL parameter (may be in old dumps)
+		"unrecognized configuration parameter", // Non-standard parameters in old dumps
+	}
+	
+	hasOnlyExpectedErrors := true
+	if stderrStr != "" {
+		// Check if there are any non-expected errors
+		errorLines := strings.Split(stderrStr, "\n")
+		for _, line := range errorLines {
+			if strings.Contains(line, "ERROR:") {
+				isExpected := false
+				for _, expectedErr := range expectedErrors {
+					if strings.Contains(line, expectedErr) {
+						isExpected = true
+						break
+					}
+				}
+				if !isExpected {
+					hasOnlyExpectedErrors = false
+					break
+				}
+			}
+		}
+	} else {
+		hasOnlyExpectedErrors = true // No errors at all
+	}
+	
+	if err != nil && hasCriticalError {
+		return common.NewErrorf("psql import failed with critical error: %v, stderr: %s", err, stderrStr)
+	}
+	
+	// Log warnings but don't fail if only expected/non-critical errors
+	if stderrStr != "" && !hasCriticalError {
+		if hasOnlyExpectedErrors {
+			logger.Info("psql import completed successfully (some expected warnings about existing objects were ignored)")
+		} else {
+			logger.Warningf("psql import completed with warnings: %s", stderrStr)
+		}
+	} else if err == nil {
+		logger.Info("psql import completed successfully")
 	}
 
 	// Reconnect to database

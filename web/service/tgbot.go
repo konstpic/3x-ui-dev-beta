@@ -3558,7 +3558,7 @@ func (t *Tgbot) sendBackup(chatId int64) {
 	env := os.Environ()
 	env = append(env, fmt.Sprintf("PGPASSWORD=%s", password))
 
-	// Use pg_dump to create a backup
+	// Use pg_dump to create a backup with --clean and --if-exists for proper restore
 	cmd := exec.Command("pg_dump",
 		"-h", host,
 		"-p", strconv.Itoa(port),
@@ -3567,6 +3567,8 @@ func (t *Tgbot) sendBackup(chatId int64) {
 		"--format=plain",
 		"--no-owner",
 		"--no-privileges",
+		"--clean",
+		"--if-exists",
 	)
 	cmd.Env = env
 	cmd.Stdout = tempFile
@@ -3576,8 +3578,21 @@ func (t *Tgbot) sendBackup(chatId int64) {
 
 	err = cmd.Run()
 	if err != nil {
-		logger.Errorf("Error in pg_dump backup: %v, stderr: %s", err, stderr.String())
-		return
+		// pg_dump failed, try fallback method via ServerService
+		logger.Warningf("pg_dump not available for Telegram backup, falling back to GORM-based export: %v", err)
+		dbData, fallbackErr := t.serverService.GetDb()
+		if fallbackErr != nil {
+			logger.Errorf("Error in database backup (both pg_dump and fallback failed): %v", fallbackErr)
+			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.messages.backupError"))
+			return
+		}
+		// Write fallback data to temp file
+		if _, err = tempFile.Write(dbData); err != nil {
+			logger.Error("Error writing fallback backup data to file: ", err)
+			return
+		}
+	} else {
+		// pg_dump succeeded, data already in tempFile
 	}
 
 	// Close the file before sending

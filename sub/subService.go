@@ -282,10 +282,10 @@ func (s *SubService) getInboundsBySubId(subId string) ([]*model.Inbound, error) 
 	err = db.Model(model.Inbound{}).Preload("ClientStats").Where(`id in (
 		SELECT DISTINCT inbounds.id
 		FROM inbounds,
-			JSON_EACH(JSON_EXTRACT(inbounds.settings, '$.clients')) AS client 
+			jsonb_array_elements((inbounds.settings::jsonb)->'clients') AS client 
 		WHERE
 			protocol in ('vmess','vless','trojan','shadowsocks')
-			AND JSON_EXTRACT(client.value, '$.subId') = ? AND enable = ?
+			AND (client.value::jsonb)->>'subId' = ? AND enable = ?
 	)`, subId, true).Find(&inbounds).Error
 	if err != nil {
 		return nil, err
@@ -306,8 +306,8 @@ func (s *SubService) getFallbackMaster(dest string, streamSettings string) (stri
 	db := database.GetDB()
 	var inbound *model.Inbound
 	err := db.Model(model.Inbound{}).
-		Where("JSON_TYPE(settings, '$.fallbacks') = 'array'").
-		Where("EXISTS (SELECT * FROM json_each(settings, '$.fallbacks') WHERE json_extract(value, '$.dest') = ?)", dest).
+		Where("jsonb_typeof((settings::jsonb)->'fallbacks') = 'array'").
+		Where("EXISTS (SELECT * FROM jsonb_array_elements((settings::jsonb)->'fallbacks') WHERE (value::jsonb)->>'dest' = ?)", dest).
 		Find(&inbound).Error
 	if err != nil {
 		return "", 0, "", err

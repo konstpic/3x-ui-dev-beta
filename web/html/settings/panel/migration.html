@@ -11,34 +11,41 @@
 
     <a-divider>{{ i18n "pages.settings.migration.uploadFile" }}</a-divider>
 
-    <a-upload
-        :file-list="migrationFileList"
-        :before-upload="beforeUpload"
-        :remove="handleRemove"
-        accept=".db"
-        :style="{ marginBottom: '50px', marginTop: '10px' }">
-        <a-button type="primary">
-            <a-icon type="upload"></a-icon>
-            {{ i18n "pages.settings.migration.selectFile" }}
+    <div :style="{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px', marginBottom: '20px', flexWrap: 'wrap' }">
+        <a-upload
+            :file-list="[]"
+            :show-upload-list="false"
+            :before-upload="beforeUpload"
+            accept=".db">
+            <a-button type="primary">
+                <a-icon type="upload"></a-icon>
+                {{ i18n "pages.settings.migration.selectFile" }}
+            </a-button>
+        </a-upload>
+
+        <a-button 
+            type="primary" 
+            :disabled="!migrationFile || migrationPreviewing || migrationExecuting"
+            :loading="migrationPreviewing"
+            @click="previewMigration">
+            {{ i18n "pages.settings.migration.preview" }}
         </a-button>
-    </a-upload>
 
-    <a-button 
-        type="primary" 
-        :disabled="!migrationFile || migrationPreviewing || migrationExecuting"
-        :loading="migrationPreviewing"
-        @click="previewMigration"
-        :style="{ marginRight: '10px' }">
-        {{ i18n "pages.settings.migration.preview" }}
-    </a-button>
+        <a-button 
+            type="danger" 
+            :disabled="!migrationFile || !migrationPreview || migrationPreviewing || migrationExecuting"
+            :loading="migrationExecuting"
+            @click="executeMigration">
+            {{ i18n "pages.settings.migration.execute" }}
+        </a-button>
+    </div>
 
-    <a-button 
-        type="danger" 
-        :disabled="!migrationFile || !migrationPreview || migrationPreviewing || migrationExecuting"
-        :loading="migrationExecuting"
-        @click="executeMigration">
-        {{ i18n "pages.settings.migration.execute" }}
-    </a-button>
+    <div v-if="migrationFile" :style="{ marginTop: '-10px', marginBottom: '10px' }">
+        <a-tag color="blue" closable @close="handleRemove">
+            <a-icon type="file"></a-icon>
+            [[ migrationFile.name ]]
+        </a-tag>
+    </div>
 
     <div v-if="migrationPreview && migrationPreview.panelSettings" :style="{ marginTop: '20px' }">
         <a-alert type="warning" show-icon>

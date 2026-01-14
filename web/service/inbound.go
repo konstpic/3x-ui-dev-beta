@@ -1299,9 +1299,9 @@ func (s *InboundService) MigrationRemoveOrphanedTraffics() {
 	db.Exec(`
 		DELETE FROM client_traffics
 		WHERE email NOT IN (
-			SELECT JSON_EXTRACT(client.value, '$.email')
+			SELECT (client.value::jsonb)->>'email' as email
 			FROM inbounds,
-				JSON_EACH(JSON_EXTRACT(inbounds.settings, '$.clients')) AS client
+				jsonb_array_elements((inbounds.settings::jsonb)->'clients') AS client
 		)
 	`)
 }
@@ -2015,11 +2015,11 @@ func (s *InboundService) GetClientTrafficByID(id string) ([]xray.ClientTraffic, 
 	var traffics []xray.ClientTraffic
 
 	err := db.Model(xray.ClientTraffic{}).Where(`email IN(
-		SELECT JSON_EXTRACT(client.value, '$.email') as email
+		SELECT (client.value::jsonb)->>'email' as email
 		FROM inbounds,
-	  	JSON_EACH(JSON_EXTRACT(inbounds.settings, '$.clients')) AS client
+	  	jsonb_array_elements((inbounds.settings::jsonb)->'clients') AS client
 		WHERE
-	  	JSON_EXTRACT(client.value, '$.id') in (?)
+	  	(client.value::jsonb)->>'id' in (?)
 		)`, id).Find(&traffics).Error
 
 	if err != nil {
@@ -2226,8 +2226,8 @@ func (s *InboundService) MigrationRequirements() {
 	err = tx.Raw(`select id, port, stream_settings
 	from inbounds
 	WHERE protocol in ('vmess','vless','trojan')
-	  AND json_extract(stream_settings, '$.security') = 'tls'
-	  AND json_extract(stream_settings, '$.tlsSettings.settings.domains') IS NOT NULL`).Scan(&externalProxy).Error
+	  AND (stream_settings::jsonb)->>'security' = 'tls'
+	  AND (stream_settings::jsonb)->'tlsSettings'->'settings'->'domains' IS NOT NULL`).Scan(&externalProxy).Error
 	if err != nil || len(externalProxy) == 0 {
 		return
 	}

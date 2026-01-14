@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/mhsanaei/3x-ui/v2/logger"
 	"github.com/mhsanaei/3x-ui/v2/web/global"
 	"github.com/mhsanaei/3x-ui/v2/web/service"
 	"github.com/mhsanaei/3x-ui/v2/web/websocket"
@@ -22,6 +23,7 @@ type ServerController struct {
 
 	serverService  service.ServerService
 	settingService service.SettingService
+	panelService   service.PanelService
 
 	lastStatus *service.Status
 
@@ -280,7 +282,7 @@ func isValidFilename(filename string) bool {
 	return filenameRegex.MatchString(filename)
 }
 
-// importDB imports a database file and restarts the Xray service.
+// importDB imports a database file and restarts the container.
 func (a *ServerController) importDB(c *gin.Context) {
 	// Get the file from the request body
 	file, _, err := c.Request.FormFile("db")
@@ -289,15 +291,20 @@ func (a *ServerController) importDB(c *gin.Context) {
 		return
 	}
 	defer file.Close()
-	// Always restart Xray before return
-	defer a.serverService.RestartXrayService()
-	// lastGetStatusTime removed; no longer needed
-	// Import it
+	
+	// Import database
 	err = a.serverService.ImportDB(file)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "pages.index.importDatabaseError"), err)
 		return
 	}
+	
+	// Restart container after successful import to ensure all services use new database
+	if err := a.panelService.RestartContainer(time.Second * 3); err != nil {
+		logger.Warningf("Failed to restart container after DB import: %v", err)
+		// Don't fail the import if container restart fails, but log it
+	}
+	
 	jsonObj(c, I18nWeb(c, "pages.index.importDatabaseSuccess"), nil)
 }
 
