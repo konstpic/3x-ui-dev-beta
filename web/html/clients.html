@@ -122,7 +122,7 @@
               </template>
               <template slot="status" slot-scope="text, client">
                 <a-tag v-if="isClientOnline(client.email)" color="green">{{ i18n "online" }}</a-tag>
-                <a-tag v-else color="default">{{ i18n "offline" }}</a-tag>
+                <a-tag v-else class="offline-tag">{{ i18n "offline" }}</a-tag>
               </template>
               <template slot="traffic" slot-scope="text, client">
                 <a-popover :overlay-class-name="themeSwitcher.currentTheme">

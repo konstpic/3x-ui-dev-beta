@@ -37,7 +37,8 @@ type MigrationPreview struct {
 	Errors                []string `json:"errors,omitempty"`
 }
 
-// PanelSettingsPreview contains panel settings that will be applied after migration.
+// PanelSettingsPreview contains panel settings found in source database.
+// NOTE: These settings are intentionally NOT migrated to preserve current panel configuration.
 type PanelSettingsPreview struct {
 	WebPort     string `json:"webPort,omitempty"`
 	WebBasePath string `json:"webBasePath,omitempty"`
@@ -45,6 +46,8 @@ type PanelSettingsPreview struct {
 	WebDomain   string `json:"webDomain,omitempty"`
 	WebCertFile string `json:"webCertFile,omitempty"`
 	WebKeyFile  string `json:"webKeyFile,omitempty"`
+	// Ignored indicates that these settings will NOT be migrated
+	Ignored bool `json:"ignored"`
 }
 
 // MigrationResult contains the result of migration execution.
@@ -58,7 +61,7 @@ type MigrationResult struct {
 	InboundClientIpsMigrated int   `json:"inboundClientIpsMigrated"`
 	OutboundTrafficsMigrated int  `json:"outboundTrafficsMigrated"`
 	HistoryOfSeedersMigrated int  `json:"historyOfSeedersMigrated"`
-	PanelSettingsApplied   *PanelSettingsPreview `json:"panelSettingsApplied,omitempty"`
+	PanelSettingsIgnored   []string `json:"panelSettingsIgnored,omitempty"` // List of panel settings that were NOT migrated
 	Errors                []string `json:"errors,omitempty"`
 	Warnings              []string `json:"warnings,omitempty"`
 }
@@ -273,15 +276,18 @@ func (s *MigrationService) ExecuteMigration(sqliteFilePath string) (*MigrationRe
 		return result, err
 	}
 
-	// Apply panel settings from SQLite
-	panelSettings, err := s.readPanelSettings(sqliteDB)
-	if err == nil && panelSettings != nil {
-		if err := s.applyPanelSettings(panelSettings); err != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("Failed to apply panel settings: %v", err))
-		} else {
-			result.PanelSettingsApplied = panelSettings
-		}
+	// NOTE: Panel settings (webPort, webBasePath, webCertFile, webKeyFile, webListen, webDomain)
+	// are intentionally NOT migrated to preserve current panel configuration.
+	// This prevents accidentally changing the panel's access settings during migration.
+	result.PanelSettingsIgnored = []string{
+		"webPort",
+		"webBasePath",
+		"webCertFile",
+		"webKeyFile",
+		"webListen",
+		"webDomain",
 	}
+	logger.Info("Migration completed. Panel settings (webPort, webBasePath, etc.) were NOT migrated to preserve current configuration.")
 
 	result.Success = true
 	return result, nil
@@ -395,6 +401,17 @@ func (s *MigrationService) migrateUsers(sqliteDB *sql.DB, tx *gorm.DB) (int, err
 	return count, nil
 }
 
+// ignoredPanelSettings contains settings that should NOT be migrated
+// to preserve the current panel configuration (port, paths, certificates, etc.)
+var ignoredPanelSettings = map[string]bool{
+	"webPort":     true,
+	"webBasePath": true,
+	"webCertFile": true,
+	"webKeyFile":  true,
+	"webListen":   true,
+	"webDomain":   true,
+}
+
 func (s *MigrationService) migrateSettings(sqliteDB *sql.DB, tx *gorm.DB) (int, error) {
 	rows, err := sqliteDB.Query("SELECT id, key, value FROM settings")
 	if err != nil {
@@ -408,6 +425,12 @@ func (s *MigrationService) migrateSettings(sqliteDB *sql.DB, tx *gorm.DB) (int, 
 		var key, value sql.NullString
 
 		if err := rows.Scan(&id, &key, &value); err != nil {
+			continue
+		}
+
+		// Skip panel-specific settings to preserve current panel configuration
+		if ignoredPanelSettings[key.String] {
+			logger.Debugf("Skipping panel setting during migration: %s", key.String)
 			continue
 		}
 
@@ -567,12 +590,14 @@ func (s *MigrationService) migrateClientsFromInbounds(sqliteDB *sql.DB, tx *gorm
 				// Check in database
 				var existingDB model.ClientEntity
 				if err := tx.Where("LOWER(email) = ?", email).First(&existingDB).Error; err == nil {
-					// Client exists, update it
-					existingDB.Enable = s.getBoolFromMap(clientMap, "enable", true)
-					existingDB.Status = "active"
-					existingDB.LimitIP = int(s.getInt64FromMap(clientMap, "limitIp"))
-					existingDB.TotalGB = float64(s.getInt64FromMap(clientMap, "totalGB"))
-					existingDB.ExpiryTime = s.getInt64FromMap(clientMap, "expiryTime")
+				// Client exists, update it
+				existingDB.Enable = s.getBoolFromMap(clientMap, "enable", true)
+				existingDB.Status = "active"
+				existingDB.LimitIP = int(s.getInt64FromMap(clientMap, "limitIp"))
+				// Convert bytes to GB (old format stores bytes, new format stores GB)
+				totalBytes := s.getInt64FromMap(clientMap, "totalGB")
+				existingDB.TotalGB = float64(totalBytes) / (1024 * 1024 * 1024)
+				existingDB.ExpiryTime = s.getInt64FromMap(clientMap, "expiryTime")
 					existingDB.TgID = s.getInt64FromMap(clientMap, "tgId")
 					existingDB.SubID = s.getStringFromMap(clientMap, "subId")
 					existingDB.Comment = s.getStringFromMap(clientMap, "comment")
@@ -608,22 +633,24 @@ func (s *MigrationService) migrateClientsFromInbounds(sqliteDB *sql.DB, tx *gorm
 					clientEntity = &existingDB
 					clientEmailMap[email] = clientEntity
 				} else {
-					// Create new client entity
-					clientEntity = &model.ClientEntity{
-						UserId:     1, // Default user
-						Email:      email,
-						Enable:     s.getBoolFromMap(clientMap, "enable", true),
-						Status:     "active",
-						LimitIP:    int(s.getInt64FromMap(clientMap, "limitIp")),
-						TotalGB:    float64(s.getInt64FromMap(clientMap, "totalGB")),
-						ExpiryTime: s.getInt64FromMap(clientMap, "expiryTime"),
-						TgID:       s.getInt64FromMap(clientMap, "tgId"),
-						SubID:      s.getStringFromMap(clientMap, "subId"),
-						Comment:    s.getStringFromMap(clientMap, "comment"),
-						Reset:      int(s.getInt64FromMap(clientMap, "reset")),
-						CreatedAt:  s.getInt64FromMap(clientMap, "created_at"),
-						UpdatedAt:  s.getInt64FromMap(clientMap, "updated_at"),
-					}
+				// Create new client entity
+				// Convert bytes to GB (old format stores bytes, new format stores GB)
+				totalBytesNew := s.getInt64FromMap(clientMap, "totalGB")
+				clientEntity = &model.ClientEntity{
+					UserId:     1, // Default user
+					Email:      email,
+					Enable:     s.getBoolFromMap(clientMap, "enable", true),
+					Status:     "active",
+					LimitIP:    int(s.getInt64FromMap(clientMap, "limitIp")),
+					TotalGB:    float64(totalBytesNew) / (1024 * 1024 * 1024),
+					ExpiryTime: s.getInt64FromMap(clientMap, "expiryTime"),
+					TgID:       s.getInt64FromMap(clientMap, "tgId"),
+					SubID:      s.getStringFromMap(clientMap, "subId"),
+					Comment:    s.getStringFromMap(clientMap, "comment"),
+					Reset:      int(s.getInt64FromMap(clientMap, "reset")),
+					CreatedAt:  s.getInt64FromMap(clientMap, "created_at"),
+					UpdatedAt:  s.getInt64FromMap(clientMap, "updated_at"),
+				}
 
 					// Set UUID/ID or Password based on protocol
 					protocolStr := protocol.String
@@ -990,10 +1017,18 @@ func (s *MigrationService) readPanelSettings(sqliteDB *sql.DB) (*PanelSettingsPr
 		return nil, nil
 	}
 
+	// Mark as ignored - these settings will NOT be migrated
+	panelSettings.Ignored = true
+
 	return panelSettings, nil
 }
 
-// applyPanelSettings applies panel settings to PostgreSQL database.
+// applyPanelSettings is DEPRECATED and no longer used.
+// Panel settings (webPort, webBasePath, webCertFile, webKeyFile, webListen, webDomain)
+// are intentionally NOT migrated to preserve current panel configuration.
+// This function is kept for potential future use but is not called anywhere.
+//
+//nolint:unused
 func (s *MigrationService) applyPanelSettings(panelSettings *PanelSettingsPreview) error {
 	if panelSettings == nil {
 		return nil
