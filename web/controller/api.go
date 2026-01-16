@@ -2,7 +2,9 @@ package controller
 
 import (
 	"fmt"
+	"io/fs"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 
@@ -20,6 +22,7 @@ type APIController struct {
 	inboundController *InboundController
 	serverController  *ServerController
 	Tgbot             service.Tgbot
+	docsFS            fs.FS // Embedded docs filesystem
 }
 
 // NewAPIController creates a new APIController instance and initializes its routes.
@@ -27,6 +30,11 @@ func NewAPIController(g *gin.RouterGroup) *APIController {
 	a := &APIController{}
 	a.initRouter(g)
 	return a
+}
+
+// SetDocsFS sets the embedded docs filesystem for the API controller.
+func (a *APIController) SetDocsFS(docsFS fs.FS) {
+	a.docsFS = docsFS
 }
 
 // checkAPIAuth is a middleware that returns 404 for unauthenticated API requests
@@ -60,6 +68,10 @@ func (a *APIController) initRouter(g *gin.RouterGroup) {
 
 	// Extra routes
 	api.GET("/backuptotgbot", a.BackuptoTgbot)
+	
+	// API Documentation
+	apiDocs := api.Group("/api-docs")
+	apiDocs.GET("/markdown", a.getAPIDocsMarkdown)
 }
 
 // BackuptoTgbot sends a backup of the panel data to Telegram bot admins.
@@ -211,4 +223,40 @@ func (a *APIController) pushNodeLogs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Logs received"})
+}
+
+// getAPIDocsMarkdown returns the API documentation markdown file.
+func (a *APIController) getAPIDocsMarkdown(c *gin.Context) {
+	var content []byte
+	var err error
+	
+	// Try reading from embedded docs filesystem first
+	if a.docsFS != nil {
+		// When using //go:embed docs, files are accessible as "docs/API.md"
+		apiDocPaths := []string{"docs/API.md", "API.md"}
+		for _, path := range apiDocPaths {
+			content, err = fs.ReadFile(a.docsFS, path)
+			if err == nil {
+				c.Header("Content-Type", "text/markdown; charset=utf-8")
+				c.String(http.StatusOK, string(content))
+				return
+			}
+		}
+		logger.Debugf("Failed to read API.md from embedded filesystem (trying disk): %v", err)
+	}
+	
+	// Fallback to disk
+	diskPaths := []string{"web/docs/API.md", "docs/API.md", "API.md"}
+	for _, path := range diskPaths {
+		content, err = os.ReadFile(path)
+		if err == nil {
+			logger.Debugf("Successfully read API.md from disk: %s", path)
+			c.Header("Content-Type", "text/markdown; charset=utf-8")
+			c.String(http.StatusOK, string(content))
+			return
+		}
+	}
+	
+	logger.Warningf("Failed to read API.md: %v", err)
+	c.String(http.StatusNotFound, "API documentation not found")
 }

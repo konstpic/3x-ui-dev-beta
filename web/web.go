@@ -44,6 +44,9 @@ var htmlFS embed.FS
 //go:embed translation/*
 var i18nFS embed.FS
 
+//go:embed docs
+var docsFS embed.FS
+
 var startTime = time.Now()
 
 type wrapAssetsFS struct {
@@ -90,6 +93,11 @@ func EmbeddedHTML() embed.FS {
 // EmbeddedAssets returns the embedded assets filesystem for reuse by other servers.
 func EmbeddedAssets() embed.FS {
 	return assetsFS
+}
+
+// EmbeddedDocs returns the embedded docs filesystem.
+func EmbeddedDocs() embed.FS {
+	return docsFS
 }
 
 // Server represents the main web server for the 3x-ui panel with controllers, services, and scheduled jobs.
@@ -287,6 +295,8 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	s.index = controller.NewIndexController(g)
 	s.panel = controller.NewXUIController(g)
 	s.api = controller.NewAPIController(g)
+	// Set embedded docs filesystem for API controller
+	s.api.SetDocsFS(docsFS)
 
 	// Initialize WebSocket hub
 	s.wsHub = websocket.NewHub()

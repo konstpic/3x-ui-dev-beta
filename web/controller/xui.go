@@ -32,6 +32,7 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 	g.GET("/nodes", a.nodes)
 	g.GET("/clients", a.clients)
 	g.GET("/hosts", a.hosts)
+	g.GET("/api-docs", a.apiDocs)
 
 	a.settingController = NewSettingController(g)
 	a.xraySettingController = NewXraySettingController(g)
@@ -76,4 +77,9 @@ func (a *XUIController) clients(c *gin.Context) {
 // hosts renders the hosts management page (multi-node mode).
 func (a *XUIController) hosts(c *gin.Context) {
 	html(c, "hosts.html", "pages.hosts.title", nil)
+}
+
+// apiDocs renders the API documentation page.
+func (a *XUIController) apiDocs(c *gin.Context) {
+	html(c, "api-docs.html", "menu.apiDocs", nil)
 }

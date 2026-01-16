@@ -1,0 +1,460 @@
+{{ template "page/head_start" .}}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css">
+<style>
+  .api-docs-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px;
+  }
+  
+  .api-docs-header {
+    margin-bottom: 32px;
+    padding-bottom: 16px;
+    border-bottom: 2px solid rgba(0, 0, 0, 0.06);
+  }
+  
+  .api-docs-header h1 {
+    margin: 0;
+    font-size: 32px;
+    font-weight: 600;
+    color: rgba(0, 0, 0, 0.85);
+  }
+  
+  .api-docs-header p {
+    margin: 8px 0 0 0;
+    color: rgba(0, 0, 0, 0.65);
+    font-size: 16px;
+  }
+  
+  .api-docs-content {
+    line-height: 1.8;
+  }
+  
+  .api-docs-content h1,
+  .api-docs-content h2,
+  .api-docs-content h3,
+  .api-docs-content h4 {
+    margin-top: 32px;
+    margin-bottom: 16px;
+    font-weight: 600;
+    color: rgba(0, 0, 0, 0.85);
+  }
+  
+  .api-docs-content h1 {
+    font-size: 28px;
+    border-bottom: 2px solid rgba(0, 0, 0, 0.06);
+    padding-bottom: 8px;
+  }
+  
+  .api-docs-content h2 {
+    font-size: 24px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    padding-bottom: 8px;
+  }
+  
+  .api-docs-content h3 {
+    font-size: 20px;
+  }
+  
+  .api-docs-content h4 {
+    font-size: 18px;
+  }
+  
+  .api-docs-content p {
+    margin: 16px 0;
+    color: rgba(0, 0, 0, 0.85);
+  }
+  
+  .api-docs-content ul,
+  .api-docs-content ol {
+    margin: 16px 0;
+    padding-left: 24px;
+  }
+  
+  .api-docs-content li {
+    margin: 8px 0;
+    color: rgba(0, 0, 0, 0.85);
+  }
+  
+  .api-docs-content code {
+    background: rgba(0, 0, 0, 0.06);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.9em;
+  }
+  
+  .api-docs-content pre {
+    background: #f5f5f5;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 4px;
+    padding: 16px;
+    overflow-x: auto;
+    margin: 16px 0;
+  }
+  
+  .api-docs-content pre code {
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+  }
+  
+  .api-docs-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+  }
+  
+  .api-docs-content table th,
+  .api-docs-content table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  }
+  
+  .api-docs-content table th {
+    background: rgba(0, 0, 0, 0.02);
+    font-weight: 600;
+    color: rgba(0, 0, 0, 0.85);
+  }
+  
+  .api-docs-content table tr:hover {
+    background: rgba(0, 0, 0, 0.02);
+  }
+  
+  .api-docs-content blockquote {
+    border-left: 4px solid #1890ff;
+    margin: 16px 0;
+    color: rgba(0, 0, 0, 0.65);
+    background: rgba(24, 144, 255, 0.05);
+    padding: 12px 16px;
+    border-radius: 4px;
+  }
+  
+  .api-docs-content hr {
+    border: none;
+    border-top: 2px solid rgba(0, 0, 0, 0.06);
+    margin: 32px 0;
+  }
+  
+  .dark .api-docs-content blockquote,
+  .ultraDark .api-docs-content blockquote {
+    border-left-color: #1890ff;
+    background: rgba(24, 144, 255, 0.1);
+    color: rgba(255, 255, 255, 0.65);
+  }
+  
+  .dark .api-docs-content hr,
+  .ultraDark .api-docs-content hr {
+    border-top-color: rgba(255, 255, 255, 0.1);
+  }
+  
+  .api-docs-toc {
+    position: sticky;
+    top: 24px;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 4px;
+    padding: 16px;
+    margin-bottom: 24px;
+  }
+  
+  .api-docs-toc h3 {
+    margin: 0 0 12px 0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  
+  .api-docs-toc ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  
+  .api-docs-toc li {
+    margin: 4px 0;
+  }
+  
+  .api-docs-toc a {
+    color: rgba(0, 0, 0, 0.65);
+    text-decoration: none;
+    display: block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s;
+  }
+  
+  .api-docs-toc a:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: #1890ff;
+  }
+  
+  .api-docs-toc a.active {
+    background: rgba(24, 144, 255, 0.1);
+    color: #1890ff;
+    font-weight: 500;
+  }
+  
+  .dark .api-docs-header,
+  .ultraDark .api-docs-header {
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+  }
+  
+  .dark .api-docs-header h1,
+  .ultraDark .api-docs-header h1 {
+    color: rgba(255, 255, 255, 0.85);
+  }
+  
+  .dark .api-docs-header p,
+  .ultraDark .api-docs-header p {
+    color: rgba(255, 255, 255, 0.65);
+  }
+  
+  .dark .api-docs-content h1,
+  .dark .api-docs-content h2,
+  .dark .api-docs-content h3,
+  .dark .api-docs-content h4,
+  .ultraDark .api-docs-content h1,
+  .ultraDark .api-docs-content h2,
+  .ultraDark .api-docs-content h3,
+  .ultraDark .api-docs-content h4 {
+    color: rgba(255, 255, 255, 0.85);
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+  }
+  
+  .dark .api-docs-content p,
+  .dark .api-docs-content li,
+  .ultraDark .api-docs-content p,
+  .ultraDark .api-docs-content li {
+    color: rgba(255, 255, 255, 0.85);
+  }
+  
+  .dark .api-docs-content code,
+  .ultraDark .api-docs-content code {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+  }
+  
+  .dark .api-docs-content pre,
+  .ultraDark .api-docs-content pre {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  
+  .dark .api-docs-content table,
+  .ultraDark .api-docs-content table {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  
+  .dark .api-docs-content table th,
+  .ultraDark .api-docs-content table th {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.85);
+  }
+  
+  .dark .api-docs-content table tr:hover,
+  .ultraDark .api-docs-content table tr:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  
+  .dark .api-docs-content table td,
+  .ultraDark .api-docs-content table td {
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+  }
+  
+  .dark .api-docs-toc,
+  .ultraDark .api-docs-toc {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  
+  .dark .api-docs-toc a,
+  .ultraDark .api-docs-toc a {
+    color: rgba(255, 255, 255, 0.65);
+  }
+  
+  .dark .api-docs-toc a:hover,
+  .ultraDark .api-docs-toc a:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #1890ff;
+  }
+  
+  .dark .api-docs-toc a.active,
+  .ultraDark .api-docs-toc a.active {
+    background: rgba(24, 144, 255, 0.2);
+    color: #1890ff;
+  }
+  
+  @media (max-width: 768px) {
+    .api-docs-container {
+      padding: 16px;
+    }
+    
+    .api-docs-toc {
+      position: relative;
+      top: 0;
+      max-height: none;
+    }
+  }
+</style>
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+<a-layout id="app" v-cloak :class="themeSwitcher.currentTheme + ' api-docs-page'">
+  <a-sidebar></a-sidebar>
+  <a-layout id="content-layout">
+    <a-layout-content>
+      <div class="api-docs-container">
+        <div class="api-docs-header">
+          <h1>{{ i18n "menu.apiDocs" }}</h1>
+          <p>Complete API reference for the 3x-ui panel</p>
+        </div>
+        
+        <a-row :gutter="24">
+          <a-col :xs="24" :sm="24" :md="6" :lg="6" :xl="6">
+            <a-card>
+              <div class="api-docs-toc" id="toc-container">
+                <h3>Table of Contents</h3>
+                <ul id="toc-list"></ul>
+              </div>
+            </a-card>
+          </a-col>
+          
+          <a-col :xs="24" :sm="24" :md="18" :lg="18" :xl="18">
+            <a-card>
+              <div class="api-docs-content" id="api-content">
+                <a-spin :spinning="loading" tip="Loading documentation...">
+                  <div v-html="markdownContent"></div>
+                </a-spin>
+              </div>
+            </a-card>
+          </a-col>
+        </a-row>
+      </div>
+    </a-layout-content>
+  </a-layout>
+</a-layout>
+
+{{template "page/body_scripts" .}}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+  // Configure marked
+  marked.setOptions({
+    highlight: function(code, lang) {
+      if (lang && hljs.getLanguage(lang)) {
+        try {
+          return hljs.highlight(code, { language: lang }).value;
+        } catch (err) {}
+      }
+      return hljs.highlightAuto(code).value;
+    },
+    breaks: true,
+    gfm: true
+  });
+
+  const app = new Vue({
+    el: '#app',
+    data: {
+      themeSwitcher: {
+        currentTheme: localStorage.getItem('theme') || 'light'
+      },
+      loading: true,
+      markdownContent: '',
+      tocItems: []
+    },
+    mounted() {
+      this.loadApiDocs();
+    },
+    methods: {
+      async loadApiDocs() {
+        try {
+          const response = await fetch('{{ .base_path }}panel/api/api-docs/markdown');
+          if (!response.ok) {
+            throw new Error('Failed to load API documentation');
+          }
+          const markdown = await response.text();
+          this.markdownContent = marked.parse(markdown);
+          this.loading = false;
+          
+          // Generate table of contents
+          this.$nextTick(() => {
+            this.generateTOC();
+            this.setupScrollSpy();
+          });
+          
+          // Highlight code blocks
+          this.$nextTick(() => {
+            document.querySelectorAll('pre code').forEach((block) => {
+              hljs.highlightElement(block);
+            });
+          });
+        } catch (error) {
+          console.error('Error loading API docs:', error);
+          this.markdownContent = '<p style="color: red;">Failed to load API documentation. Please try again later.</p>';
+          this.loading = false;
+        }
+      },
+      generateTOC() {
+        const content = document.getElementById('api-content');
+        if (!content) return;
+        
+        const headings = content.querySelectorAll('h1, h2, h3');
+        const tocList = document.getElementById('toc-list');
+        if (!tocList) return;
+        
+        tocList.innerHTML = '';
+        
+        headings.forEach((heading, index) => {
+          const id = `heading-${index}`;
+          heading.id = id;
+          
+          const li = document.createElement('li');
+          const a = document.createElement('a');
+          a.href = `#${id}`;
+          a.textContent = heading.textContent;
+          a.className = heading.tagName.toLowerCase();
+          
+          a.addEventListener('click', (e) => {
+            e.preventDefault();
+            heading.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            window.history.pushState(null, '', `#${id}`);
+          });
+          
+          li.appendChild(a);
+          tocList.appendChild(li);
+        });
+      },
+      setupScrollSpy() {
+        const headings = document.querySelectorAll('#api-content h1, #api-content h2, #api-content h3');
+        const tocLinks = document.querySelectorAll('#toc-list a');
+        
+        if (headings.length === 0 || tocLinks.length === 0) return;
+        
+        const observer = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              const id = entry.target.id;
+              tocLinks.forEach(link => {
+                link.classList.remove('active');
+                if (link.getAttribute('href') === `#${id}`) {
+                  link.classList.add('active');
+                }
+              });
+            }
+          });
+        }, {
+          rootMargin: '-20% 0px -70% 0px'
+        });
+        
+        headings.forEach(heading => observer.observe(heading));
+      }
+    }
+  });
+</script>
+{{ template "page/body_end" .}}

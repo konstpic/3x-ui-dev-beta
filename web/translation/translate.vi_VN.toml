@@ -93,8 +93,9 @@
 "dashboard" = "Trạng thái hệ thống"
 "inbounds" = "Đầu vào khách hàng"
 "settings" = "Cài đặt bảng điều khiển"
-"logout" = "Đăng xuất"
 "xray" = "Cài đặt Xray"
+"apiDocs" = "Tài liệu API"
+"logout" = "Đăng xuất"
 "link" = "Quản lý"
 
 [pages.login]
