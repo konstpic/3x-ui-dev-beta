@@ -65,13 +65,21 @@
               </a-button-group>
             </template>
             <a-space direction="vertical">
-              <div :style="isMobile ? {} : { display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }">
+              <div :style="isMobile ? {} : { display: 'flex', alignItems: 'center', justifyContent: 'flex-start', flexWrap: 'wrap', gap: '8px' }">
                 <a-switch v-model="enableFilter"
                   :style="isMobile ? { marginBottom: '.5rem', display: 'flex' } : { marginRight: '.5rem' }"
                   @change="toggleFilter">
                   <a-icon slot="checkedChildren" type="search"></a-icon>
                   <a-icon slot="unCheckedChildren" type="filter"></a-icon>
                 </a-switch>
+                <a-select v-model="filterByGroup" :style="{ minWidth: '150px' }" :size="isMobile ? 'small' : ''"
+                  :dropdown-class-name="themeSwitcher.currentTheme" :allow-clear="true" @change="onGroupFilterChange"
+                  placeholder='{{ i18n "pages.clients.filterByGroup" }}'>
+                  <a-select-option :value="null">{{ i18n "allGroups" }}</a-select-option>
+                  <a-select-option v-for="group in groups" :key="group.id" :value="group.id">
+                    [[ group.name ]]
+                  </a-select-option>
+                </a-select>
                 <a-input v-if="!enableFilter" v-model.lazy="searchKey" placeholder='{{ i18n "search" }}' autofocus
                   :style="{ maxWidth: '300px' }" :size="isMobile ? 'small' : ''"></a-input>
                 <a-radio-group v-if="enableFilter" v-model="filterBy" @change="filterClients" button-style="solid"
@@ -84,9 +92,25 @@
                   <a-radio-button value="hwidExceeded">HWID !</a-radio-button>
                 </a-radio-group>
               </div>
+              <div v-if="selectedClientIds.length > 0" :style="{ marginBottom: '10px', padding: '10px', background: themeSwitcher.isDarkTheme ? '#1f1f1f' : '#f0f0f0', borderRadius: '4px' }">
+                <a-space>
+                  <span>{{ i18n "pages.clients.selectedCount" }}: [[ selectedClientIds.length ]]</span>
+                  <a-button-group>
+                    <a-button @click="bulkResetTraffic" icon="reload">{{ i18n "pages.inbounds.resetTraffic" }}</a-button>
+                    <a-button @click="bulkClearHwid" icon="mobile">{{ i18n "pages.clients.clearHwid" }}</a-button>
+                    <a-button @click="bulkDelete" icon="delete" type="danger">{{ i18n "delete" }}</a-button>
+                    <a-button @click="bulkEnable(true)" icon="check">{{ i18n "enable" }}</a-button>
+                    <a-button @click="bulkEnable(false)" icon="close">{{ i18n "disable" }}</a-button>
+                    <a-button @click="bulkSetHwidLimit" icon="setting">{{ i18n "pages.clients.setHwidLimit" }}</a-button>
+                    <a-button @click="bulkAssignGroup" icon="team">{{ i18n "pages.clients.assignGroup" }}</a-button>
+                  </a-button-group>
+                  <a-button @click="clearSelection" icon="close-circle">{{ i18n "pages.clients.clearSelection" }}</a-button>
+                </a-space>
+              </div>
               <a-table :columns="isMobile ? mobileColumns : columns" :row-key="client => client.id"
                 :data-source="searchedClients" :scroll="isMobile ? {} : { x: 1150 }"
                 :pagination="false"
+                :row-selection="{ selectedRowKeys: selectedClientIds, onChange: onSelectionChange }"
                 :style="{ marginTop: '10px' }"
                 class="clients-table"
               :locale='{ filterConfirm: `{{ i18n "confirm" }}`, filterReset: `{{ i18n "reset" }}`, emptyText: `{{ i18n "noData" }}` }'>
@@ -201,6 +225,15 @@
                 <span v-if="client.comment" :style="{ maxWidth: '150px', display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }" :title="client.comment">[[ client.comment ]]</span>
                 <span v-else style="color: #999;">-</span>
               </template>
+              <template slot="group" slot-scope="text, client">
+                <a-tag v-if="client.groupId && getGroupById(client.groupId)" 
+                  color="blue"
+                  :style="{ cursor: 'pointer' }"
+                  @click="viewGroupClients(getGroupById(client.groupId))">
+                  [[ getGroupById(client.groupId).name ]]
+                </a-tag>
+                <span v-else style="color: #999;">-</span>
+              </template>
             </a-table>
             </a-space>
           </a-card>
@@ -227,6 +260,22 @@
 {{template "component/aThemeSwitch" .}}
 {{template "modals/qrcodeModal"}}
 {{template "modals/clientEntityModal"}}
+<style>
+  /* Fix selected row background in Glass Morphism theme */
+  [data-glass-morphism] .clients-table .ant-table-tbody > tr.ant-table-row-selected > td {
+    background-color: rgba(24, 144, 255, 0.15) !important;
+    color: inherit !important;
+  }
+  
+  [data-glass-morphism] .clients-table .ant-table-tbody > tr.ant-table-row-selected:hover > td {
+    background-color: rgba(24, 144, 255, 0.25) !important;
+  }
+  
+  /* Ensure text remains visible in selected rows */
+  [data-glass-morphism] .clients-table .ant-table-tbody > tr.ant-table-row-selected > td * {
+    color: inherit !important;
+  }
+</style>
 <script>
   const columns = [{
     title: "ID",
@@ -240,6 +289,11 @@
     align: 'center',
     width: 80,
     scopedSlots: { customRender: 'action' },
+  }, {
+    title: '{{ i18n "pages.clients.group" }}',
+    align: 'left',
+    width: 150,
+    scopedSlots: { customRender: 'group' },
   }, {
     title: '{{ i18n "pages.clients.email" }}',
     align: 'left',
@@ -341,8 +395,12 @@
       searchKey: '',
       enableFilter: false,
       filterBy: '',
+      filterByGroup: null,
       expireDiff: 0,
       trafficDiff: 0,
+      selectedClientIds: [],
+      selectedGroupId: null,
+      groups: [],
       subSettings: {
         enable: false,
         subTitle: '',
@@ -375,8 +433,9 @@
             } else {
               this.searchClients(this.searchKey);
             }
-            // Ensure searchedClients is initialized
-            if (this.searchedClients.length === 0 && this.clients.length > 0) {
+            // Ensure searchedClients is initialized (only if no filters are applied)
+            if (this.searchedClients.length === 0 && this.clients.length > 0 && 
+                !this.filterByGroup && !this.searchKey && !this.filterBy) {
               this.searchedClients = this.clients.slice();
             }
           }
@@ -730,6 +789,8 @@
           if (msg.success) {
             app.$message.success(isEdit ? '{{ i18n "pages.clients.updateSuccess" }}' : '{{ i18n "pages.clients.addSuccess" }}');
             clientEntityModal.close();
+            // Reload groups in case group assignment changed
+            await this.loadGroups();
             await this.loadClients();
           } else {
             app.$message.error(msg.msg || (isEdit ? '{{ i18n "pages.clients.updateError" }}' : '{{ i18n "pages.clients.addError" }}'));
@@ -819,12 +880,19 @@
         }
       },
       searchClients(key) {
+        this.searchedClients.splice(0, this.searchedClients.length);
+        let filteredClients = this.clients.slice();
+        
+        // Apply group filter first
+        if (this.filterByGroup !== null && this.filterByGroup !== undefined) {
+          filteredClients = filteredClients.filter(client => client.groupId === this.filterByGroup);
+        }
+        
         if (ObjectUtil.isEmpty(key)) {
-          this.searchedClients = this.clients.slice();
+          this.searchedClients = filteredClients;
         } else {
-          this.searchedClients.splice(0, this.searchedClients.length);
           const searchKey = key.toLowerCase().trim();
-          this.clients.forEach(client => {
+          filteredClients.forEach(client => {
             // Search by email (client name) starting from the first character
             const email = (client.email || '').toLowerCase();
             if (email.startsWith(searchKey)) {
@@ -834,12 +902,19 @@
         }
       },
       filterClients() {
+        this.searchedClients.splice(0, this.searchedClients.length);
+        let filteredClients = this.clients.slice();
+        
+        // Apply group filter first
+        if (this.filterByGroup !== null && this.filterByGroup !== undefined) {
+          filteredClients = filteredClients.filter(client => client.groupId === this.filterByGroup);
+        }
+        
         if (ObjectUtil.isEmpty(this.filterBy)) {
-          this.searchedClients = this.clients.slice();
+          this.searchedClients = filteredClients;
         } else {
-          this.searchedClients.splice(0, this.searchedClients.length);
           const now = new Date().getTime();
-          this.clients.forEach(client => {
+          filteredClients.forEach(client => {
             let shouldInclude = false;
             switch (this.filterBy) {
               case 'deactive':
@@ -878,8 +953,21 @@
           if (this.searchKey && this.searchKey.trim()) {
             this.searchClients(this.searchKey);
           } else {
-            this.searchedClients = this.clients.slice();
+            // Apply group filter if set
+            if (this.filterByGroup !== null && this.filterByGroup !== undefined) {
+              this.searchedClients = this.clients.filter(client => client.groupId === this.filterByGroup);
+            } else {
+              this.searchedClients = this.clients.slice();
+            }
           }
+        }
+      },
+      onGroupFilterChange() {
+        // Apply filter based on current mode
+        if (this.enableFilter) {
+          this.filterClients();
+        } else {
+          this.searchClients(this.searchKey);
         }
       },
       isClientDepleted(client) {
@@ -1029,6 +1117,242 @@
             }
           }
         });
+      },
+      async loadGroups() {
+        try {
+          const msg = await HttpUtil.get('/panel/group/list');
+          if (msg && msg.success && msg.obj) {
+            this.groups = msg.obj;
+          }
+        } catch (e) {
+          console.error("Failed to load groups:", e);
+        }
+      },
+      getGroupById(groupId) {
+        return this.groups.find(g => g.id === groupId);
+      },
+      viewGroupClients(group) {
+        // Navigate to clients page with group filter
+        location.href = `{{ .base_path }}panel/clients?group=${group.id}`;
+      },
+      onSelectionChange(selectedRowKeys) {
+        this.selectedClientIds = selectedRowKeys;
+      },
+      clearSelection() {
+        this.selectedClientIds = [];
+      },
+      async bulkResetTraffic() {
+        if (this.selectedClientIds.length === 0) {
+          app.$message.warning('{{ i18n "pages.clients.noClientsSelected" }}');
+          return;
+        }
+        this.$confirm({
+          title: '{{ i18n "pages.inbounds.resetTraffic"}}',
+          content: `{{ i18n "pages.clients.bulkResetTrafficConfirm" }} ${this.selectedClientIds.length} {{ i18n "pages.clients.clients" }}?`,
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "reset"}}',
+          cancelText: '{{ i18n "cancel"}}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post('/panel/client/bulk/resetTraffic', { clientIds: this.selectedClientIds });
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.inbounds.toasts.resetAllClientTrafficSuccess" }}');
+                this.clearSelection();
+                await this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to reset traffic:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      async bulkClearHwid() {
+        if (this.selectedClientIds.length === 0) {
+          app.$message.warning('{{ i18n "pages.clients.noClientsSelected" }}');
+          return;
+        }
+        this.$confirm({
+          title: '{{ i18n "pages.clients.clearHwidTitle" }}',
+          content: `{{ i18n "pages.clients.bulkClearHwidConfirm" }} ${this.selectedClientIds.length} {{ i18n "pages.clients.clients" }}?`,
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "sure" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post('/panel/client/bulk/clearHwid', { clientIds: this.selectedClientIds });
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.clients.hwidCleared" }}');
+                this.clearSelection();
+                await this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to clear HWIDs:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      async bulkDelete() {
+        if (this.selectedClientIds.length === 0) {
+          app.$message.warning('{{ i18n "pages.clients.noClientsSelected" }}');
+          return;
+        }
+        this.$confirm({
+          title: '{{ i18n "pages.clients.deleteConfirm" }}',
+          content: `{{ i18n "pages.clients.bulkDeleteConfirm" }} ${this.selectedClientIds.length} {{ i18n "pages.clients.clients" }}?`,
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "delete"}}',
+          okType: 'danger',
+          cancelText: '{{ i18n "cancel"}}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post('/panel/client/bulk/delete', { clientIds: this.selectedClientIds });
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.clients.deleteSuccess" }}');
+                this.clearSelection();
+                await this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "pages.clients.deleteError" }}');
+              }
+            } catch (e) {
+              console.error("Failed to delete clients:", e);
+              app.$message.error('{{ i18n "pages.clients.deleteError" }}');
+            }
+          }
+        });
+      },
+      async bulkEnable(enable) {
+        if (this.selectedClientIds.length === 0) {
+          app.$message.warning('{{ i18n "pages.clients.noClientsSelected" }}');
+          return;
+        }
+        try {
+          const msg = await HttpUtil.post('/panel/client/bulk/enable', { clientIds: this.selectedClientIds, enable: enable });
+          if (msg.success) {
+            app.$message.success('{{ i18n "pages.clients.updateSuccess" }}');
+            this.clearSelection();
+            await this.loadClients();
+          } else {
+            app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+          }
+        } catch (e) {
+          console.error("Failed to enable/disable clients:", e);
+          app.$message.error('{{ i18n "somethingWentWrong" }}');
+        }
+      },
+      bulkSetHwidLimit() {
+        if (this.selectedClientIds.length === 0) {
+          app.$message.warning('{{ i18n "pages.clients.noClientsSelected" }}');
+          return;
+        }
+        const _this = this;
+        this.$confirm({
+          title: '{{ i18n "pages.clients.setHwidLimitAllTitle" }}',
+          content: h => {
+            return h('div', [
+              h('p', `{{ i18n "pages.clients.bulkSetHwidLimitConfirm" }} ${_this.selectedClientIds.length} {{ i18n "pages.clients.clients" }}?`),
+              h('a-input-number', {
+                props: { min: 0, max: 100, defaultValue: 3 },
+                style: { width: '100%', marginTop: '10px' },
+                on: { change: val => { _this.hwidLimitValue = val; } }
+              })
+            ]);
+          },
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "sure" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            try {
+              const limit = _this.hwidLimitValue || 3;
+              const msg = await HttpUtil.post('/panel/client/bulk/setHwidLimit', { clientIds: _this.selectedClientIds, maxHwid: limit, enabled: limit > 0 });
+              if (msg.success) {
+                app.$message.success(msg.msg || '{{ i18n "pages.clients.hwidLimitSet" }}');
+                _this.clearSelection();
+                await _this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to set HWID limit:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      bulkAssignGroup() {
+        if (this.selectedClientIds.length === 0) {
+          app.$message.warning('{{ i18n "pages.clients.noClientsSelected" }}');
+          return;
+        }
+        const _this = this;
+        this.$confirm({
+          title: '{{ i18n "pages.clients.assignGroup" }}',
+          width: 520,
+          content: h => {
+            return h('div', {
+              style: { width: '100%' }
+            }, [
+              h('p', {
+                style: { marginBottom: '16px' }
+              }, `{{ i18n "pages.clients.bulkAssignGroupConfirm" }} ${_this.selectedClientIds.length} {{ i18n "pages.clients.clients" }}?`),
+              h('a-select', {
+                props: {
+                  placeholder: '{{ i18n "pages.clients.selectGroup" }}',
+                  'dropdown-class-name': themeSwitcher.currentTheme,
+                  'allow-clear': true,
+                  'show-search': true,
+                  'option-filter-prop': 'children'
+                },
+                style: { width: '100%', marginTop: '10px' },
+                on: {
+                  change: (value) => { _this.selectedGroupId = value; }
+                }
+              }, [
+                h('a-select-option', { props: { value: null } }, '{{ i18n "none" }}'),
+                ...(_this.groups || []).map(group => 
+                  h('a-select-option', { props: { value: group.id } }, group.name)
+                )
+              ])
+            ]);
+          },
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "sure" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            try {
+              const groupId = _this.selectedGroupId;
+              if (groupId === null || groupId === undefined) {
+                // Remove from group - update each client to set groupId to null
+                const updatePromises = _this.selectedClientIds.map(clientId => 
+                  HttpUtil.post(`/panel/client/update/${clientId}`, { groupId: null })
+                );
+                await Promise.all(updatePromises);
+                app.$message.success('{{ i18n "pages.clients.groupRemoved" }}');
+              } else {
+                // Assign to group
+                const msg = await HttpUtil.post(`/panel/group/${groupId}/assignClients`, { clientIds: _this.selectedClientIds });
+                if (msg.success) {
+                  app.$message.success('{{ i18n "pages.clients.groupAssigned" }}');
+                } else {
+                  app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+                  return;
+                }
+              }
+              _this.clearSelection();
+              _this.selectedGroupId = null;
+              await _this.loadGroups();
+              await _this.loadClients();
+            } catch (e) {
+              console.error("Failed to assign group:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
       }
     },
     async mounted() {
@@ -1036,13 +1360,30 @@
       await this.getDefaultSettings();
       // Load available nodes for proper host addresses in QR codes
       await this.loadAvailableNodes();
+      // Load groups before clients so they're available when rendering
+      await this.loadGroups();
+      
+      // Check URL parameters for group filter
+      const urlParams = new URLSearchParams(window.location.search);
+      const groupIdParam = urlParams.get('group');
+      if (groupIdParam) {
+        const groupId = parseInt(groupIdParam, 10);
+        if (!isNaN(groupId) && this.groups.find(g => g.id === groupId)) {
+          this.filterByGroup = groupId;
+        }
+      }
+      
       this.loading();
       
       // Initial data fetch
       this.loadClients().then(() => {
         this.loading(false);
-        // Initialize searchedClients after first load
-        this.searchedClients = this.clients.slice();
+        // Apply filters after loading clients
+        if (this.enableFilter) {
+          this.filterClients();
+        } else {
+          this.searchClients(this.searchKey);
+        }
       });
 
       // Setup WebSocket for real-time updates (only if auto-refresh is enabled)
@@ -1092,9 +1433,13 @@
           if (!this.isRefreshEnabled) return;
           
           // Reload clients to get updated data (HWID, traffic, etc.)
+          // Also reload groups in case group assignments changed
           if (!this.refreshing) {
             this.refreshing = true;
-            this.loadClients().finally(() => {
+            Promise.all([
+              this.loadGroups(),
+              this.loadClients()
+            ]).finally(() => {
               this.refreshing = false;
             });
           }

@@ -57,6 +57,14 @@
                 </a-select-option>
             </a-select>
         </a-form-item>
+        <a-form-item label='{{ i18n "pages.clients.group" }}'>
+            <a-select v-model="client.groupId" :dropdown-class-name="themeSwitcher.currentTheme" :style="{ width: '100%' }" :allow-clear="true">
+                <a-select-option :value="null">{{ i18n "none" }}</a-select-option>
+                <a-select-option v-for="group in app.groups" :key="group.id" :value="group.id">
+                    [[ group.name ]]
+                </a-select-option>
+            </a-select>
+        </a-form-item>
         <a-divider>{{ i18n "hwidSettings" }}</a-divider>
         <a-alert
             message='{{ i18n "hwidBetaWarningTitle" }}'
@@ -141,11 +149,28 @@
                 }
             }
         },
-        show({ title = '', okText = '{{ i18n "sure" }}', client = null, confirm = () => {}, isEdit = false }) {
+        async show({ title = '', okText = '{{ i18n "sure" }}', client = null, confirm = () => {}, isEdit = false }) {
             this.title = title;
             this.okText = okText;
             this.isEdit = isEdit;
             this.confirm = confirm;
+            
+            // Always load groups when opening modal to ensure list is up-to-date
+            if (typeof app !== 'undefined') {
+                try {
+                    const msg = await HttpUtil.get('/panel/group/list');
+                    if (msg && msg.success && msg.obj) {
+                        app.groups = msg.obj;
+                    } else if (!app.groups) {
+                        app.groups = [];
+                    }
+                } catch (e) {
+                    console.error("Failed to load groups:", e);
+                    if (!app.groups) {
+                        app.groups = [];
+                    }
+                }
+            }
             
             if (client) {
                 // Edit mode - use provided client data
@@ -167,7 +192,8 @@
                     enable: client.enable !== undefined ? client.enable : true,
                     hwidEnabled: client.hwidEnabled !== undefined ? client.hwidEnabled : false,
                     maxHwid: client.maxHwid !== undefined ? client.maxHwid : 1,
-                    hwids: client.hwids ? [...client.hwids] : []
+                    hwids: client.hwids ? [...client.hwids] : [],
+                    groupId: client.groupId !== undefined ? client.groupId : null
                 };
                 
                 // If in edit mode, load HWIDs from API
@@ -192,8 +218,14 @@
                     inboundIds: [],
                     enable: true,
                     hwidEnabled: false,
-                    maxHwid: 1
+                    maxHwid: 1,
+                    groupId: null
                 };
+            }
+            
+            // Ensure groupId is set correctly (can be null or number)
+            if (this.client && this.client.groupId === undefined) {
+                this.client.groupId = client && client.groupId !== undefined ? client.groupId : null;
             }
             
             this.visible = true;
@@ -293,7 +325,18 @@
                 return typeof themeSwitcher !== 'undefined' ? themeSwitcher : { currentTheme: 'light' };
             },
             app() {
-                return typeof app !== 'undefined' ? app : null;
+                const appInstance = typeof app !== 'undefined' ? app : null;
+                if (appInstance) {
+                    // Ensure groups array exists
+                    if (!appInstance.groups) {
+                        appInstance.groups = [];
+                    }
+                    // Ensure allInbounds array exists
+                    if (!appInstance.allInbounds) {
+                        appInstance.allInbounds = [];
+                    }
+                }
+                return appInstance;
             },
             USERS_SECURITY() {
                 return typeof USERS_SECURITY !== 'undefined' ? USERS_SECURITY : {};

@@ -198,8 +198,27 @@ func (s *ClientService) AddClient(userId int, client *model.ClientEntity) (bool,
 	if client.Status == "" {
 		client.Status = "active"
 	}
+	
+	// Ensure GroupId is explicitly set (can be nil for no group)
+	// This prevents foreign key constraint violations
+	if client.GroupId != nil && *client.GroupId <= 0 {
+		client.GroupId = nil
+	}
 
-	err = tx.Create(client).Error
+	// Use Select to explicitly control which fields are inserted
+	// This ensures that nil GroupId is properly handled as NULL
+	fieldsToInsert := []string{
+		"user_id", "email", "uuid", "security", "password", "flow",
+		"limit_ip", "total_gb", "expiry_time", "enable", "status",
+		"tg_id", "sub_id", "comment", "reset", "created_at", "updated_at",
+		"up", "down", "all_time", "last_online", "hwid_enabled", "max_hwid",
+	}
+	// Add group_id only if it's not nil
+	if client.GroupId != nil {
+		fieldsToInsert = append(fieldsToInsert, "group_id")
+	}
+	
+	err = tx.Select(fieldsToInsert).Create(client).Error
 	if err != nil {
 		return false, err
 	}
@@ -332,6 +351,9 @@ func (s *ClientService) UpdateClient(userId int, client *model.ClientEntity) (bo
 	updates["sub_id"] = client.SubID
 	updates["comment"] = client.Comment
 	updates["reset"] = client.Reset
+	// Update group_id - can be nil (no group)
+	// Always update group_id if it's set (including nil to remove from group)
+	updates["group_id"] = client.GroupId
 	// Update HWID settings - GORM converts field names to snake_case automatically
 	// HWIDEnabled -> hwid_enabled, MaxHWID -> max_hwid
 	// Always update HWID settings (they should always be present when updating from the UI)
@@ -1262,4 +1284,373 @@ func (s *ClientService) DelDepletedClients(userId int) (int, bool, error) {
 	}
 	
 	return len(clientIdsToDelete), needRestart, nil
+}
+
+// BulkResetTraffic resets traffic counters for multiple clients.
+// Returns whether Xray needs restart and any error.
+func (s *ClientService) BulkResetTraffic(userId int, clientIds []int) (bool, error) {
+	if len(clientIds) == 0 {
+		return false, nil
+	}
+
+	db := database.GetDB()
+
+	// Verify all clients belong to user
+	var count int64
+	err := db.Model(&model.ClientEntity{}).
+		Where("id IN ? AND user_id = ?", clientIds, userId).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	if int(count) != len(clientIds) {
+		return false, common.NewError("Some clients not found or access denied")
+	}
+
+	// Get clients that were expired due to traffic before reset
+	var expiredClients []model.ClientEntity
+	err = db.Where("id IN ? AND user_id = ? AND status = ?", clientIds, userId, "expired_traffic").Find(&expiredClients).Error
+	if err != nil {
+		return false, err
+	}
+
+	// Reset traffic for selected clients
+	result := db.Model(&model.ClientEntity{}).
+		Where("id IN ? AND user_id = ?", clientIds, userId).
+		Updates(map[string]interface{}{
+			"up":       0,
+			"down":     0,
+			"all_time": 0,
+		})
+
+	if result.Error != nil {
+		return false, result.Error
+	}
+
+	// Invalidate cache for this user's clients
+	cache.InvalidateClients(userId)
+
+	// Reset status to "active" for clients expired due to traffic
+	if len(expiredClients) > 0 {
+		db.Model(&model.ClientEntity{}).
+			Where("id IN ? AND user_id = ? AND status = ?", clientIds, userId, "expired_traffic").
+			Update("status", "active")
+	}
+
+	// Re-add expired clients to Xray if they were removed
+	needRestart := false
+	if len(expiredClients) > 0 && p != nil {
+		inboundService := InboundService{}
+		inboundService.xrayApi.Init(p.GetAPIPort())
+		defer inboundService.xrayApi.Close()
+
+		// Group clients by inbound
+		inboundClients := make(map[int][]model.ClientEntity)
+		for _, client := range expiredClients {
+			inboundIds, err := s.GetInboundIdsForClient(client.Id)
+			if err == nil {
+				for _, inboundId := range inboundIds {
+					inboundClients[inboundId] = append(inboundClients[inboundId], client)
+				}
+			}
+		}
+
+		// Re-add clients to Xray for each inbound
+		for inboundId, clients := range inboundClients {
+			inbound, err := inboundService.GetInbound(inboundId)
+			if err != nil {
+				continue
+			}
+
+			for _, client := range clients {
+				if !client.Enable {
+					continue
+				}
+
+				// Build client data for Xray API
+				clientData := make(map[string]any)
+				clientData["email"] = client.Email
+
+				switch inbound.Protocol {
+				case model.Trojan:
+					clientData["password"] = client.Password
+				case model.Shadowsocks:
+					var settings map[string]any
+					json.Unmarshal([]byte(inbound.Settings), &settings)
+					if method, ok := settings["method"].(string); ok {
+						clientData["method"] = method
+					}
+					clientData["password"] = client.Password
+				case model.VMESS, model.VLESS:
+					clientData["id"] = client.UUID
+					if inbound.Protocol == model.VMESS && client.Security != "" {
+						clientData["security"] = client.Security
+					}
+					if inbound.Protocol == model.VLESS && client.Flow != "" {
+						clientData["flow"] = client.Flow
+					}
+				}
+
+				err = inboundService.xrayApi.AddUser(string(inbound.Protocol), inbound.Tag, clientData)
+				if err != nil {
+					if strings.Contains(err.Error(), fmt.Sprintf("User %s already exists.", client.Email)) {
+						logger.Debugf("Client %s already exists in Xray (tag: %s)", client.Email, inbound.Tag)
+					} else {
+						logger.Warningf("Failed to re-add client %s to Xray (tag: %s): %v", client.Email, inbound.Tag, err)
+						needRestart = true
+					}
+				}
+			}
+
+			// Update inbound settings
+			clientEntities, err := s.GetClientsForInbound(inboundId)
+			if err == nil {
+				newSettings, err := inboundService.BuildSettingsFromClientEntities(inbound, clientEntities)
+				if err == nil {
+					inbound.Settings = newSettings
+					_, inboundNeedRestart, err := inboundService.updateInboundWithRetry(inbound)
+					if err != nil {
+						logger.Warningf("Failed to update inbound %d settings: %v", inboundId, err)
+					} else if inboundNeedRestart {
+						needRestart = true
+					}
+				}
+			}
+		}
+	}
+
+	return needRestart, nil
+}
+
+// BulkClearHWIDs clears HWIDs for multiple clients.
+func (s *ClientService) BulkClearHWIDs(userId int, clientIds []int) error {
+	if len(clientIds) == 0 {
+		return nil
+	}
+
+	// Verify all clients belong to user
+	db := database.GetDB()
+	var count int64
+	err := db.Model(&model.ClientEntity{}).
+		Where("id IN ? AND user_id = ?", clientIds, userId).
+		Count(&count).Error
+	if err != nil {
+		return err
+	}
+	if int(count) != len(clientIds) {
+		return common.NewError("Some clients not found or access denied")
+	}
+
+	// Clear HWIDs for selected clients
+	hwidService := ClientHWIDService{}
+	for _, clientId := range clientIds {
+		err = hwidService.ClearHWIDsForClient(clientId)
+		if err != nil {
+			logger.Warningf("Failed to clear HWIDs for client %d: %v", clientId, err)
+		}
+	}
+
+	// Invalidate cache for this user's clients
+	cache.InvalidateClients(userId)
+
+	return nil
+}
+
+// BulkDelete deletes multiple clients.
+// Returns whether Xray needs restart and any error.
+func (s *ClientService) BulkDelete(userId int, clientIds []int) (bool, error) {
+	if len(clientIds) == 0 {
+		return false, nil
+	}
+
+	// Verify all clients belong to user
+	db := database.GetDB()
+	var count int64
+	err := db.Model(&model.ClientEntity{}).
+		Where("id IN ? AND user_id = ?", clientIds, userId).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	if int(count) != len(clientIds) {
+		return false, common.NewError("Some clients not found or access denied")
+	}
+
+	// Get inbound assignments before deleting
+	var mappings []model.ClientInboundMapping
+	err = db.Where("client_id IN ?", clientIds).Find(&mappings).Error
+	if err != nil {
+		return false, err
+	}
+
+	affectedInboundIds := make(map[int]bool)
+	for _, mapping := range mappings {
+		affectedInboundIds[mapping.InboundId] = true
+	}
+
+	needRestart := false
+
+	tx := db.Begin()
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		} else {
+			tx.Commit()
+		}
+	}()
+
+	// Delete inbound mappings
+	err = tx.Where("client_id IN ?", clientIds).Delete(&model.ClientInboundMapping{}).Error
+	if err != nil {
+		return false, err
+	}
+
+	// Delete clients
+	err = tx.Where("id IN ? AND user_id = ?", clientIds, userId).Delete(&model.ClientEntity{}).Error
+	if err != nil {
+		return false, err
+	}
+
+	// Invalidate cache for this user's clients
+	cache.InvalidateClients(userId)
+
+	// Update Settings for affected inbounds
+	inboundService := InboundService{}
+	for inboundId := range affectedInboundIds {
+		inbound, err := inboundService.GetInbound(inboundId)
+		if err != nil {
+			continue
+		}
+
+		clientEntities, err := s.GetClientsForInbound(inboundId)
+		if err != nil {
+			continue
+		}
+
+		newSettings, err := inboundService.BuildSettingsFromClientEntities(inbound, clientEntities)
+		if err != nil {
+			continue
+		}
+
+		inbound.Settings = newSettings
+		_, inboundNeedRestart, err := inboundService.updateInboundWithRetry(inbound)
+		if err != nil {
+			logger.Warningf("Failed to update inbound %d settings: %v", inboundId, err)
+		} else if inboundNeedRestart {
+			needRestart = true
+		}
+	}
+
+	return needRestart, nil
+}
+
+// BulkEnable enables or disables multiple clients.
+// Returns whether Xray needs restart and any error.
+func (s *ClientService) BulkEnable(userId int, clientIds []int, enable bool) (bool, error) {
+	if len(clientIds) == 0 {
+		return false, nil
+	}
+
+	// Verify all clients belong to user
+	db := database.GetDB()
+	var count int64
+	err := db.Model(&model.ClientEntity{}).
+		Where("id IN ? AND user_id = ?", clientIds, userId).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	if int(count) != len(clientIds) {
+		return false, common.NewError("Some clients not found or access denied")
+	}
+
+	// Get inbound assignments
+	var mappings []model.ClientInboundMapping
+	err = db.Where("client_id IN ?", clientIds).Find(&mappings).Error
+	if err != nil {
+		return false, err
+	}
+
+	affectedInboundIds := make(map[int]bool)
+	for _, mapping := range mappings {
+		affectedInboundIds[mapping.InboundId] = true
+	}
+
+	// Update enable status
+	err = db.Model(&model.ClientEntity{}).
+		Where("id IN ? AND user_id = ?", clientIds, userId).
+		Update("enable", enable).Error
+	if err != nil {
+		return false, err
+	}
+
+	// Invalidate cache for this user's clients
+	cache.InvalidateClients(userId)
+
+	// Update Settings for affected inbounds
+	needRestart := false
+	inboundService := InboundService{}
+	for inboundId := range affectedInboundIds {
+		inbound, err := inboundService.GetInbound(inboundId)
+		if err != nil {
+			continue
+		}
+
+		clientEntities, err := s.GetClientsForInbound(inboundId)
+		if err != nil {
+			continue
+		}
+
+		newSettings, err := inboundService.BuildSettingsFromClientEntities(inbound, clientEntities)
+		if err != nil {
+			continue
+		}
+
+		inbound.Settings = newSettings
+		_, inboundNeedRestart, err := inboundService.updateInboundWithRetry(inbound)
+		if err != nil {
+			logger.Warningf("Failed to update inbound %d settings: %v", inboundId, err)
+		} else if inboundNeedRestart {
+			needRestart = true
+		}
+	}
+
+	return needRestart, nil
+}
+
+// BulkSetHWIDLimit sets HWID limit for multiple clients.
+func (s *ClientService) BulkSetHWIDLimit(userId int, clientIds []int, maxHwid int, enabled bool) error {
+	if len(clientIds) == 0 {
+		return nil
+	}
+
+	// Verify all clients belong to user
+	db := database.GetDB()
+	var count int64
+	err := db.Model(&model.ClientEntity{}).
+		Where("id IN ? AND user_id = ?", clientIds, userId).
+		Count(&count).Error
+	if err != nil {
+		return err
+	}
+	if int(count) != len(clientIds) {
+		return common.NewError("Some clients not found or access denied")
+	}
+
+	// Update HWID settings
+	err = db.Model(&model.ClientEntity{}).
+		Where("id IN ? AND user_id = ?", clientIds, userId).
+		Updates(map[string]interface{}{
+			"hwid_enabled": enabled,
+			"max_hwid":     maxHwid,
+		}).Error
+
+	if err != nil {
+		return err
+	}
+
+	// Invalidate cache for this user's clients
+	cache.InvalidateClients(userId)
+
+	return nil
 }

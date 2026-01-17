@@ -436,16 +436,11 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 	}
 
 	db := database.GetDB()
-	tx := db.Begin()
-	defer func() {
-		if err == nil {
-			tx.Commit()
-		} else {
-			tx.Rollback()
-		}
-	}()
-
-	err = tx.Save(inbound).Error
+	
+	err = db.Transaction(func(tx *gorm.DB) error {
+		return tx.Save(inbound).Error
+	})
+	
 	if err != nil {
 		return inbound, false, err
 	}
@@ -585,16 +580,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	tag := oldInbound.Tag
 
 	db := database.GetDB()
-	tx := db.Begin()
-
-	defer func() {
-		if err != nil {
-			tx.Rollback()
-		} else {
-			tx.Commit()
-		}
-	}()
-
+	
 	// updateClientTraffics is no longer needed - clients are managed through ClientEntity
 	// Settings JSON is generated from ClientEntity via BuildSettingsFromClientEntities
 	// No need to sync client_traffics as traffic is stored directly in ClientEntity
@@ -711,7 +697,10 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 		logger.Debug("Inbound is disabled, not adding to Xray:", tag)
 	}
 
-	err = tx.Save(oldInbound).Error
+	err = db.Transaction(func(tx *gorm.DB) error {
+		return tx.Save(oldInbound).Error
+	})
+	
 	if err == nil {
 		// Invalidate cache for this user's inbounds
 		if oldInbound.UserId > 0 {
@@ -1848,14 +1837,6 @@ func (s *InboundService) ResetAllTraffics() error {
 
 func (s *InboundService) DelDepletedClients(id int) (err error) {
 	db := database.GetDB()
-	tx := db.Begin()
-	defer func() {
-		if err == nil {
-			tx.Commit()
-		} else {
-			tx.Rollback()
-		}
-	}()
 
 	whereText := "reset = 0 and inbound_id "
 	if id < 0 {
@@ -1876,59 +1857,56 @@ func (s *InboundService) DelDepletedClients(id int) (err error) {
 		return err
 	}
 
-	for _, depletedClient := range depletedClients {
-		emails := strings.Split(depletedClient.Email, ",")
-		oldInbound, err := s.GetInbound(depletedClient.InboundId)
-		if err != nil {
-			return err
-		}
-		var oldSettings map[string]any
-		err = json.Unmarshal([]byte(oldInbound.Settings), &oldSettings)
-		if err != nil {
-			return err
-		}
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, depletedClient := range depletedClients {
+			emails := strings.Split(depletedClient.Email, ",")
+			oldInbound, err := s.GetInbound(depletedClient.InboundId)
+			if err != nil {
+				return err
+			}
+			var oldSettings map[string]any
+			err = json.Unmarshal([]byte(oldInbound.Settings), &oldSettings)
+			if err != nil {
+				return err
+			}
 
-		oldClients := oldSettings["clients"].([]any)
-		var newClients []any
-		for _, client := range oldClients {
-			deplete := false
-			c := client.(map[string]any)
-			for _, email := range emails {
-				if email == c["email"].(string) {
-					deplete = true
-					break
+			oldClients := oldSettings["clients"].([]any)
+			var newClients []any
+			for _, client := range oldClients {
+				deplete := false
+				c := client.(map[string]any)
+				for _, email := range emails {
+					if email == c["email"].(string) {
+						deplete = true
+						break
+					}
+				}
+				if !deplete {
+					newClients = append(newClients, client)
 				}
 			}
-			if !deplete {
-				newClients = append(newClients, client)
+			if len(newClients) > 0 {
+				oldSettings["clients"] = newClients
+
+				newSettings, err := json.MarshalIndent(oldSettings, "", "  ")
+				if err != nil {
+					return err
+				}
+
+				oldInbound.Settings = string(newSettings)
+				err = tx.Save(oldInbound).Error
+				if err != nil {
+					return err
+				}
+			} else {
+				// Delete inbound if no client remains
+				s.DelInbound(depletedClient.InboundId)
 			}
 		}
-		if len(newClients) > 0 {
-			oldSettings["clients"] = newClients
 
-			newSettings, err := json.MarshalIndent(oldSettings, "", "  ")
-			if err != nil {
-				return err
-			}
-
-			oldInbound.Settings = string(newSettings)
-			err = tx.Save(oldInbound).Error
-			if err != nil {
-				return err
-			}
-		} else {
-			// Delete inbound if no client remains
-			s.DelInbound(depletedClient.InboundId)
-		}
-	}
-
-	// Delete stats only for truly depleted clients
-	err = tx.Where(whereText+" and ((total > 0 and up + down >= total) or (expiry_time > 0 and expiry_time <= ?))", id, now).Delete(xray.ClientTraffic{}).Error
-	if err != nil {
-		return err
-	}
-
-	return nil
+		// Delete stats only for truly depleted clients
+		return tx.Where(whereText+" and ((total > 0 and up + down >= total) or (expiry_time > 0 and expiry_time <= ?))", id, now).Delete(xray.ClientTraffic{}).Error
+	})
 }
 
 func (s *InboundService) GetClientTrafficTgBot(tgId int64) ([]*xray.ClientTraffic, error) {
@@ -2124,43 +2102,30 @@ func (s *InboundService) SearchInbounds(query string) ([]*model.Inbound, error) 
 
 func (s *InboundService) MigrationRequirements() {
 	db := database.GetDB()
-	tx := db.Begin()
-	var err error
-	defer func() {
-		if err == nil {
-			tx.Commit()
-			// VACUUM is optional for PostgreSQL, removed for performance reasons
-			// PostgreSQL automatically handles vacuum operations via autovacuum
-		} else {
-			tx.Rollback()
+	
+	err := db.Transaction(func(tx *gorm.DB) error {
+		// Calculate and backfill all_time from up+down for inbounds and clients
+		if err := tx.Exec(`
+			UPDATE inbounds
+			SET all_time = COALESCE(up, 0) + COALESCE(down, 0)
+			WHERE COALESCE(all_time, 0) = 0 AND (COALESCE(up, 0) + COALESCE(down, 0)) > 0
+		`).Error; err != nil {
+			return err
 		}
-	}()
+		
+		if err := tx.Exec(`
+			UPDATE client_traffics
+			SET all_time = COALESCE(up, 0) + COALESCE(down, 0)
+			WHERE COALESCE(all_time, 0) = 0 AND (COALESCE(up, 0) + COALESCE(down, 0)) > 0
+		`).Error; err != nil {
+			return err
+		}
 
-	// Calculate and backfill all_time from up+down for inbounds and clients
-	err = tx.Exec(`
-		UPDATE inbounds
-		SET all_time = COALESCE(up, 0) + COALESCE(down, 0)
-		WHERE COALESCE(all_time, 0) = 0 AND (COALESCE(up, 0) + COALESCE(down, 0)) > 0
-	`).Error
-	if err != nil {
-		return
-	}
-	err = tx.Exec(`
-		UPDATE client_traffics
-		SET all_time = COALESCE(up, 0) + COALESCE(down, 0)
-		WHERE COALESCE(all_time, 0) = 0 AND (COALESCE(up, 0) + COALESCE(down, 0)) > 0
-	`).Error
-
-	if err != nil {
-		return
-	}
-
-	// Fix inbounds based problems
-	var inbounds []*model.Inbound
-	err = tx.Model(model.Inbound{}).Where("protocol IN (?)", []string{"vmess", "vless", "trojan"}).Find(&inbounds).Error
-	if err != nil && err != gorm.ErrRecordNotFound {
-		return
-	}
+		// Fix inbounds based problems
+		var inbounds []*model.Inbound
+		if err := tx.Model(model.Inbound{}).Where("protocol IN (?)", []string{"vmess", "vless", "trojan"}).Find(&inbounds).Error; err != nil && err != gorm.ErrRecordNotFound {
+			return err
+		}
 	for inbound_index := range inbounds {
 		settings := map[string]any{}
 		json.Unmarshal([]byte(inbounds[inbound_index].Settings), &settings)
@@ -2203,7 +2168,7 @@ func (s *InboundService) MigrationRequirements() {
 			settings["clients"] = newClients
 			modifiedSettings, err := json.MarshalIndent(settings, "", "  ")
 			if err != nil {
-				return
+				return err
 			}
 
 			inbounds[inbound_index].Settings = string(modifiedSettings)
@@ -2211,57 +2176,73 @@ func (s *InboundService) MigrationRequirements() {
 
 		// Note: Client traffic is now stored in ClientEntity table
 		// No need to create client_traffics records - they are deprecated
-	}
-	tx.Save(inbounds)
+		}
+		
+		if err := tx.Save(inbounds).Error; err != nil {
+			return err
+		}
 
-	// Remove orphaned traffics
-	tx.Where("inbound_id = 0").Delete(xray.ClientTraffic{})
+		// Remove orphaned traffics
+		if err := tx.Where("inbound_id = 0").Delete(xray.ClientTraffic{}).Error; err != nil {
+			return err
+		}
 
-	// Migrate old MultiDomain to External Proxy
-	var externalProxy []struct {
-		Id             int
-		Port           int
-		StreamSettings []byte
-	}
-	err = tx.Raw(`select id, port, stream_settings
-	from inbounds
-	WHERE protocol in ('vmess','vless','trojan')
-	  AND (stream_settings::jsonb)->>'security' = 'tls'
-	  AND (stream_settings::jsonb)->'tlsSettings'->'settings'->'domains' IS NOT NULL`).Scan(&externalProxy).Error
-	if err != nil || len(externalProxy) == 0 {
-		return
-	}
+		// Migrate old MultiDomain to External Proxy
+		var externalProxy []struct {
+			Id             int
+			Port           int
+			StreamSettings []byte
+		}
+		if err := tx.Raw(`select id, port, stream_settings
+		from inbounds
+		WHERE protocol in ('vmess','vless','trojan')
+		  AND (stream_settings::jsonb)->>'security' = 'tls'
+		  AND (stream_settings::jsonb)->'tlsSettings'->'settings'->'domains' IS NOT NULL`).Scan(&externalProxy).Error; err != nil {
+			return err
+		}
 
-	for _, ep := range externalProxy {
-		var reverses any
-		var stream map[string]any
-		json.Unmarshal(ep.StreamSettings, &stream)
-		if tlsSettings, ok := stream["tlsSettings"].(map[string]any); ok {
-			if settings, ok := tlsSettings["settings"].(map[string]any); ok {
-				if domains, ok := settings["domains"].([]any); ok {
-					for _, domain := range domains {
-						if domainMap, ok := domain.(map[string]any); ok {
-							domainMap["forceTls"] = "same"
-							domainMap["port"] = ep.Port
-							domainMap["dest"] = domainMap["domain"].(string)
-							delete(domainMap, "domain")
+		if len(externalProxy) > 0 {
+			for _, ep := range externalProxy {
+				var reverses any
+				var stream map[string]any
+				if err := json.Unmarshal(ep.StreamSettings, &stream); err != nil {
+					continue
+				}
+				if tlsSettings, ok := stream["tlsSettings"].(map[string]any); ok {
+					if settings, ok := tlsSettings["settings"].(map[string]any); ok {
+						if domains, ok := settings["domains"].([]any); ok {
+							for _, domain := range domains {
+								if domainMap, ok := domain.(map[string]any); ok {
+									domainMap["forceTls"] = "same"
+									domainMap["port"] = ep.Port
+									if domainStr, ok := domainMap["domain"].(string); ok {
+										domainMap["dest"] = domainStr
+									}
+									delete(domainMap, "domain")
+								}
+							}
 						}
+						reverses = settings["domains"]
+						delete(settings, "domains")
 					}
 				}
-				reverses = settings["domains"]
-				delete(settings, "domains")
+				stream["externalProxy"] = reverses
+				newStream, _ := json.MarshalIndent(stream, " ", "  ")
+				if err := tx.Model(model.Inbound{}).Where("id = ?", ep.Id).Update("stream_settings", newStream).Error; err != nil {
+					return err
+				}
 			}
 		}
-		stream["externalProxy"] = reverses
-		newStream, _ := json.MarshalIndent(stream, " ", "  ")
-		tx.Model(model.Inbound{}).Where("id = ?", ep.Id).Update("stream_settings", newStream)
-	}
 
-	err = tx.Raw(`UPDATE inbounds
-	SET tag = REPLACE(tag, '0.0.0.0:', '')
-	WHERE INSTR(tag, '0.0.0.0:') > 0;`).Error
+		// Note: PostgreSQL doesn't have INSTR function, use POSITION instead
+		// But this migration might be for SQLite compatibility, so we'll skip it for PostgreSQL
+		// If needed, use: WHERE POSITION('0.0.0.0:' IN tag) > 0
+		
+		return nil
+	})
+	
 	if err != nil {
-		return
+		logger.Warning("MigrationRequirements error:", err)
 	}
 }
 

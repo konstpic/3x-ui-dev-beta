@@ -1,0 +1,105 @@
+{{define "modals/groupModal"}}
+<a-modal id="group-modal" v-model="groupModal.visible" :title="groupModal.title" @ok="groupModal.ok"
+  :confirm-loading="groupModal.confirmLoading" :closable="true" :mask-closable="false"
+  :class="themeSwitcher.currentTheme"
+  :ok-text="groupModal.okText" cancel-text='{{ i18n "close" }}' :width="600">
+  <a-form layout="vertical" v-if="groupModal.formData">
+    <a-form-item label='{{ i18n "pages.groups.name" }}' :required="true">
+      <a-input v-model.trim="groupModal.formData.name" placeholder='{{ i18n "pages.groups.enterGroupName" }}'></a-input>
+    </a-form-item>
+    <a-form-item label='{{ i18n "pages.groups.groupDescription" }}'>
+      <a-textarea v-model.trim="groupModal.formData.description" :rows="3" placeholder='{{ i18n "pages.groups.enterGroupDescription" }}'></a-textarea>
+    </a-form-item>
+  </a-form>
+</a-modal>
+<script>
+  const groupModal = window.groupModal = {
+    visible: false,
+    confirmLoading: false,
+    title: '',
+    okText: '{{ i18n "sure" }}',
+    isEdit: false,
+    confirm: null,
+    formData: {
+      name: '',
+      description: ''
+    },
+    ok() {
+      // Validate form data
+      if (!groupModal.formData.name || !groupModal.formData.name.trim()) {
+        if (typeof app !== 'undefined' && app.$message) {
+          app.$message.error('{{ i18n "pages.groups.enterGroupName" }}');
+        } else if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
+          Vue.prototype.$message.error('{{ i18n "pages.groups.enterGroupName" }}');
+        }
+        return;
+      }
+      
+      const dataToSend = { ...groupModal.formData };
+      
+      groupModal.confirmLoading = true;
+      if (groupModal.confirm) {
+        try {
+          const result = groupModal.confirm(dataToSend);
+          // If confirm returns a promise, handle it
+          if (result && typeof result.then === 'function') {
+            result.catch(() => {
+              // Error handling is done in submitGroup
+            }).finally(() => {
+              groupModal.confirmLoading = false;
+            });
+          } else {
+            // If not async, reset loading after a short delay
+            setTimeout(() => {
+              groupModal.confirmLoading = false;
+            }, 100);
+          }
+        } catch (e) {
+          console.error("Error in groupModal.ok():", e);
+          groupModal.confirmLoading = false;
+        }
+      } else {
+        groupModal.confirmLoading = false;
+      }
+    },
+    show({ title = '', okText = '{{ i18n "sure" }}', group = null, confirm = () => {}, isEdit = false }) {
+      this.title = title;
+      this.okText = okText;
+      this.isEdit = isEdit;
+      this.confirm = confirm;
+      
+      if (group) {
+        this.formData = {
+          name: group.name || '',
+          description: group.description || ''
+        };
+      } else {
+        this.formData = {
+          name: '',
+          description: ''
+        };
+      }
+      
+      this.visible = true;
+    },
+    close() {
+      this.visible = false;
+      this.confirmLoading = false;
+    },
+    loading(loading = true) {
+      this.confirmLoading = loading;
+    }
+  };
+
+  const groupModalApp = new Vue({
+    delimiters: ['[[', ']]'],
+    el: '#group-modal',
+    data: {
+      groupModal: groupModal,
+      get themeSwitcher() {
+        return typeof themeSwitcher !== 'undefined' ? themeSwitcher : { currentTheme: 'light' };
+      }
+    }
+  });
+</script>
+{{end}}

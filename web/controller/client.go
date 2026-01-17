@@ -46,6 +46,12 @@ func (a *ClientController) initRouter(g *gin.RouterGroup) {
 	g.POST("/clearHwid/:id", a.clearClientHWIDs)
 	g.POST("/clearAllHwids", a.clearAllClientHWIDs)
 	g.POST("/setHwidLimitAll", a.setHWIDLimitForAllClients)
+	// Bulk operations
+	g.POST("/bulk/resetTraffic", a.bulkResetTraffic)
+	g.POST("/bulk/clearHwid", a.bulkClearHwid)
+	g.POST("/bulk/delete", a.bulkDelete)
+	g.POST("/bulk/enable", a.bulkEnable)
+	g.POST("/bulk/setHwidLimit", a.bulkSetHwidLimit)
 }
 
 // getClients retrieves the list of all clients for the current user.
@@ -83,15 +89,17 @@ func (a *ClientController) getClient(c *gin.Context) {
 func (a *ClientController) addClient(c *gin.Context) {
 	user := session.GetLoginUser(c)
 	
-	// Extract inboundIds from JSON or form data
+	// Extract inboundIds and groupId from JSON or form data
 	var inboundIdsFromJSON []int
 	var hasInboundIdsInJSON bool
+	var groupIdFromJSON *int
+	var hasGroupIdInJSON bool
 	
 	if c.ContentType() == "application/json" {
-		// Read raw body to extract inboundIds
+		// Read raw body to extract inboundIds and groupId
 		bodyBytes, err := c.GetRawData()
 		if err == nil && len(bodyBytes) > 0 {
-			// Parse JSON to extract inboundIds
+			// Parse JSON to extract inboundIds and groupId
 			var jsonData map[string]interface{}
 			if err := json.Unmarshal(bodyBytes, &jsonData); err == nil {
 				// Check for inboundIds array
@@ -110,6 +118,19 @@ func (a *ClientController) addClient(c *gin.Context) {
 						inboundIdsFromJSON = append(inboundIdsFromJSON, int(num))
 					} else if num, ok := inboundIdsVal.(int); ok {
 						inboundIdsFromJSON = append(inboundIdsFromJSON, num)
+					}
+				}
+				// Check for groupId
+				if groupIdVal, ok := jsonData["groupId"]; ok {
+					hasGroupIdInJSON = true
+					if groupIdVal == nil {
+						// Explicitly null - no group
+						groupIdFromJSON = nil
+					} else if num, ok := groupIdVal.(float64); ok && num > 0 {
+						groupIdInt := int(num)
+						groupIdFromJSON = &groupIdInt
+					} else if num, ok := groupIdVal.(int); ok && num > 0 {
+						groupIdFromJSON = &num
 					}
 				}
 			}
@@ -141,6 +162,25 @@ func (a *ClientController) addClient(c *gin.Context) {
 				}
 			}
 			client.InboundIds = inboundIds
+		}
+	}
+
+	// Handle groupId - from JSON or form data
+	if hasGroupIdInJSON {
+		// Use groupId from JSON (can be nil)
+		client.GroupId = groupIdFromJSON
+	} else {
+		// Try to get from form data
+		if groupIdStr := c.PostForm("groupId"); groupIdStr != "" {
+			if groupId, err := strconv.Atoi(groupIdStr); err == nil && groupId > 0 {
+				client.GroupId = &groupId
+			} else {
+				// Invalid value, set to nil
+				client.GroupId = nil
+			}
+		} else {
+			// No groupId provided - explicitly set to nil (no group)
+			client.GroupId = nil
 		}
 	}
 
@@ -309,6 +349,17 @@ func (a *ClientController) updateClient(c *gin.Context) {
 					client.MaxHWID = int(maxHwid)
 				}
 			}
+			// Handle groupId - can be null (no group), so check if key exists
+			if groupIdVal, exists := updateData["groupId"]; exists {
+				if groupIdVal == nil {
+					client.GroupId = nil
+				} else if groupId, ok := groupIdVal.(float64); ok {
+					groupIdInt := int(groupId)
+					client.GroupId = &groupIdInt
+				} else if groupId, ok := groupIdVal.(int); ok {
+					client.GroupId = &groupId
+				}
+			}
 		}
 	} else {
 		// For form data, use ShouldBind
@@ -392,6 +443,15 @@ func (a *ClientController) updateClient(c *gin.Context) {
 			} else if updateClient.MaxHWID >= 0 {
 				// If maxHwid is explicitly set in the form (including 0), use it
 				client.MaxHWID = updateClient.MaxHWID
+			}
+			// Handle groupId - can be empty (no group)
+			if groupIdStr := c.PostForm("groupId"); groupIdStr != "" {
+				if groupId, err := strconv.Atoi(groupIdStr); err == nil && groupId > 0 {
+					client.GroupId = &groupId
+				}
+			} else if groupIdStr, exists := c.GetPostForm("groupId"); exists && groupIdStr == "" {
+				// Explicitly set to null (remove from group)
+				client.GroupId = nil
 			}
 		}
 	}
@@ -598,4 +658,122 @@ func (a *ClientController) setHWIDLimitForAllClients(c *gin.Context) {
 	}
 
 	jsonMsg(c, fmt.Sprintf("Updated HWID limit for %d clients", count), nil)
+}
+
+// bulkResetTraffic resets traffic for selected clients.
+func (a *ClientController) bulkResetTraffic(c *gin.Context) {
+	user := session.GetLoginUser(c)
+	var req struct {
+		ClientIds []int `json:"clientIds" form:"clientIds"`
+	}
+	err := c.ShouldBind(&req)
+	if err != nil {
+		jsonMsg(c, "Invalid request data", err)
+		return
+	}
+	needRestart, err := a.clientService.BulkResetTraffic(user.Id, req.ClientIds)
+	if err != nil {
+		logger.Errorf("Failed to reset traffic for clients: %v", err)
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonMsg(c, "Traffic reset successfully", nil)
+	if needRestart {
+		if err := a.xrayService.RestartXray(false); err != nil {
+			logger.Warningf("Failed to restart Xray after bulk traffic reset: %v", err)
+		}
+	}
+}
+
+// bulkClearHwid clears HWIDs for selected clients.
+func (a *ClientController) bulkClearHwid(c *gin.Context) {
+	user := session.GetLoginUser(c)
+	var req struct {
+		ClientIds []int `json:"clientIds" form:"clientIds"`
+	}
+	err := c.ShouldBind(&req)
+	if err != nil {
+		jsonMsg(c, "Invalid request data", err)
+		return
+	}
+	err = a.clientService.BulkClearHWIDs(user.Id, req.ClientIds)
+	if err != nil {
+		logger.Errorf("Failed to clear HWIDs for clients: %v", err)
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonMsg(c, "HWIDs cleared successfully", nil)
+}
+
+// bulkDelete deletes selected clients.
+func (a *ClientController) bulkDelete(c *gin.Context) {
+	user := session.GetLoginUser(c)
+	var req struct {
+		ClientIds []int `json:"clientIds" form:"clientIds"`
+	}
+	err := c.ShouldBind(&req)
+	if err != nil {
+		jsonMsg(c, "Invalid request data", err)
+		return
+	}
+	needRestart, err := a.clientService.BulkDelete(user.Id, req.ClientIds)
+	if err != nil {
+		logger.Errorf("Failed to delete clients: %v", err)
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonMsg(c, "Clients deleted successfully", nil)
+	if needRestart {
+		if err := a.xrayService.RestartXray(false); err != nil {
+			logger.Warningf("Failed to restart Xray after bulk deletion: %v", err)
+		}
+	}
+}
+
+// bulkEnable enables or disables selected clients.
+func (a *ClientController) bulkEnable(c *gin.Context) {
+	user := session.GetLoginUser(c)
+	var req struct {
+		ClientIds []int `json:"clientIds" form:"clientIds"`
+		Enable    bool  `json:"enable" form:"enable"`
+	}
+	err := c.ShouldBind(&req)
+	if err != nil {
+		jsonMsg(c, "Invalid request data", err)
+		return
+	}
+	needRestart, err := a.clientService.BulkEnable(user.Id, req.ClientIds, req.Enable)
+	if err != nil {
+		logger.Errorf("Failed to enable/disable clients: %v", err)
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonMsg(c, "Clients updated successfully", nil)
+	if needRestart {
+		if err := a.xrayService.RestartXray(false); err != nil {
+			logger.Warningf("Failed to restart Xray after bulk enable/disable: %v", err)
+		}
+	}
+}
+
+// bulkSetHwidLimit sets HWID limit for selected clients.
+func (a *ClientController) bulkSetHwidLimit(c *gin.Context) {
+	user := session.GetLoginUser(c)
+	var req struct {
+		ClientIds []int `json:"clientIds" form:"clientIds"`
+		MaxHwid   int   `json:"maxHwid" form:"maxHwid"`
+		Enabled   bool  `json:"enabled" form:"enabled"`
+	}
+	err := c.ShouldBind(&req)
+	if err != nil {
+		jsonMsg(c, "Invalid request data", err)
+		return
+	}
+	err = a.clientService.BulkSetHWIDLimit(user.Id, req.ClientIds, req.MaxHwid, req.Enabled)
+	if err != nil {
+		logger.Errorf("Failed to set HWID limit for clients: %v", err)
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonMsg(c, "HWID limit set successfully", nil)
 }

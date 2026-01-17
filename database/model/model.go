@@ -149,6 +149,9 @@ type ClientEntity struct {
 	// Relations (not stored in DB, loaded via joins)
 	InboundIds []int `json:"inboundIds,omitempty" form:"-" gorm:"-"` // Inbound IDs this client is assigned to
 	
+	// Group assignment
+	GroupId *int `json:"groupId,omitempty" form:"groupId" gorm:"column:group_id;index"` // Group ID (nullable, client can belong to one group)
+	
 	// Traffic statistics (stored directly in ClientEntity table)
 	Up         int64 `json:"up,omitempty" form:"-" gorm:"default:0"`         // Upload traffic in bytes
 	Down       int64 `json:"down,omitempty" form:"-" gorm:"default:0"`       // Download traffic in bytes
@@ -248,4 +251,17 @@ type ClientHWID struct {
 // GORM by default would use "client_hwids" but the actual table is "client_hw_ids"
 func (ClientHWID) TableName() string {
 	return "client_hw_ids"
+}
+
+// ClientGroup represents a group of clients for organization and bulk operations.
+type ClientGroup struct {
+	Id          int    `json:"id" gorm:"primaryKey;autoIncrement"` // Unique identifier
+	UserId      int    `json:"userId" gorm:"index"`                // Associated user ID
+	Name        string `json:"name" form:"name"`                    // Group name
+	Description string `json:"description" form:"description"`     // Group description
+	CreatedAt   int64  `json:"createdAt" gorm:"autoCreateTime"`    // Creation timestamp
+	UpdatedAt   int64  `json:"updatedAt" gorm:"autoUpdateTime"`    // Last update timestamp
+	
+	// Relations (not stored in DB, loaded via queries)
+	ClientCount int `json:"clientCount,omitempty" form:"-" gorm:"-"` // Number of clients in this group (computed)
 }

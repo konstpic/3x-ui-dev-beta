@@ -18,11 +18,12 @@ Complete API reference for the 3x-ui panel. This documentation covers all endpoi
 - [6. Xray Settings](#6-xray-settings)
 - [7. Nodes (Multi-Node Mode)](#7-nodes-multi-node-mode)
 - [8. Clients](#8-clients)
-- [9. Client HWID](#9-client-hwid)
-- [10. Hosts](#10-hosts)
-- [11. Node Push API](#11-node-push-api)
-- [12. Subscription Server](#12-subscription-server)
-- [13. WebSocket](#13-websocket)
+- [9. Client Groups](#9-client-groups)
+- [10. Client HWID](#10-client-hwid)
+- [11. Hosts](#11-hosts)
+- [12. Node Push API](#12-node-push-api)
+- [13. Subscription Server](#13-subscription-server)
+- [14. WebSocket](#14-websocket)
 
 ---
 
@@ -2188,7 +2189,8 @@ curl -X GET "http://localhost:2053/panel/client/list" \
       "allTime": 1111111110,
       "lastOnline": 1704067200,
       "hwidEnabled": false,
-      "maxHwid": 1
+      "maxHwid": 1,
+      "groupId": 1
     }
   ]
 }
@@ -2239,6 +2241,7 @@ Create a new client entity.
 | `hwidEnabled` | boolean | No | Enable HWID tracking |
 | `maxHwid` | integer | No | Max HWID devices (0 = unlimited) |
 | `inboundIds` | array | No | Array of inbound IDs to assign |
+| `groupId` | integer | No | Group ID to assign client to (null to remove from group) |
 
 **Example Request:**
 
@@ -2254,7 +2257,8 @@ curl -X POST "http://localhost:2053/panel/client/add" \
     "totalGB": 50,
     "expiryTime": 1767225600000,
     "enable": true,
-    "inboundIds": [1, 2]
+    "inboundIds": [1, 2],
+    "groupId": 1
   }'
 ```
 
@@ -2281,7 +2285,8 @@ curl -X POST "http://localhost:2053/panel/client/update/1" \
   -d '{
     "totalGB": 100,
     "enable": true,
-    "inboundIds": [1, 2, 3]
+    "inboundIds": [1, 2, 3],
+    "groupId": 1
   }'
 ```
 
@@ -2432,7 +2437,647 @@ curl -X POST "http://localhost:2053/panel/client/setHwidLimitAll" \
 
 ---
 
-## 9. Client HWID
+### POST `/panel/client/bulk/resetTraffic`
+
+Reset traffic counters for selected clients.
+
+**Request Body:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clientIds` | array | Yes | Array of client IDs to reset traffic for |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/client/bulk/resetTraffic" \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"clientIds": [1, 2, 3]}'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "Traffic reset successfully"
+}
+```
+
+---
+
+### POST `/panel/client/bulk/clearHwid`
+
+Clear HWIDs for selected clients.
+
+**Request Body:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clientIds` | array | Yes | Array of client IDs to clear HWIDs for |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/client/bulk/clearHwid" \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"clientIds": [1, 2, 3]}'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "HWIDs cleared successfully"
+}
+```
+
+---
+
+### POST `/panel/client/bulk/delete`
+
+Delete selected clients.
+
+**Request Body:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clientIds` | array | Yes | Array of client IDs to delete |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/client/bulk/delete" \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"clientIds": [1, 2, 3]}'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "Clients deleted successfully"
+}
+```
+
+---
+
+### POST `/panel/client/bulk/enable`
+
+Enable or disable selected clients.
+
+**Request Body:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clientIds` | array | Yes | Array of client IDs to enable/disable |
+| `enable` | boolean | Yes | Whether to enable (true) or disable (false) clients |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/client/bulk/enable" \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"clientIds": [1, 2, 3], "enable": true}'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "Clients updated successfully"
+}
+```
+
+---
+
+### POST `/panel/client/bulk/setHwidLimit`
+
+Set HWID limit for selected clients.
+
+**Request Body:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clientIds` | array | Yes | Array of client IDs to update |
+| `maxHwid` | integer | Yes | Maximum number of allowed devices (0 = unlimited) |
+| `enabled` | boolean | Yes | Whether HWID restriction is enabled |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/client/bulk/setHwidLimit" \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"clientIds": [1, 2, 3], "maxHwid": 3, "enabled": true}'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "HWID limit set successfully"
+}
+```
+
+---
+
+### Mass Assignment to Group
+
+To assign selected clients to a group, use the group assignment endpoint:
+
+**POST `/panel/group/{id}/assignClients`**
+
+This endpoint is documented in the [Client Groups](#9-client-groups) section. It allows assigning multiple clients to a group at once. If a client already belongs to another group, it will be moved to the new group.
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/group/1/assignClients" \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"clientIds": [1, 2, 3]}'
+```
+
+To remove clients from their group, update each client individually with `groupId: null`:
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/client/update/1" \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"groupId": null}'
+```
+
+---
+
+## 9. Client Groups
+
+Base path: `/panel/group`
+
+Client groups allow organizing clients into groups for easier management and bulk operations.
+
+### GET `/panel/group/list`
+
+Get all groups for the current user.
+
+**Example Request:**
+
+```bash
+curl -X GET "http://localhost:2053/panel/group/list" \
+  -b cookies.txt
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "",
+  "obj": [
+    {
+      "id": 1,
+      "userId": 1,
+      "name": "Premium Users",
+      "description": "Premium subscription clients",
+      "clientCount": 5,
+      "createdAt": 1703980800,
+      "updatedAt": 1704067200
+    }
+  ]
+}
+```
+
+---
+
+### GET `/panel/group/get/{id}`
+
+Get a specific group by ID.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | integer | Group ID |
+
+**Example Request:**
+
+```bash
+curl -X GET "http://localhost:2053/panel/group/get/1" \
+  -b cookies.txt
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "",
+  "obj": {
+    "id": 1,
+    "userId": 1,
+    "name": "Premium Users",
+    "description": "Premium subscription clients",
+    "clientCount": 5,
+    "createdAt": 1703980800,
+    "updatedAt": 1704067200
+  }
+}
+```
+
+---
+
+### POST `/panel/group/add`
+
+Create a new group.
+
+**Request Body** (form-urlencoded or JSON):
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | Yes | Group name |
+| `description` | string | No | Group description |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/group/add" \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{
+    "name": "Premium Users",
+    "description": "Premium subscription clients"
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "Group created successfully",
+  "obj": {
+    "id": 1,
+    "userId": 1,
+    "name": "Premium Users",
+    "description": "Premium subscription clients",
+    "createdAt": 1703980800,
+    "updatedAt": 1703980800
+  }
+}
+```
+
+---
+
+### POST `/panel/group/update/{id}`
+
+Update an existing group.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | integer | Group ID |
+
+**Request Body:** Same as `add` endpoint. Only provided fields will be updated.
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/group/update/1" \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{
+    "name": "VIP Users"
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "Group updated successfully",
+  "obj": {
+    "id": 1,
+    "userId": 1,
+    "name": "VIP Users",
+    "description": "Premium subscription clients",
+    "createdAt": 1703980800,
+    "updatedAt": 1704067200
+  }
+}
+```
+
+---
+
+### POST `/panel/group/del/{id}`
+
+Delete a group. Clients in the group will remain but will have their `groupId` set to null.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | integer | Group ID |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/group/del/1" \
+  -b cookies.txt
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "Group deleted successfully"
+}
+```
+
+---
+
+### GET `/panel/group/{id}/clients`
+
+Get all clients in a specific group.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | integer | Group ID |
+
+**Example Request:**
+
+```bash
+curl -X GET "http://localhost:2053/panel/group/1/clients" \
+  -b cookies.txt
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "",
+  "obj": [
+    {
+      "id": 1,
+      "userId": 1,
+      "email": "user1@example.com",
+      "uuid": "550e8400-e29b-41d4-a716-446655440000",
+      "groupId": 1,
+      "enable": true,
+      "totalGB": 50,
+      "expiryTime": 1735689600000
+    }
+  ]
+}
+```
+
+---
+
+### POST `/panel/group/{id}/assignClients`
+
+Assign clients to a group.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | integer | Group ID |
+
+**Request Body:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clientIds` | array | Yes | Array of client IDs to assign to the group |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/group/1/assignClients" \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"clientIds": [1, 2, 3]}'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "Clients assigned to group successfully"
+}
+```
+
+---
+
+### POST `/panel/group/{id}/removeClients`
+
+Remove clients from their group (sets `groupId` to null).
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | integer | Group ID (not used, but required for route consistency) |
+
+**Request Body:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `clientIds` | array | Yes | Array of client IDs to remove from their group |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/group/1/removeClients" \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"clientIds": [1, 2, 3]}'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "Clients removed from group successfully"
+}
+```
+
+---
+
+### POST `/panel/group/{id}/bulk/resetTraffic`
+
+Reset traffic counters for all clients in a group.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | integer | Group ID |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/group/1/bulk/resetTraffic" \
+  -b cookies.txt
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "Traffic reset successfully"
+}
+```
+
+---
+
+### POST `/panel/group/{id}/bulk/clearHwid`
+
+Clear HWIDs for all clients in a group.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | integer | Group ID |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/group/1/bulk/clearHwid" \
+  -b cookies.txt
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "HWIDs cleared successfully"
+}
+```
+
+---
+
+### POST `/panel/group/{id}/bulk/delete`
+
+Delete all clients in a group.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | integer | Group ID |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/group/1/bulk/delete" \
+  -b cookies.txt
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "Clients deleted successfully"
+}
+```
+
+---
+
+### POST `/panel/group/{id}/bulk/enable`
+
+Enable or disable all clients in a group.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | integer | Group ID |
+
+**Request Body:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `enable` | boolean | Yes | Whether to enable (true) or disable (false) clients |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/group/1/bulk/enable" \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"enable": true}'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "Clients updated successfully"
+}
+```
+
+---
+
+### POST `/panel/group/{id}/bulk/setHwidLimit`
+
+Set HWID limit for all clients in a group.
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | integer | Group ID |
+
+**Request Body:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `maxHwid` | integer | Yes | Maximum number of allowed devices (0 = unlimited) |
+| `enabled` | boolean | Yes | Whether HWID restriction is enabled |
+
+**Example Request:**
+
+```bash
+curl -X POST "http://localhost:2053/panel/group/1/bulk/setHwidLimit" \
+  -H "Content-Type: application/json" \
+  -b cookies.txt \
+  -d '{"maxHwid": 3, "enabled": true}'
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "msg": "HWID limit set successfully"
+}
+```
+
+---
+
+## 10. Client HWID
 
 Base path: `/panel/client/hwid`
 
@@ -2645,7 +3290,7 @@ curl -X POST "http://localhost:2053/panel/client/hwid/fix-timestamps" \
 
 ---
 
-## 10. Hosts
+## 11. Hosts
 
 Base path: `/panel/host`
 
@@ -2783,7 +3428,7 @@ curl -X POST "http://localhost:2053/panel/host/del/1" \
 
 ---
 
-## 11. Node Push API
+## 12. Node Push API
 
 Base path: `/panel/api/node`
 
@@ -2826,7 +3471,7 @@ curl -X POST "http://localhost:2053/panel/api/node/push-logs" \
 
 ---
 
-## 12. Subscription Server
+## 13. Subscription Server
 
 The subscription server runs on a separate port (default: 2096) and provides subscription links for proxy clients.
 
@@ -2906,7 +3551,7 @@ curl -X GET "http://localhost:2096/json/abcd1234"
 
 ---
 
-## 13. WebSocket
+## 14. WebSocket
 
 Real-time updates via WebSocket connection.
 

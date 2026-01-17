@@ -3,13 +3,14 @@
 package database
 
 import (
+	"fmt"
 	"log"
 	"slices"
+	"time"
 
 	"github.com/mhsanaei/3x-ui/v2/config"
 	"github.com/mhsanaei/3x-ui/v2/database/model"
 	"github.com/mhsanaei/3x-ui/v2/util/crypto"
-	"github.com/mhsanaei/3x-ui/v2/xray"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -21,33 +22,10 @@ var db *gorm.DB
 const (
 	defaultUsername = "admin"
 	defaultPassword = "admin"
+	// minRequiredSchemaVersion is the minimum schema version required by this application version
+	// Update this when you add new migrations that are required for the app to function
+	minRequiredSchemaVersion = 1
 )
-
-func initModels() error {
-	models := []any{
-		&model.User{},
-		&model.Inbound{},
-		&model.OutboundTraffics{},
-		&model.Setting{},
-		&model.InboundClientIps{},
-		&xray.ClientTraffic{},
-		&model.HistoryOfSeeders{},
-		&model.Node{},
-		&model.InboundNodeMapping{},
-		&model.ClientEntity{},
-		&model.ClientInboundMapping{},
-		&model.Host{},
-		&model.HostInboundMapping{},
-		&model.ClientHWID{}, // HWID tracking for clients
-	}
-	for _, model := range models {
-		if err := db.AutoMigrate(model); err != nil {
-			log.Printf("Error auto migrating model: %v", err)
-			return err
-		}
-	}
-	return nil
-}
 
 // initUser creates a default admin user if the users table is empty.
 func initUser() error {
@@ -123,9 +101,17 @@ func isTableEmpty(tableName string) (bool, error) {
 // InitDB sets up the database connection, migrates models, and runs seeders.
 // dbConnectionString should be a PostgreSQL connection string in the format:
 // postgres://user:password@host:port/dbname?sslmode=mode
+//
+// InitDB performs the following steps in order:
+// 1. Establishes database connection
+// 2. Configures connection pool
+// 3. Runs schema migrations
+// 4. Checks schema version compatibility
+// 5. Initializes default user (if needed)
+// 6. Runs seeders
 func InitDB(dbConnectionString string) error {
+	// Step 1: Establish database connection
 	var gormLogger logger.Interface
-
 	if config.IsDebug() {
 		gormLogger = logger.Default
 	} else {
@@ -139,22 +125,49 @@ func InitDB(dbConnectionString string) error {
 	var err error
 	db, err = gorm.Open(postgres.Open(dbConnectionString), c)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	if err := initModels(); err != nil {
-		return err
+	// Step 2: Configure connection pool
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get underlying sql.DB: %w", err)
 	}
 
+	// Set connection pool settings
+	// These values can be overridden via environment variables if needed
+	sqlDB.SetMaxOpenConns(25)                    // Maximum number of open connections
+	sqlDB.SetMaxIdleConns(5)                     // Maximum number of idle connections
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)    // Maximum connection lifetime
+	sqlDB.SetConnMaxIdleTime(10 * time.Minute)   // Maximum idle time before closing
+
+	// Step 3: Run schema migrations
+	migrator := NewMigrator(db)
+	if err := migrator.Migrate(); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	// Step 4: Check schema version compatibility
+	if err := migrator.CheckSchemaVersion(minRequiredSchemaVersion); err != nil {
+		return fmt.Errorf("schema version check failed: %w", err)
+	}
+
+	// Step 5: Initialize default user (if needed)
 	isUsersEmpty, err := isTableEmpty("users")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to check if users table is empty: %w", err)
 	}
 
 	if err := initUser(); err != nil {
-		return err
+		return fmt.Errorf("failed to initialize default user: %w", err)
 	}
-	return runSeeders(isUsersEmpty)
+
+	// Step 6: Run seeders
+	if err := runSeeders(isUsersEmpty); err != nil {
+		return fmt.Errorf("failed to run seeders: %w", err)
+	}
+
+	return nil
 }
 
 // CloseDB closes the database connection if it exists.

@@ -1,0 +1,451 @@
+{{ template "page/head_start" .}}
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+<a-layout id="app" v-cloak :class="themeSwitcher.currentTheme + ' groups-page'">
+  <a-sidebar></a-sidebar>
+  <a-layout id="content-layout">
+    <a-layout-content :style="{ padding: '24px 16px' }">
+      <a-spin :spinning="loadingStates.spinning" :delay="500" tip='{{ i18n "loading"}}'>
+        <transition name="list" appear>
+          <a-row :gutter="[isMobile ? 8 : 16, isMobile ? 0 : 12]" v-if="loadingStates.fetched">
+        <a-col>
+          <a-card hoverable>
+            <template #title>
+              <a-space direction="horizontal">
+                <a-button type="primary" icon="plus" @click="openAddGroup">
+                  <template v-if="!isMobile">{{ i18n "pages.groups.addGroup" }}</template>
+                </a-button>
+              </a-space>
+            </template>
+            <template #extra>
+              <a-button icon="sync" @click="loadGroups" :loading="refreshing"></a-button>
+            </template>
+            <a-table :columns="isMobile ? mobileColumns : columns" :row-key="group => group.id"
+              :data-source="groups" :scroll="isMobile ? {} : { x: 1000 }"
+              :pagination="false"
+              :style="{ marginTop: '10px' }"
+              class="groups-table"
+              :locale='{ filterConfirm: `{{ i18n "confirm" }}`, filterReset: `{{ i18n "reset" }}`, emptyText: `{{ i18n "noData" }}` }'>
+              <template slot="action" slot-scope="text, group">
+                <a-dropdown :trigger="['click']">
+                  <a-icon @click="e => e.preventDefault()" type="more"
+                    :style="{ fontSize: '20px', textDecoration: 'solid' }"></a-icon>
+                  <a-menu slot="overlay" @click="a => clickAction(a, group)"
+                    :theme="themeSwitcher.currentTheme">
+                    <a-menu-item key="viewClients">
+                      <a-icon type="team"></a-icon>
+                      {{ i18n "pages.groups.viewClients" }}
+                    </a-menu-item>
+                    <a-menu-divider />
+                    <a-menu-item key="edit">
+                      <a-icon type="edit"></a-icon>
+                      {{ i18n "edit" }}
+                    </a-menu-item>
+                    <a-menu-divider />
+                    <a-sub-menu key="bulkOperations" :title="'{{ i18n "pages.groups.bulkOperations" }}'">
+                      <a-menu-item key="bulkResetTraffic">
+                        <a-icon type="reload"></a-icon>
+                        {{ i18n "pages.inbounds.resetTraffic" }}
+                      </a-menu-item>
+                      <a-menu-item key="bulkClearHwid">
+                        <a-icon type="mobile"></a-icon>
+                        {{ i18n "pages.clients.clearHwid" }}
+                      </a-menu-item>
+                      <a-menu-item key="bulkEnable">
+                        <a-icon type="check"></a-icon>
+                        {{ i18n "enable" }}
+                      </a-menu-item>
+                      <a-menu-item key="bulkDisable">
+                        <a-icon type="close"></a-icon>
+                        {{ i18n "disable" }}
+                      </a-menu-item>
+                      <a-menu-item key="bulkSetHwidLimit">
+                        <a-icon type="setting"></a-icon>
+                        {{ i18n "pages.clients.setHwidLimit" }}
+                      </a-menu-item>
+                      <a-menu-item key="bulkDelete" :style="{ color: '#FF4D4F' }">
+                        <a-icon type="delete"></a-icon>
+                        {{ i18n "delete" }}
+                      </a-menu-item>
+                    </a-sub-menu>
+                    <a-menu-divider />
+                    <a-menu-item key="delete" :style="{ color: '#FF4D4F' }">
+                      <a-icon type="delete"></a-icon>
+                      {{ i18n "delete" }}
+                    </a-menu-item>
+                  </a-menu>
+                </a-dropdown>
+              </template>
+            </a-table>
+          </a-card>
+        </a-col>
+      </a-row>
+      <a-row v-else>
+        <a-card
+          :style="{ textAlign: 'center', padding: '30px 0', marginTop: '10px', background: 'transparent', border: 'none' }">
+          <a-spin tip='{{ i18n "loading" }}'></a-spin>
+        </a-card>
+      </a-row>
+        </transition>
+      </a-spin>
+    </a-layout-content>
+  </a-layout>
+</a-layout>
+
+{{template "page/body_scripts" .}}
+{{template "component/aSidebar" .}}
+{{template "component/aThemeSwitch" .}}
+{{template "modals/groupModal"}}
+<style>
+  .groups-table .ant-table:not(.ant-table-expanded-row .ant-table) {
+    border-radius: 1rem;
+    overflow: hidden;
+  }
+  
+  /* Ensure rounded corners in glass morphism theme */
+  [data-glass-morphism] .groups-table .ant-table:not(.ant-table-expanded-row .ant-table) {
+    border-radius: 1rem;
+    overflow: hidden;
+  }
+  
+  [data-glass-morphism] .groups-table .ant-table-thead > tr > th:first-child {
+    border-top-left-radius: 1rem;
+  }
+  
+  [data-glass-morphism] .groups-table .ant-table-thead > tr > th:last-child {
+    border-top-right-radius: 1rem;
+  }
+  
+  [data-glass-morphism] .groups-table .ant-table-tbody > tr:last-child > td:first-child {
+    border-bottom-left-radius: 1rem;
+  }
+  
+  [data-glass-morphism] .groups-table .ant-table-tbody > tr:last-child > td:last-child {
+    border-bottom-right-radius: 1rem;
+  }
+</style>
+<script>
+  const columns = [{
+    title: "ID",
+    align: 'right',
+    dataIndex: "id",
+    width: 50,
+    sorter: (a, b) => a.id - b.id,
+    defaultSortOrder: 'ascend',
+  }, {
+    title: '{{ i18n "pages.groups.operate" }}',
+    align: 'center',
+    width: 80,
+    scopedSlots: { customRender: 'action' },
+  }, {
+    title: '{{ i18n "pages.groups.name" }}',
+    align: 'left',
+    width: 200,
+    dataIndex: "name",
+    sorter: (a, b) => (a.name || '').localeCompare(b.name || ''),
+  }, {
+    title: '{{ i18n "pages.groups.groupDescription" }}',
+    align: 'left',
+    width: 300,
+    dataIndex: "description",
+  }, {
+    title: '{{ i18n "pages.groups.clientCount" }}',
+    align: 'center',
+    width: 100,
+    dataIndex: "clientCount",
+    sorter: (a, b) => (a.clientCount || 0) - (b.clientCount || 0),
+  }];
+
+  const mobileColumns = [{
+    title: "ID",
+    align: 'right',
+    dataIndex: "id",
+    width: 30,
+  }, {
+    title: '{{ i18n "pages.groups.operate" }}',
+    align: 'center',
+    width: 60,
+    scopedSlots: { customRender: 'action' },
+  }, {
+    title: '{{ i18n "pages.groups.name" }}',
+    align: 'left',
+    width: 150,
+    dataIndex: "name",
+  }];
+
+  const app = window.app = new Vue({
+    delimiters: ['[[', ']]'],
+    el: '#app',
+    mixins: [MediaQueryMixin],
+    data: {
+      themeSwitcher,
+      loadingStates: {
+        fetched: false,
+        spinning: false
+      },
+      groups: [],
+      refreshing: false,
+      hwidLimitValue: 3,
+    },
+    methods: {
+      loading(spinning = true) {
+        this.loadingStates.spinning = spinning;
+      },
+      async loadGroups() {
+        this.refreshing = true;
+        try {
+          const msg = await HttpUtil.get('/panel/group/list');
+          if (msg && msg.success && msg.obj) {
+            this.groups = msg.obj;
+          }
+        } catch (e) {
+          console.error("Failed to load groups:", e);
+          app.$message.error('{{ i18n "pages.groups.loadError" }}');
+        } finally {
+          this.refreshing = false;
+          this.loadingStates.fetched = true;
+        }
+      },
+      clickAction(action, group) {
+        switch (action.key) {
+          case 'viewClients':
+            this.viewClients(group);
+            break;
+          case 'edit':
+            this.editGroup(group);
+            break;
+          case 'delete':
+            this.deleteGroup(group.id);
+            break;
+          case 'bulkResetTraffic':
+            this.bulkResetTraffic(group);
+            break;
+          case 'bulkClearHwid':
+            this.bulkClearHwid(group);
+            break;
+          case 'bulkEnable':
+            this.bulkEnable(group, true);
+            break;
+          case 'bulkDisable':
+            this.bulkEnable(group, false);
+            break;
+          case 'bulkSetHwidLimit':
+            this.bulkSetHwidLimit(group);
+            break;
+          case 'bulkDelete':
+            this.bulkDelete(group);
+            break;
+        }
+      },
+      viewClients(group) {
+        // Navigate to clients page with group filter
+        location.href = `{{ .base_path }}panel/clients?group=${group.id}`;
+      },
+      async editGroup(group) {
+        if (typeof window.groupModal !== 'undefined') {
+          window.groupModal.show({
+            title: '{{ i18n "pages.groups.editGroup" }}',
+            okText: '{{ i18n "update" }}',
+            group: group,
+            confirm: async (groupData) => {
+              await this.submitGroup(groupData, true, group.id);
+            },
+            isEdit: true
+          });
+        }
+      },
+      async submitGroup(group, isEdit, id) {
+        groupModal.loading(true);
+        try {
+          let msg;
+          if (isEdit) {
+            msg = await HttpUtil.post(`/panel/group/update/${id}`, group);
+          } else {
+            msg = await HttpUtil.post('/panel/group/add', group);
+          }
+          
+          if (msg.success) {
+            app.$message.success(isEdit ? '{{ i18n "pages.groups.updateSuccess" }}' : '{{ i18n "pages.groups.addSuccess" }}');
+            groupModal.close();
+            await this.loadGroups();
+          } else {
+            app.$message.error(msg.msg || (isEdit ? '{{ i18n "pages.groups.updateError" }}' : '{{ i18n "pages.groups.addError" }}'));
+          }
+        } catch (e) {
+          console.error("Failed to submit group:", e);
+          app.$message.error(isEdit ? '{{ i18n "pages.groups.updateError" }}' : '{{ i18n "pages.groups.addError" }}');
+        } finally {
+          groupModal.loading(false);
+        }
+      },
+      async deleteGroup(id) {
+        this.$confirm({
+          title: '{{ i18n "pages.groups.deleteConfirm" }}',
+          content: '{{ i18n "pages.groups.deleteConfirmText" }}',
+          okText: '{{ i18n "sure" }}',
+          okType: 'danger',
+          cancelText: '{{ i18n "close" }}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post(`/panel/group/del/${id}`);
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.groups.deleteSuccess" }}');
+                await this.loadGroups();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "pages.groups.deleteError" }}');
+              }
+            } catch (e) {
+              console.error("Failed to delete group:", e);
+              app.$message.error('{{ i18n "pages.groups.deleteError" }}');
+            }
+          }
+        });
+      },
+      openAddGroup() {
+        if (typeof window.groupModal !== 'undefined') {
+          window.groupModal.show({
+            title: '{{ i18n "pages.groups.addGroup" }}',
+            okText: '{{ i18n "create" }}',
+            confirm: async (group) => {
+              await this.submitGroup(group, false);
+            },
+            isEdit: false
+          });
+        }
+      },
+      async manualRefresh() {
+        if (!this.refreshing) {
+          this.loadingStates.spinning = true;
+          await this.loadGroups();
+          this.loadingStates.spinning = false;
+        }
+      },
+      async bulkResetTraffic(group) {
+        this.$confirm({
+          title: '{{ i18n "pages.inbounds.resetTraffic"}}',
+          content: `{{ i18n "pages.groups.bulkResetTrafficConfirm" }} "${group.name}"?`,
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "reset"}}',
+          cancelText: '{{ i18n "cancel"}}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post(`/panel/group/${group.id}/bulk/resetTraffic`);
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.inbounds.toasts.resetAllClientTrafficSuccess" }}');
+                await this.loadGroups();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to reset traffic:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      async bulkClearHwid(group) {
+        this.$confirm({
+          title: '{{ i18n "pages.clients.clearHwidTitle" }}',
+          content: `{{ i18n "pages.groups.bulkClearHwidConfirm" }} "${group.name}"?`,
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "sure" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post(`/panel/group/${group.id}/bulk/clearHwid`);
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.clients.hwidCleared" }}');
+                await this.loadGroups();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to clear HWIDs:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      async bulkDelete(group) {
+        this.$confirm({
+          title: '{{ i18n "pages.clients.deleteConfirm" }}',
+          content: `{{ i18n "pages.groups.bulkDeleteConfirm" }} "${group.name}"?`,
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "delete"}}',
+          okType: 'danger',
+          cancelText: '{{ i18n "cancel"}}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post(`/panel/group/${group.id}/bulk/delete`);
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.clients.deleteSuccess" }}');
+                await this.loadGroups();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "pages.clients.deleteError" }}');
+              }
+            } catch (e) {
+              console.error("Failed to delete clients:", e);
+              app.$message.error('{{ i18n "pages.clients.deleteError" }}');
+            }
+          }
+        });
+      },
+      async bulkEnable(group, enable) {
+        try {
+          const msg = await HttpUtil.post(`/panel/group/${group.id}/bulk/enable`, { enable: enable });
+          if (msg.success) {
+            app.$message.success('{{ i18n "pages.clients.updateSuccess" }}');
+            await this.loadGroups();
+          } else {
+            app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+          }
+        } catch (e) {
+          console.error("Failed to enable/disable clients:", e);
+          app.$message.error('{{ i18n "somethingWentWrong" }}');
+        }
+      },
+      bulkSetHwidLimit(group) {
+        const _this = this;
+        this.$confirm({
+          title: '{{ i18n "pages.clients.setHwidLimitAllTitle" }}',
+          content: h => {
+            return h('div', [
+              h('p', `{{ i18n "pages.groups.bulkSetHwidLimitConfirm" }} "${group.name}"?`),
+              h('a-input-number', {
+                props: { min: 0, max: 100, defaultValue: 3 },
+                style: { width: '100%', marginTop: '10px' },
+                on: { change: val => { _this.hwidLimitValue = val; } }
+              })
+            ]);
+          },
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "sure" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            try {
+              const limit = _this.hwidLimitValue || 3;
+              const msg = await HttpUtil.post(`/panel/group/${group.id}/bulk/setHwidLimit`, { maxHwid: limit, enabled: limit > 0 });
+              if (msg.success) {
+                app.$message.success(msg.msg || '{{ i18n "pages.clients.hwidLimitSet" }}');
+                await _this.loadGroups();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to set HWID limit:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+    },
+    async mounted() {
+      this.loading();
+      this.loadGroups().then(() => {
+        this.loading(false);
+      });
+    }
+  });
+</script>
+{{ template "page/body_end" .}}

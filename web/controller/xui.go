@@ -31,6 +31,7 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 	g.GET("/xray", a.xraySettings)
 	g.GET("/nodes", a.nodes)
 	g.GET("/clients", a.clients)
+	g.GET("/groups", a.groups)
 	g.GET("/hosts", a.hosts)
 	g.GET("/api-docs", a.apiDocs)
 
@@ -42,6 +43,7 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 	NewClientController(g.Group("/client"))
 	NewHostController(g.Group("/host"))
 	NewClientHWIDController(g.Group("/client")) // Register HWID controller under /panel/client/hwid
+	NewClientGroupController(g.Group("/group"))  // Register group controller under /panel/group
 }
 
 // index renders the main panel index page.
@@ -72,6 +74,11 @@ func (a *XUIController) nodes(c *gin.Context) {
 // clients renders the clients management page.
 func (a *XUIController) clients(c *gin.Context) {
 	html(c, "clients.html", "pages.clients.title", nil)
+}
+
+// groups renders the groups management page.
+func (a *XUIController) groups(c *gin.Context) {
+	html(c, "groups.html", "pages.groups.title", nil)
 }
 
 // hosts renders the hosts management page (multi-node mode).
