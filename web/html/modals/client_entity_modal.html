@@ -233,11 +233,30 @@
             return new Date(timestampMs).toLocaleString();
         },
         async removeHwid(hwidId) {
-            if (!confirm('{{ i18n "pages.clients.confirmDeleteHwid" }}')) {
-                return;
+            const vueInstance = (typeof window.clientEntityModalApp !== 'undefined' && window.clientEntityModalApp.$confirm) 
+                ? window.clientEntityModalApp 
+                : (typeof app !== 'undefined' && app.$confirm ? app : null);
+            
+            if (vueInstance && vueInstance.$confirm) {
+                vueInstance.$confirm({
+                    title: '{{ i18n "pages.clients.confirmDeleteHwid" }}',
+                    okText: '{{ i18n "sure" }}',
+                    cancelText: '{{ i18n "cancel" }}',
+                    onOk: async () => {
+                        await this.performRemoveHwid(hwidId);
+                    }
+                });
+            } else {
+                // Fallback to standard confirm if $confirm is not available
+                if (!confirm('{{ i18n "pages.clients.confirmDeleteHwid" }}')) {
+                    return;
+                }
+                await this.performRemoveHwid(hwidId);
             }
+        },
+        async performRemoveHwid(hwidId) {
             try {
-                const msg = await HttpUtil.post(`/panel/client/hwid/remove/${hwidId}`);
+                const msg = await HttpUtil.post(`/panel/client/hwid/del/${hwidId}`);
                 if (msg.success) {
                     if (typeof app !== 'undefined') {
                         app.$message.success('{{ i18n "pages.clients.hwidDeleteSuccess" }}');
