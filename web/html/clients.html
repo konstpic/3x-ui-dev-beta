@@ -823,8 +823,11 @@
           this.searchedClients = this.clients.slice();
         } else {
           this.searchedClients.splice(0, this.searchedClients.length);
+          const searchKey = key.toLowerCase().trim();
           this.clients.forEach(client => {
-            if (ObjectUtil.deepSearch(client, key)) {
+            // Search by email (client name) starting from the first character
+            const email = (client.email || '').toLowerCase();
+            if (email.startsWith(searchKey)) {
               this.searchedClients.push(client);
             }
           });
