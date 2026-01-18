@@ -92,6 +92,7 @@
 "ultraDark" = "Sangat Gelap"
 "dashboard" = "Ikhtisar"
 "inbounds" = "Masuk"
+"outbounds" = "Keluar"
 "settings" = "Pengaturan Panel"
 "xray" = "Konfigurasi Xray"
 "apiDocs" = "Dokumentasi API"

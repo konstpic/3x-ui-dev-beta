@@ -1,0 +1,434 @@
+{{ template "page/head_start" .}}
+<link rel="stylesheet" href="{{ .base_path }}assets/codemirror/codemirror.min.css?{{ .cur_ver }}">
+<link rel="stylesheet" href="{{ .base_path }}assets/codemirror/fold/foldgutter.css">
+<link rel="stylesheet" href="{{ .base_path }}assets/codemirror/xq.min.css?{{ .cur_ver }}">
+<link rel="stylesheet" href="{{ .base_path }}assets/codemirror/lint/lint.css">
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+<a-layout id="app" v-cloak :class="(typeof themeSwitcher !== 'undefined' ? themeSwitcher.currentTheme : 'light') + ' xray-core-config-profiles-page'">
+  <a-sidebar></a-sidebar>
+  <a-layout id="content-layout">
+    <a-layout-content :style="{ padding: '24px 16px' }">
+      <transition name="list" appear>
+        <a-row :gutter="[isMobile ? 8 : 16, isMobile ? 0 : 12]" v-if="loadingStates.fetched" key="profiles-loaded">
+          <a-col>
+            <a-card size="small" :style="{ padding: '16px' }" hoverable>
+              <h2>{{ i18n "pages.xrayCoreConfigProfiles.title" }}</h2>
+              
+              <div style="margin-bottom: 20px;">
+                <a-button type="primary" icon="plus" @click="openAddProfile">{{ i18n "pages.xrayCoreConfigProfiles.addProfile" }}</a-button>
+              </div>
+
+              <div style="margin-bottom: 20px;">
+                <a-button icon="sync" @click="loadProfiles" :loading="refreshing">{{ i18n "refresh" }}</a-button>
+              </div>
+
+              <a-table :columns="isMobile ? mobileColumns : columns" :row-key="profile => profile.id"
+                :data-source="profiles" :scroll="isMobile ? {} : { x: 1000 }"
+                :pagination="false"
+                :style="{ marginTop: '10px' }"
+                class="xray-core-config-profiles-table"
+                :locale='{ filterConfirm: `{{ i18n "confirm" }}`, filterReset: `{{ i18n "reset" }}`, emptyText: `{{ i18n "noData" }}` }'>
+                <template slot="action" slot-scope="text, profile">
+                  <a-dropdown :trigger="['click']">
+                    <a-icon @click="e => e.preventDefault()" type="more"
+                      :style="{ fontSize: '20px', textDecoration: 'solid' }"></a-icon>
+                    <a-menu slot="overlay" @click="a => clickAction(a, profile)"
+                      :theme="(typeof themeSwitcher !== 'undefined' ? themeSwitcher.currentTheme : 'light')">
+                      <a-menu-item key="edit">
+                        <a-icon type="edit"></a-icon>
+                        {{ i18n "edit" }}
+                      </a-menu-item>
+                      <a-menu-item key="setDefault" v-if="!profile.isDefault">
+                        <a-icon type="star"></a-icon>
+                        {{ i18n "pages.xrayCoreConfigProfiles.setAsDefault" }}
+                      </a-menu-item>
+                      <a-menu-item key="reset">
+                        <a-icon type="reload"></a-icon>
+                        {{ i18n "pages.xrayCoreConfigProfiles.resetToDefault" }}
+                      </a-menu-item>
+                      <a-menu-item key="delete" :style="{ color: '#FF4D4F' }" v-if="!profile.isDefault">
+                        <a-icon type="delete"></a-icon>
+                        {{ i18n "delete" }}
+                      </a-menu-item>
+                    </a-menu>
+                  </a-dropdown>
+                </template>
+                <template slot="isDefault" slot-scope="text, profile">
+                  <a-tag v-if="profile.isDefault" color="green">{{ i18n "pages.xrayCoreConfigProfiles.default" }}</a-tag>
+                  <span v-else>-</span>
+                </template>
+                <template slot="assignedNodes" slot-scope="text, profile">
+                  <div v-if="profile.nodeIds && profile.nodeIds.length > 0" style="margin-bottom: 8px;">
+                    <a-tag v-for="nodeId in profile.nodeIds" :key="nodeId" color="blue" style="margin: 2px;">
+                      [[ getNodeName(nodeId) ]]
+                    </a-tag>
+                  </div>
+                  <span v-else style="color: #999;">-</span>
+                  <a-button size="small" icon="plus" @click="openAssignNodes(profile)" style="margin-left: 8px;">
+                    {{ i18n "pages.xrayCoreConfigProfiles.assignNodes" }}
+                  </a-button>
+                </template>
+              </a-table>
+            </a-card>
+          </a-col>
+        </a-row>
+        <a-row v-else>
+          <a-card
+            :style="{ textAlign: 'center', padding: '30px 0', marginTop: '10px', background: 'transparent', border: 'none' }">
+            <a-spin tip='{{ i18n "loading" }}'></a-spin>
+          </a-card>
+        </a-row>
+      </transition>
+      
+      <!-- Assign Nodes Modal -->
+      <a-modal
+        v-model="assignNodesModalVisible"
+        :title="assignNodesModalTitle"
+        :ok-text="assignNodesModalOkText"
+        :cancel-text="assignNodesModalCancelText"
+        @ok="handleAssignNodesOk"
+      >
+        <p>{{ i18n "pages.xrayCoreConfigProfiles.assignNodesHint" }}</p>
+        <a-select
+          mode="multiple"
+          :placeholder="assignNodesModalPlaceholder"
+          v-model="selectedNodeIds"
+          style="width: 100%; margin-top: 10px;"
+        >
+          <a-select-option
+            v-for="node in getAvailableNodesForSelection()"
+            :key="node.value"
+            :value="node.value"
+            :disabled="node.disabled"
+          >
+            [[ node.label ]]
+          </a-select-option>
+        </a-select>
+      </a-modal>
+    </a-layout-content>
+  </a-layout>
+</a-layout>
+{{template "page/body_scripts" .}}
+<script src="{{ .base_path }}assets/codemirror/codemirror.min.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/codemirror/javascript.js"></script>
+<script src="{{ .base_path }}assets/codemirror/jshint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/jsonlint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/lint/lint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/lint/javascript-lint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/hint/javascript-hint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/foldcode.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/foldgutter.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/brace-fold.js"></script>
+{{template "modals/xrayCoreConfigProfileModal"}}
+{{template "component/aSidebar" .}}
+{{template "component/aThemeSwitch" .}}
+<script>
+  const columns = [
+    { title: '{{ i18n "pages.inbounds.operate" }}', align: 'center', width: 50, scopedSlots: { customRender: 'action' } },
+    { title: '{{ i18n "pages.xrayCoreConfigProfiles.name" }}', align: 'left', width: 150, dataIndex: "name" },
+    { title: '{{ i18n "pages.xrayCoreConfigProfiles.descriptionField" }}', align: 'left', width: 200, dataIndex: "description" },
+    { title: '{{ i18n "pages.xrayCoreConfigProfiles.assignedNodes" }}', align: 'left', width: 200, scopedSlots: { customRender: 'assignedNodes' } },
+    { title: '{{ i18n "pages.xrayCoreConfigProfiles.default" }}', align: 'center', width: 100, scopedSlots: { customRender: 'isDefault' } },
+  ];
+
+  const mobileColumns = [
+    { title: '{{ i18n "pages.inbounds.operate" }}', align: 'center', width: 30, scopedSlots: { customRender: 'action' } },
+    { title: '{{ i18n "pages.xrayCoreConfigProfiles.name" }}', align: 'left', width: 70, dataIndex: "name" },
+  ];
+
+  const app = new Vue({
+    delimiters: ['[[', ']]'],
+    el: '#app',
+    mixins: [MediaQueryMixin],
+    data: {
+      get themeSwitcher() {
+        return typeof themeSwitcher !== 'undefined' ? themeSwitcher : { currentTheme: 'light' };
+      },
+      loadingStates: {
+        fetched: false,
+        spinning: false
+      },
+      profiles: [],
+      availableNodes: [],
+      selectedNodeIds: [],
+      currentProfileForNodes: null,
+      assignNodesModalVisible: false,
+      assignNodesModalTitle: '{{ i18n "pages.xrayCoreConfigProfiles.assignNodes" }}',
+      assignNodesModalOkText: '{{ i18n "sure" }}',
+      assignNodesModalCancelText: '{{ i18n "cancel" }}',
+      assignNodesModalPlaceholder: '{{ i18n "pages.xrayCoreConfigProfiles.selectNodes" }}',
+      refreshing: false,
+      cmOptions: {
+        lineNumbers: true,
+        mode: "application/json",
+        lint: true,
+        styleActiveLine: true,
+        matchBrackets: true,
+        theme: "xq",
+        autoCloseTags: true,
+        lineWrapping: true,
+        indentUnit: 2,
+        indentWithTabs: true,
+        smartIndent: true,
+        tabSize: 2,
+        lineWiseCopyCut: false,
+        foldGutter: true,
+        gutters: [
+          "CodeMirror-lint-markers",
+          "CodeMirror-linenumbers",
+          "CodeMirror-foldgutter",
+        ],
+      },
+    },
+    async mounted() {
+      // Load profiles first (required)
+      try {
+        await this.loadProfiles();
+      } catch (e) {
+        console.error("Error loading profiles in mounted:", e);
+        this.loadingStates.fetched = true;
+      }
+      // Load nodes (optional, can fail silently)
+      try {
+        await this.loadAvailableNodes();
+      } catch (e) {
+        console.warn("Error loading nodes in mounted (non-critical):", e);
+      }
+    },
+    methods: {
+      async loadProfiles() {
+        this.loadingStates.fetched = false;
+        this.refreshing = true;
+        try {
+          const msg = await HttpUtil.get("/panel/xray-core-config-profile/list");
+          if (msg && msg.success && msg.obj) {
+            this.profiles = msg.obj || [];
+            this.loadingStates.fetched = true;
+          } else {
+            console.error("Failed to load profiles:", msg);
+            if (this.$message) {
+              this.$message.error(msg.msg || 'Failed to load profiles');
+            }
+            this.profiles = [];
+            this.loadingStates.fetched = true;
+          }
+        } catch (e) {
+          console.error("Failed to load profiles:", e);
+          if (this.$message) {
+            this.$message.error('Failed to load profiles: ' + (e.message || e));
+          }
+          this.profiles = [];
+          this.loadingStates.fetched = true;
+        } finally {
+          this.refreshing = false;
+        }
+      },
+      openAddProfile() {
+        xrayCoreConfigProfileModal.show({
+          title: '{{ i18n "pages.xrayCoreConfigProfiles.addProfile" }}',
+          okText: '{{ i18n "create" }}',
+          profile: null,
+          confirm: async (profileData) => {
+            await this.addProfile(profileData);
+          },
+          isEdit: false
+        });
+      },
+      async addProfile(profileData) {
+        try {
+          xrayCoreConfigProfileModal.loading(true);
+          const msg = await HttpUtil.post("/panel/xray-core-config-profile/add", profileData);
+          if (msg && msg.success) {
+            this.$message.success(msg.msg || 'Profile added successfully');
+            await this.loadProfiles();
+            xrayCoreConfigProfileModal.close();
+          } else {
+            this.$message.error(msg.msg || 'Failed to add profile');
+            xrayCoreConfigProfileModal.loading(false);
+          }
+        } catch (e) {
+          console.error("Failed to add profile:", e);
+          this.$message.error('Failed to add profile');
+          xrayCoreConfigProfileModal.loading(false);
+        }
+      },
+      clickAction(action, profile) {
+        if (action.key === 'edit') {
+          this.editProfile(profile);
+        } else if (action.key === 'delete') {
+          this.deleteProfile(profile);
+        } else if (action.key === 'setDefault') {
+          this.setAsDefault(profile);
+        } else if (action.key === 'reset') {
+          this.resetToDefault(profile);
+        }
+      },
+      editProfile(profile) {
+        // Open profile in Xray settings page for visual editing
+        // Navigate to xray page with editProfile parameter
+        const basePath = window.location.pathname.split('/panel')[0] || '';
+        window.location.href = `${basePath}/panel/xray?editProfile=${profile.id}`;
+      },
+      async updateProfile(id, profileData) {
+        try {
+          xrayCoreConfigProfileModal.loading(true);
+          const msg = await HttpUtil.post(`/panel/xray-core-config-profile/update/${id}`, profileData);
+          if (msg && msg.success) {
+            this.$message.success(msg.msg || 'Profile updated successfully');
+            await this.loadProfiles();
+            xrayCoreConfigProfileModal.close();
+          } else {
+            this.$message.error(msg.msg || 'Failed to update profile');
+            xrayCoreConfigProfileModal.loading(false);
+          }
+        } catch (e) {
+          console.error("Failed to update profile:", e);
+          this.$message.error('Failed to update profile');
+          xrayCoreConfigProfileModal.loading(false);
+        }
+      },
+      async deleteProfile(profile) {
+        this.$confirm({
+          title: '{{ i18n "pages.xrayCoreConfigProfiles.deleteProfile" }}',
+          content: `{{ i18n "pages.xrayCoreConfigProfiles.deleteProfileConfirm" }} "${profile.name}"?`,
+          okText: '{{ i18n "delete" }}',
+          okType: 'danger',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post(`/panel/xray-core-config-profile/del/${profile.id}`);
+              if (msg && msg.success) {
+                this.$message.success(msg.msg || 'Profile deleted successfully');
+                await this.loadProfiles();
+              } else {
+                this.$message.error(msg.msg || 'Failed to delete profile');
+              }
+            } catch (e) {
+              console.error("Failed to delete profile:", e);
+              this.$message.error('Failed to delete profile');
+            }
+          }
+        });
+      },
+      async setAsDefault(profile) {
+        try {
+          const msg = await HttpUtil.post(`/panel/xray-core-config-profile/set-default/${profile.id}`);
+          if (msg && msg.success) {
+            this.$message.success(msg.msg || 'Profile set as default successfully');
+            await this.loadProfiles();
+          } else {
+            this.$message.error(msg.msg || 'Failed to set profile as default');
+          }
+        } catch (e) {
+          console.error("Failed to set profile as default:", e);
+          this.$message.error('Failed to set profile as default');
+        }
+      },
+      async resetToDefault(profile) {
+        this.$confirm({
+          title: '{{ i18n "pages.xrayCoreConfigProfiles.resetToDefault" }}',
+          content: `{{ i18n "pages.xrayCoreConfigProfiles.resetToDefaultConfirm" }} "${profile.name}"?`,
+          okText: '{{ i18n "sure" }}',
+          okType: 'danger',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post(`/panel/xray-core-config-profile/reset-to-default/${profile.id}`);
+              if (msg && msg.success) {
+                this.$message.success(msg.msg || 'Profile reset to default successfully');
+                await this.loadProfiles();
+                // Reload modal if it's open for this profile
+                if (xrayCoreConfigProfileModal.visible && xrayCoreConfigProfileModal.profile && xrayCoreConfigProfileModal.profile.id === profile.id) {
+                  xrayCoreConfigProfileModal.show({
+                    title: xrayCoreConfigProfileModal.title,
+                    okText: xrayCoreConfigProfileModal.okText,
+                    profile: msg.obj,
+                    confirm: xrayCoreConfigProfileModal.confirm,
+                    isEdit: xrayCoreConfigProfileModal.isEdit
+                  });
+                }
+              } else {
+                this.$message.error(msg.msg || 'Failed to reset profile');
+              }
+            } catch (e) {
+              console.error("Failed to reset profile:", e);
+              this.$message.error('Failed to reset profile');
+            }
+          }
+        });
+      },
+      async loadAvailableNodes() {
+        try {
+          const msg = await HttpUtil.get("/panel/node/list");
+          if (msg && msg.success && msg.obj) {
+            this.availableNodes = msg.obj.map(node => ({
+              id: node.id,
+              name: node.name,
+              address: node.address,
+              status: node.status
+            }));
+          }
+        } catch (e) {
+          console.warn("Failed to load nodes:", e);
+        }
+      },
+      getNodeName(nodeId) {
+        if (!this.availableNodes || this.availableNodes.length === 0) {
+          return `Node ${nodeId}`;
+        }
+        const node = this.availableNodes.find(n => n.id === nodeId);
+        return node ? node.name : `Node ${nodeId}`;
+      },
+      openAssignNodes(profile) {
+        this.currentProfileForNodes = profile;
+        this.selectedNodeIds = profile.nodeIds ? [...profile.nodeIds] : [];
+        this.assignNodesModalVisible = true;
+      },
+      async assignNodes(profileId, nodeIds) {
+        try {
+          const msg = await HttpUtil.post(`/panel/xray-core-config-profile/assign-nodes/${profileId}`, { nodeIds: nodeIds });
+          if (msg && msg.success) {
+            this.$message.success(msg.msg || 'Nodes assigned successfully');
+            this.assignNodesModalVisible = false;
+            await this.loadProfiles();
+          } else {
+            this.$message.error(msg.msg || 'Failed to assign nodes');
+          }
+        } catch (e) {
+          console.error("Failed to assign nodes:", e);
+          this.$message.error('Failed to assign nodes');
+        }
+      },
+      getAvailableNodesForSelection() {
+        if (!this.currentProfileForNodes || !this.availableNodes || this.availableNodes.length === 0) {
+          return [];
+        }
+        
+        // Find nodes already assigned to other profiles
+        const assignedNodeIds = new Set();
+        this.profiles.forEach(p => {
+          if (p.id !== this.currentProfileForNodes.id && p.nodeIds) {
+            p.nodeIds.forEach(nodeId => assignedNodeIds.add(nodeId));
+          }
+        });
+        
+        // Filter and map only available (not assigned) nodes
+        return this.availableNodes
+          .filter(node => !assignedNodeIds.has(node.id))
+          .map(node => ({
+            label: node.name,
+            value: node.id,
+            disabled: false
+          }));
+      },
+      handleAssignNodesOk() {
+        if (this.currentProfileForNodes) {
+          this.assignNodes(this.currentProfileForNodes.id, this.selectedNodeIds || []);
+        }
+      },
+    },
+  });
+</script>
+{{ template "page/body_end" .}}

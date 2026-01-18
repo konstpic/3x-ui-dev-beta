@@ -106,13 +106,26 @@
                 ];
                 
                 // Add Nodes and Hosts menu items if multi-node mode is enabled
+                // Note: Outbounds are no longer shown in menu - profiles are used instead
                 if (this.multiNodeMode) {
-                    this.tabs.splice(4, 0, {
+                    // Find index after inbounds
+                    const inboundsIndex = this.tabs.findIndex(tab => tab.key === '{{ .base_path }}panel/inbounds');
+                    const insertIndex = inboundsIndex >= 0 ? inboundsIndex + 1 : 2;
+                    
+                    // Add Xray Core Config Profiles menu item
+                    this.tabs.splice(insertIndex, 0, {
+                        key: '{{ .base_path }}panel/xray-core-config-profiles',
+                        icon: 'file-text',
+                        title: '{{ i18n "menu.xrayCoreConfigProfiles"}}'
+                    });
+                    
+                    // Add Nodes and Hosts menu items
+                    this.tabs.splice(insertIndex + 1, 0, {
                         key: '{{ .base_path }}panel/nodes',
                         icon: 'cluster',
                         title: '{{ i18n "menu.nodes"}}'
                     });
-                    this.tabs.splice(5, 0, {
+                    this.tabs.splice(insertIndex + 2, 0, {
                         key: '{{ .base_path }}panel/hosts',
                         icon: 'cloud-server',
                         title: '{{ i18n "menu.hosts"}}'

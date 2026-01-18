@@ -62,7 +62,28 @@
                         this.cm=null;
                 }
                 textAreaObj.value = JSON.stringify(this.outbound.toJson(), null, 2);
-                this.cm = CodeMirror.fromTextArea(textAreaObj, app.cmOptions);
+                const cmOptions = (typeof app !== 'undefined' && app.cmOptions) ? app.cmOptions : {
+                    lineNumbers: true,
+                    mode: "application/json",
+                    lint: true,
+                    styleActiveLine: true,
+                    matchBrackets: true,
+                    theme: "xq",
+                    autoCloseTags: true,
+                    lineWrapping: true,
+                    indentUnit: 2,
+                    indentWithTabs: true,
+                    smartIndent: true,
+                    tabSize: 2,
+                    lineWiseCopyCut: false,
+                    foldGutter: true,
+                    gutters: [
+                        "CodeMirror-lint-markers",
+                        "CodeMirror-linenumbers",
+                        "CodeMirror-foldgutter",
+                    ],
+                };
+                this.cm = CodeMirror.fromTextArea(textAreaObj, cmOptions);
                 this.cm.on('change',editor => {
                     value = editor.getValue();
                     if(this.isJsonString(value)){
@@ -94,9 +115,41 @@
         el: '#out-modal',
         data: {
             outModal: outModal,
+            outboundModal: null, // Not used in this modal
+            multiNodeMode: false,
+            availableNodes: [],
+            get themeSwitcher() {
+                return typeof themeSwitcher !== 'undefined' ? themeSwitcher : { currentTheme: 'light' };
+            },
             get outbound() {
                 return outModal.outbound;
             },
+            get currentModal() {
+                return outModal;
+            },
+            get showRemark() {
+                return false; // Not shown in template mode
+            },
+            get showNodesSection() {
+                return false; // Not shown in template mode
+            },
+            get availableNodesList() {
+                return [];
+            },
+            get nodeConflictErrorText() {
+                return '';
+            },
+        },
+        async mounted() {
+            // Load multi-node mode
+            try {
+                const msg = await HttpUtil.post("/panel/setting/all");
+                if (msg && msg.success && msg.obj) {
+                    this.multiNodeMode = Boolean(msg.obj.multiNodeMode) || false;
+                }
+            } catch (e) {
+                console.warn("Failed to load multi-node mode:", e);
+            }
         },
         methods: {
             streamNetworkChange() {
@@ -113,12 +166,25 @@
                     this.outModal.outbound = newOutbound;
                     this.outModal.toggleJson(true);
                     this.outModal.check();
-                    this.$message.success('Link imported successfully...');      
+                    if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
+                        Vue.prototype.$message.success('Link imported successfully...');
+                    }
                     outModal.link = '';
                 } else {
-                    this.$message.error('Wrong Link!');
+                    if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
+                        Vue.prototype.$message.error('Wrong Link!');
+                    }
                     outModal.link = '';
                 }
+            },
+            isNodeDisabled() {
+                return false; // Not applicable for template outbounds
+            },
+            onNodeIdsChange() {
+                // Not applicable for template outbounds
+            },
+            filterNodeOption() {
+                return true;
             },
         },
     });

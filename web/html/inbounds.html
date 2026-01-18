@@ -1472,7 +1472,10 @@
       toggleRefresh() {
         localStorage.setItem("isRefreshEnabled", this.isRefreshEnabled);
         if (this.isRefreshEnabled) {
-          this.startDataRefreshLoop();
+          // Connect WebSocket if available
+          if (window.wsClient && !window.wsClient.isConnected) {
+            window.wsClient.connect();
+          }
         }
       },
       changeRefreshInterval() {
@@ -1555,28 +1558,6 @@
             this.lastOnlineMap = { ...this.lastOnlineMap, ...payload.lastOnlineMap };
           }
         });
-
-        // Fallback to polling if WebSocket fails
-        window.wsClient.on('error', () => {
-          console.warn('WebSocket connection failed, falling back to polling');
-          if (this.isRefreshEnabled) {
-            this.startDataRefreshLoop();
-          }
-        });
-
-        window.wsClient.on('disconnected', () => {
-          if (window.wsClient.reconnectAttempts >= window.wsClient.maxReconnectAttempts) {
-            console.warn('WebSocket reconnection failed, falling back to polling');
-            if (this.isRefreshEnabled) {
-              this.startDataRefreshLoop();
-            }
-          }
-        });
-      } else {
-        // Fallback to polling if WebSocket is not available
-        if (this.isRefreshEnabled) {
-          this.startDataRefreshLoop();
-        }
       }
     },
     computed: {

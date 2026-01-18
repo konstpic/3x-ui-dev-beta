@@ -1,0 +1,240 @@
+{{define "modals/xrayCoreConfigProfileModal"}}
+<a-modal id="xray-core-config-profile-modal" v-model="xrayCoreConfigProfileModal.visible" :title="xrayCoreConfigProfileModal.title" @ok="xrayCoreConfigProfileModal.ok"
+         :confirm-loading="xrayCoreConfigProfileModal.confirmLoading" :closable="true" :mask-closable="false"
+         :ok-button-props="{ props: { disabled: !xrayCoreConfigProfileModal.isValid } }" :style="{ overflow: 'hidden' }"
+         :ok-text="xrayCoreConfigProfileModal.okText" cancel-text='{{ i18n "close" }}' :class="themeSwitcher.currentTheme"
+         width="900px">
+    <a-form :colon="false" :label-col="{ md: {span:6} }" :wrapper-col="{ md: {span:16} }">
+        <a-form-item label='{{ i18n "pages.xrayCoreConfigProfiles.name" }}' required>
+            <a-input v-model.trim="xrayCoreConfigProfileModal.profile.name" 
+                    placeholder='{{ i18n "pages.xrayCoreConfigProfiles.namePlaceholder" }}'></a-input>
+        </a-form-item>
+        <a-form-item label='{{ i18n "pages.xrayCoreConfigProfiles.descriptionField" }}'>
+            <a-input v-model.trim="xrayCoreConfigProfileModal.profile.description" 
+                    placeholder='{{ i18n "pages.xrayCoreConfigProfiles.descriptionPlaceholder" }}'></a-input>
+        </a-form-item>
+        <a-form-item label='{{ i18n "pages.xrayCoreConfigProfiles.configJson" }}' required>
+            <template slot="extra">
+                <a-button size="small" icon="reload" @click="resetToDefaultTemplate" style="margin-right: 8px;">
+                    {{ i18n "pages.xrayCoreConfigProfiles.resetToDefaultTemplate" }}
+                </a-button>
+            </template>
+            <a-tabs :active-key="xrayCoreConfigProfileModal.activeKey" :style="{ padding: '0', backgroundColor: 'transparent' }"
+              @change="(activeKey) => { xrayCoreConfigProfileModal.toggleJson(activeKey == '2'); }">
+              <a-tab-pane key="1" tab="Form">
+                <div style="color: #999; font-size: 12px; margin-bottom: 8px;">
+                  {{ i18n "pages.xrayCoreConfigProfiles.configJsonHint" }}
+                </div>
+                <a-textarea v-model="xrayCoreConfigProfileModal.profile.configJson" 
+                           :rows="20" 
+                           placeholder='{{ i18n "pages.xrayCoreConfigProfiles.configJsonPlaceholder" }}'></a-textarea>
+              </a-tab-pane>
+              <a-tab-pane key="2" tab="JSON">
+                <textarea id="xrayCoreConfigProfileJson" style="display: none;"></textarea>
+              </a-tab-pane>
+            </a-tabs>
+        </a-form-item>
+        <a-form-item v-if="!xrayCoreConfigProfileModal.isEdit">
+            <a-checkbox v-model="xrayCoreConfigProfileModal.profile.isDefault">
+                {{ i18n "pages.xrayCoreConfigProfiles.setAsDefault" }}
+            </a-checkbox>
+        </a-form-item>
+    </a-form>
+</a-modal>
+<script>
+    const xrayCoreConfigProfileModal = {
+        title: '',
+        visible: false,
+        confirmLoading: false,
+        okText: '{{ i18n "sure" }}',
+        isEdit: false,
+        confirm: null,
+        profile: {
+            name: '',
+            description: '',
+            configJson: '',
+            isDefault: false
+        },
+        jsonMode: false,
+        cm: null,
+        isValid: true,
+        activeKey: '1',
+        ok() {
+            if (!xrayCoreConfigProfileModal.profile.name || !xrayCoreConfigProfileModal.profile.name.trim()) {
+                if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
+                    Vue.prototype.$message.error('{{ i18n "pages.xrayCoreConfigProfiles.nameRequired" }}');
+                }
+                return;
+            }
+            if (!xrayCoreConfigProfileModal.profile.configJson || !xrayCoreConfigProfileModal.profile.configJson.trim()) {
+                if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
+                    Vue.prototype.$message.error('{{ i18n "pages.xrayCoreConfigProfiles.configJsonRequired" }}');
+                }
+                return;
+            }
+            // Validate JSON
+            try {
+                JSON.parse(xrayCoreConfigProfileModal.profile.configJson);
+            } catch (e) {
+                if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
+                    Vue.prototype.$message.error('{{ i18n "pages.xrayCoreConfigProfiles.invalidJson" }}: ' + e.message);
+                }
+                return;
+            }
+            ObjectUtil.execute(xrayCoreConfigProfileModal.confirm, xrayCoreConfigProfileModal.profile);
+        },
+        show({ title='', okText='{{ i18n "sure" }}', profile, confirm=(profile)=>{}, isEdit=false }) {
+            this.title = title;
+            this.okText = okText;
+            this.confirm = confirm;
+            this.jsonMode = false;
+            this.activeKey = '1';
+            this.visible = true;
+            this.isEdit = isEdit;
+            
+            if (profile && typeof profile === 'object' && profile.id) {
+                // Database profile
+                this.profile = {
+                    id: profile.id,
+                    name: profile.name || '',
+                    description: profile.description || '',
+                    configJson: profile.configJson || '',
+                    isDefault: profile.isDefault || false
+                };
+            } else {
+                // New profile
+                this.profile = {
+                    name: profile && profile.name ? profile.name : '',
+                    description: profile && profile.description ? profile.description : '',
+                    configJson: profile && profile.configJson ? profile.configJson : '',
+                    isDefault: profile && profile.isDefault !== undefined ? profile.isDefault : false
+                };
+                // Load default template only if configJson is not provided
+                if (!this.profile.configJson || !this.profile.configJson.trim()) {
+                    this.loadDefaultTemplate();
+                }
+            }
+            
+            this.check();
+        },
+        async loadDefaultTemplate() {
+            try {
+                const msg = await HttpUtil.get("/panel/xray/getDefaultJsonConfig");
+                if (msg && msg.success && msg.obj) {
+                    this.profile.configJson = JSON.stringify(msg.obj, null, 2);
+                }
+            } catch (e) {
+                console.warn("Failed to load default template:", e);
+                // Set a basic default template if API fails
+                this.profile.configJson = JSON.stringify({
+                    "log": {},
+                    "routing": {},
+                    "dns": {},
+                    "inbounds": [],
+                    "outbounds": []
+                }, null, 2);
+            }
+        },
+        async resetToDefaultTemplate() {
+            await this.loadDefaultTemplate();
+            if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
+                Vue.prototype.$message.success('{{ i18n "pages.xrayCoreConfigProfiles.templateLoaded" }}');
+            }
+        },
+        close() {
+            // Clean up CodeMirror instance
+            if(this.cm != null) {
+                try {
+                    this.cm.toTextArea();
+                } catch (e) {
+                    console.warn("Error cleaning up CodeMirror:", e);
+                }
+                this.cm = null;
+            }
+            xrayCoreConfigProfileModal.visible = false;
+            xrayCoreConfigProfileModal.loading(false);
+        },
+        loading(loading=true) {
+            xrayCoreConfigProfileModal.confirmLoading = loading;
+        },
+        check(){
+            this.isValid = true;
+        },
+        toggleJson(jsonTab) {
+            if(jsonTab){
+                if(this.cm != null) {
+                    this.cm.toTextArea();
+                    this.cm = null;
+                }
+                // Use setTimeout to ensure DOM is ready after tab switch
+                const initCodeMirror = () => {
+                    const textAreaObj = document.getElementById('xrayCoreConfigProfileJson');
+                    if (!textAreaObj) {
+                        console.error('Textarea element not found');
+                        return;
+                    }
+                    textAreaObj.value = this.profile.configJson;
+                    const cmOptions = (typeof app !== 'undefined' && app.cmOptions) ? app.cmOptions : {
+                        lineNumbers: true,
+                        mode: "application/json",
+                        lint: true,
+                        styleActiveLine: true,
+                        matchBrackets: true,
+                        theme: "xq",
+                        autoCloseTags: true,
+                        lineWrapping: true,
+                        indentUnit: 2,
+                        indentWithTabs: true,
+                        smartIndent: true,
+                        tabSize: 2,
+                        lineWiseCopyCut: false,
+                        foldGutter: true,
+                        gutters: [
+                            "CodeMirror-lint-markers",
+                            "CodeMirror-linenumbers",
+                            "CodeMirror-foldgutter",
+                        ],
+                    };
+                    this.cm = CodeMirror.fromTextArea(textAreaObj, cmOptions);
+                    this.cm.on('change', editor => {
+                        const value = editor.getValue();
+                        try {
+                            JSON.parse(value);
+                            this.profile.configJson = value;
+                            this.check();
+                        } catch (e) {
+                            // Invalid JSON, but don't update yet
+                        }
+                    });
+                };
+                // Wait for tab to render
+                setTimeout(initCodeMirror, 150);
+                this.activeKey = '2';
+            } else {
+                if(this.cm != null) {
+                    this.cm.toTextArea();
+                    this.cm = null;
+                }
+                this.activeKey = '1';
+            }
+        },
+    };
+
+    new Vue({
+        delimiters: ['[[', ']]'],
+        el: '#xray-core-config-profile-modal',
+        data: {
+            xrayCoreConfigProfileModal: xrayCoreConfigProfileModal,
+            get themeSwitcher() {
+                return typeof themeSwitcher !== 'undefined' ? themeSwitcher : { currentTheme: 'light' };
+            },
+        },
+        methods: {
+            resetToDefaultTemplate() {
+                xrayCoreConfigProfileModal.resetToDefaultTemplate();
+            },
+        },
+    });
+
+</script>
+{{end}}

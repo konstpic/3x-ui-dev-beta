@@ -188,6 +188,61 @@ type InboundNodeMapping struct {
 	NodeId    int `json:"nodeId" form:"nodeId" gorm:"uniqueIndex:idx_inbound_node"`        // Node ID
 }
 
+// Outbound represents an Xray outbound configuration.
+// Outbounds can be assigned to specific nodes in multi-node mode.
+type Outbound struct {
+	Id          int    `json:"id" form:"id" gorm:"primaryKey;autoIncrement"` // Unique identifier
+	UserId      int    `json:"userId" gorm:"index"`                           // Associated user ID
+	Remark      string `json:"remark" form:"remark"`                          // Human-readable remark
+	Enable      bool   `json:"enable" form:"enable" gorm:"default:true"`     // Whether the outbound is enabled
+	Protocol    string `json:"protocol" form:"protocol"`                      // Outbound protocol (freedom, blackhole, socks, http, vmess, vless, trojan, shadowsocks, wireguard, etc.)
+	Settings    string `json:"settings" form:"settings"`                      // Protocol-specific settings (JSON)
+	StreamSettings string `json:"streamSettings" form:"streamSettings"`       // Stream settings (JSON, optional)
+	Tag         string `json:"tag" form:"tag" gorm:"unique"`                 // Outbound tag (must be unique)
+	ProxySettings string `json:"proxySettings" form:"proxySettings"`           // Proxy settings for chaining (JSON, optional)
+	SendThrough  string `json:"sendThrough" form:"sendThrough"`              // Send through address (optional)
+	Mux          string `json:"mux" form:"mux"`                               // Mux settings (JSON, optional)
+	CreatedAt   int64  `json:"createdAt" gorm:"autoCreateTime"`               // Creation timestamp
+	UpdatedAt   int64  `json:"updatedAt" gorm:"autoUpdateTime"`                // Last update timestamp
+	
+	// Relations (not stored in DB, loaded via queries)
+	NodeIds []int `json:"nodeIds,omitempty" form:"-" gorm:"-"` // Node IDs array (not stored in Outbound table, from mapping) - use this for multi-node support
+	
+	// Core config profile relation
+	CoreConfigProfileId *int `json:"coreConfigProfileId,omitempty" form:"coreConfigProfileId" gorm:"index"` // Xray core config profile ID (optional)
+}
+
+// OutboundNodeMapping maps outbounds to nodes in multi-node mode.
+type OutboundNodeMapping struct {
+	Id         int `json:"id" gorm:"primaryKey;autoIncrement"` // Unique identifier
+	OutboundId int `json:"outboundId" form:"outboundId" gorm:"uniqueIndex:idx_outbound_node"` // Outbound ID
+	NodeId     int `json:"nodeId" form:"nodeId" gorm:"uniqueIndex:idx_outbound_node"`         // Node ID
+}
+
+// XrayCoreConfigProfile represents an Xray core configuration profile for multi-node mode.
+// Each profile contains a complete Xray configuration (routing, dns, log, policy, stats, inbounds, outbounds)
+// that can be assigned to nodes.
+type XrayCoreConfigProfile struct {
+	Id          int    `json:"id" gorm:"primaryKey;autoIncrement"`                    // Unique identifier
+	UserId      int    `json:"userId" form:"userId" gorm:"index"`                    // Associated user ID
+	Name        string `json:"name" form:"name"`                                     // Profile name
+	Description string `json:"description" form:"description"`                       // Profile description
+	ConfigJson  string `json:"configJson" form:"configJson" gorm:"type:text"`        // Full Xray JSON config
+	IsDefault   bool   `json:"isDefault" form:"isDefault" gorm:"default:false"`     // Whether this is the default profile
+	CreatedAt   int64  `json:"createdAt" gorm:"autoCreateTime"`                      // Creation timestamp
+	UpdatedAt   int64  `json:"updatedAt" gorm:"autoUpdateTime"`                      // Last update timestamp
+	
+	// Relations (not stored in DB, loaded via queries)
+	NodeIds []int `json:"nodeIds,omitempty" form:"-" gorm:"-"` // Node IDs array (not stored in Profile table, from mapping) - use this for multi-node support
+}
+
+// ProfileNodeMapping maps profiles to nodes in multi-node mode.
+type ProfileNodeMapping struct {
+	Id        int `json:"id" gorm:"primaryKey;autoIncrement"` // Unique identifier
+	ProfileId int `json:"profileId" form:"profileId" gorm:"uniqueIndex:idx_profile_node"` // Profile ID
+	NodeId    int `json:"nodeId" form:"nodeId" gorm:"uniqueIndex:idx_profile_node"`     // Node ID
+}
+
 // ClientInboundMapping maps clients to inbounds (many-to-many relationship).
 type ClientInboundMapping struct {
 	Id        int `json:"id" gorm:"primaryKey;autoIncrement"` // Unique identifier

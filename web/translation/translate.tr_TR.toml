@@ -92,6 +92,7 @@
 "ultraDark" = "Ultra Koyu"
 "dashboard" = "Genel Bakış"
 "inbounds" = "Gelenler"
+"outbounds" = "Gidenler"
 "settings" = "Panel Ayarları"
 "xray" = "Xray Yapılandırmaları"
 "apiDocs" = "API Dokümantasyonu"

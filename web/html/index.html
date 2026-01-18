@@ -1384,22 +1384,6 @@
         });
 
         // Notifications disabled - white notifications are not needed
-
-        // Fallback to polling if WebSocket fails
-        window.wsClient.on('error', () => {
-          console.warn('WebSocket connection failed, falling back to polling');
-          this.startPolling();
-        });
-
-        window.wsClient.on('disconnected', () => {
-          if (window.wsClient.reconnectAttempts >= window.wsClient.maxReconnectAttempts) {
-            console.warn('WebSocket reconnection failed, falling back to polling');
-            this.startPolling();
-          }
-        });
-      } else {
-        // Fallback to polling if WebSocket is not available
-        this.startPolling();
       }
     },
   });

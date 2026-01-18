@@ -195,9 +195,8 @@ func (a *ClientController) addClient(c *gin.Context) {
 	if needRestart {
 		// In multi-node mode, this will send config to nodes immediately
 		// In single mode, this will restart local Xray
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warningf("Failed to restart Xray after client creation: %v", err)
-		}
+		// Restart asynchronously to avoid blocking the response
+		a.xrayService.RestartXrayAsync(false)
 	}
 }
 
@@ -490,11 +489,10 @@ func (a *ClientController) updateClient(c *gin.Context) {
 
 	jsonMsgObj(c, I18nWeb(c, "pages.clients.toasts.clientUpdateSuccess"), client, nil)
 	if needRestart {
-		// In multi-node mode, this will send config to nodes immediately
-		// In single mode, this will restart local Xray
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warningf("Failed to restart Xray after client update: %v", err)
-		}
+		// In multi-node mode, this will send config to nodes asynchronously (non-blocking)
+		// In single mode, this will restart local Xray asynchronously
+		// This allows the user to get an immediate response while configs are being sent
+		a.xrayService.RestartXrayAsync(false)
 	}
 }
 
@@ -516,11 +514,10 @@ func (a *ClientController) deleteClient(c *gin.Context) {
 
 	jsonMsg(c, I18nWeb(c, "pages.clients.toasts.clientDeleteSuccess"), nil)
 	if needRestart {
-		// In multi-node mode, this will send config to nodes immediately
-		// In single mode, this will restart local Xray
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warningf("Failed to restart Xray after client deletion: %v", err)
-		}
+		// In multi-node mode, this will send config to nodes asynchronously (non-blocking)
+		// In single mode, this will restart local Xray asynchronously
+		// This allows the user to get an immediate response while configs are being sent
+		a.xrayService.RestartXrayAsync(false)
 	}
 }
 
@@ -537,9 +534,8 @@ func (a *ClientController) resetAllClientTraffics(c *gin.Context) {
 	if needRestart {
 		// In multi-node mode, this will send config to nodes immediately
 		// In single mode, this will restart local Xray
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warningf("Failed to restart Xray after resetting all client traffics: %v", err)
-		}
+		// Restart asynchronously to avoid blocking the response
+		a.xrayService.RestartXrayAsync(false)
 	}
 }
 
@@ -563,9 +559,8 @@ func (a *ClientController) resetClientTraffic(c *gin.Context) {
 	if needRestart {
 		// In multi-node mode, this will send config to nodes immediately
 		// In single mode, this will restart local Xray
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warningf("Failed to restart Xray after client traffic reset: %v", err)
-		}
+		// Restart asynchronously to avoid blocking the response
+		a.xrayService.RestartXrayAsync(false)
 	}
 }
 
@@ -584,9 +579,8 @@ func (a *ClientController) delDepletedClients(c *gin.Context) {
 		if needRestart {
 			// In multi-node mode, this will send config to nodes immediately
 			// In single mode, this will restart local Xray
-			if err := a.xrayService.RestartXray(false); err != nil {
-				logger.Warningf("Failed to restart Xray after deleting depleted clients: %v", err)
-			}
+			// Restart asynchronously to avoid blocking the response
+			a.xrayService.RestartXrayAsync(false)
 		}
 	} else {
 		jsonMsg(c, "No depleted clients found", nil)
@@ -679,9 +673,8 @@ func (a *ClientController) bulkResetTraffic(c *gin.Context) {
 	}
 	jsonMsg(c, "Traffic reset successfully", nil)
 	if needRestart {
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warningf("Failed to restart Xray after bulk traffic reset: %v", err)
-		}
+		// Restart asynchronously to avoid blocking the response
+		a.xrayService.RestartXrayAsync(false)
 	}
 }
 
@@ -724,9 +717,8 @@ func (a *ClientController) bulkDelete(c *gin.Context) {
 	}
 	jsonMsg(c, "Clients deleted successfully", nil)
 	if needRestart {
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warningf("Failed to restart Xray after bulk deletion: %v", err)
-		}
+		// Restart asynchronously to avoid blocking the response
+		a.xrayService.RestartXrayAsync(false)
 	}
 }
 
@@ -750,9 +742,8 @@ func (a *ClientController) bulkEnable(c *gin.Context) {
 	}
 	jsonMsg(c, "Clients updated successfully", nil)
 	if needRestart {
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warningf("Failed to restart Xray after bulk enable/disable: %v", err)
-		}
+		// Restart asynchronously to avoid blocking the response
+		a.xrayService.RestartXrayAsync(false)
 	}
 }
 

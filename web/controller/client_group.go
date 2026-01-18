@@ -229,9 +229,8 @@ func (a *ClientGroupController) bulkResetTraffic(c *gin.Context) {
 	}
 	jsonMsg(c, "Traffic reset successfully", nil)
 	if needRestart {
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warningf("Failed to restart Xray after group traffic reset: %v", err)
-		}
+		// Restart asynchronously to avoid blocking the response
+		a.xrayService.RestartXrayAsync(false)
 	}
 }
 
@@ -296,9 +295,8 @@ func (a *ClientGroupController) bulkDelete(c *gin.Context) {
 	}
 	jsonMsg(c, "Clients deleted successfully", nil)
 	if needRestart {
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warningf("Failed to restart Xray after group deletion: %v", err)
-		}
+		// Restart asynchronously to avoid blocking the response
+		a.xrayService.RestartXrayAsync(false)
 	}
 }
 
@@ -340,9 +338,8 @@ func (a *ClientGroupController) bulkEnable(c *gin.Context) {
 	}
 	jsonMsg(c, "Clients updated successfully", nil)
 	if needRestart {
-		if err := a.xrayService.RestartXray(false); err != nil {
-			logger.Warningf("Failed to restart Xray after group enable/disable: %v", err)
-		}
+		// Restart asynchronously to avoid blocking the response
+		a.xrayService.RestartXrayAsync(false)
 	}
 }
 

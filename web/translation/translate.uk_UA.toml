@@ -92,6 +92,7 @@
 "ultraDark" = "Ультра темна"
 "dashboard" = "Огляд"
 "inbounds" = "Вхідні"
+"outbounds" = "Вихідні"
 "settings" = "Параметри панелі"
 "xray" = "Конфігурації Xray"
 "apiDocs" = "Документація API"

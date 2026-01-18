@@ -27,8 +27,10 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 
 	g.GET("/", a.index)
 	g.GET("/inbounds", a.inbounds)
+	g.GET("/outbounds", a.outbounds)
 	g.GET("/settings", a.settings)
 	g.GET("/xray", a.xraySettings)
+	g.GET("/xray-core-config-profiles", a.xrayCoreConfigProfiles)
 	g.GET("/nodes", a.nodes)
 	g.GET("/clients", a.clients)
 	g.GET("/groups", a.groups)
@@ -44,6 +46,12 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 	NewHostController(g.Group("/host"))
 	NewClientHWIDController(g.Group("/client")) // Register HWID controller under /panel/client/hwid
 	NewClientGroupController(g.Group("/group"))  // Register group controller under /panel/group
+	
+	// Register outbound controller
+	NewOutboundController(g.Group("/outbound"))
+	
+	// Register Xray core config profile controller
+	NewXrayCoreConfigProfileController(g.Group("/xray-core-config-profile"))
 }
 
 // index renders the main panel index page.
@@ -84,6 +92,16 @@ func (a *XUIController) groups(c *gin.Context) {
 // hosts renders the hosts management page (multi-node mode).
 func (a *XUIController) hosts(c *gin.Context) {
 	html(c, "hosts.html", "pages.hosts.title", nil)
+}
+
+// outbounds renders the outbounds management page (multi-node mode).
+func (a *XUIController) outbounds(c *gin.Context) {
+	html(c, "outbounds.html", "pages.outbounds.title", nil)
+}
+
+// xrayCoreConfigProfiles renders the Xray core config profiles management page (multi-node mode).
+func (a *XUIController) xrayCoreConfigProfiles(c *gin.Context) {
+	html(c, "xray_core_config_profiles.html", "pages.xrayCoreConfigProfiles.title", nil)
 }
 
 // apiDocs renders the API documentation page.

@@ -1,0 +1,417 @@
+{{ template "page/head_start" .}}
+<link rel="stylesheet" href="{{ .base_path }}assets/codemirror/codemirror.min.css?{{ .cur_ver }}">
+<link rel="stylesheet" href="{{ .base_path }}assets/codemirror/fold/foldgutter.css">
+<link rel="stylesheet" href="{{ .base_path }}assets/codemirror/xq.min.css?{{ .cur_ver }}">
+<link rel="stylesheet" href="{{ .base_path }}assets/codemirror/lint/lint.css">
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+<a-layout id="app" v-cloak :class="(typeof themeSwitcher !== 'undefined' ? themeSwitcher.currentTheme : 'light') + ' outbounds-page'">
+  <a-sidebar></a-sidebar>
+  <a-layout id="content-layout">
+    <a-layout-content :style="{ padding: '24px 16px' }">
+      <transition name="list" appear>
+        <a-row :gutter="[isMobile ? 8 : 16, isMobile ? 0 : 12]" v-if="loadingStates.fetched">
+          <a-col>
+            <a-card size="small" :style="{ padding: '16px' }" hoverable>
+              <h2>[[ multiNodeMode ? '{{ i18n "menu.outboundsNodes" }}' : 'Outbounds' ]]</h2>
+              
+              <div style="margin-bottom: 20px;">
+                <a-button type="primary" icon="plus" @click="openAddOutbound">Add Outbound</a-button>
+              </div>
+
+              <div style="margin-bottom: 20px;">
+                <a-button icon="sync" @click="loadOutbounds" :loading="refreshing">Refresh</a-button>
+              </div>
+
+              <a-table :columns="isMobile ? mobileColumns : columns" :row-key="outbound => outbound.id"
+                :data-source="outbounds" :scroll="isMobile ? {} : { x: 1000 }"
+                :pagination="false"
+                :style="{ marginTop: '10px' }"
+                class="outbounds-table"
+                :locale='{ filterConfirm: `{{ i18n "confirm" }}`, filterReset: `{{ i18n "reset" }}`, emptyText: `{{ i18n "noData" }}` }'>
+                <template slot="action" slot-scope="text, outbound">
+                  <a-dropdown :trigger="['click']">
+                    <a-icon @click="e => e.preventDefault()" type="more"
+                      :style="{ fontSize: '20px', textDecoration: 'solid' }"></a-icon>
+                    <a-menu slot="overlay" @click="a => clickAction(a, outbound)"
+                      :theme="(typeof themeSwitcher !== 'undefined' ? themeSwitcher.currentTheme : 'light')">
+                      <a-menu-item key="edit">
+                        <a-icon type="edit"></a-icon>
+                        {{ i18n "edit" }}
+                      </a-menu-item>
+                      <a-menu-item key="delete" :style="{ color: '#FF4D4F' }">
+                        <a-icon type="delete"></a-icon>
+                        {{ i18n "delete" }}
+                      </a-menu-item>
+                    </a-menu>
+                  </a-dropdown>
+                </template>
+                <template slot="enable" slot-scope="text, outbound">
+                  <a-switch size="small" v-model="outbound.enable"
+                    @change="switchEnable(outbound.id, outbound.enable)"></a-switch>
+                </template>
+                <template slot="protocol" slot-scope="text, outbound">
+                  <a-tag color="purple">[[ outbound.protocol ]]</a-tag>
+                </template>
+                <template slot="nodes" slot-scope="text, outbound">
+                  <template v-if="outbound.nodeIds && outbound.nodeIds.length > 0">
+                    <a-tag v-for="nodeId in outbound.nodeIds" :key="nodeId" color="blue" :style="{ margin: '0 4px 4px 0' }">
+                      [[ getNodeName(nodeId) ]]
+                    </a-tag>
+                  </template>
+                  <a-tag v-else color="default">{{ i18n "none" }}</a-tag>
+                </template>
+                <template slot="profile" slot-scope="text, outbound">
+                  <template v-if="outbound.coreConfigProfileId">
+                    [[ getProfileName(outbound.coreConfigProfileId) ]]
+                  </template>
+                  <a-tag v-else color="default">{{ i18n "pages.xrayCoreConfigProfiles.default" }}</a-tag>
+                </template>
+              </a-table>
+            </a-card>
+          </a-col>
+        </a-row>
+        <a-row v-else>
+          <a-card
+            :style="{ textAlign: 'center', padding: '30px 0', marginTop: '10px', background: 'transparent', border: 'none' }">
+            <a-spin tip='{{ i18n "loading" }}'></a-spin>
+          </a-card>
+        </a-row>
+      </transition>
+    </a-layout-content>
+  </a-layout>
+</a-layout>
+{{template "page/body_scripts" .}}
+<script src="{{ .base_path }}assets/js/model/outbound.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/codemirror/codemirror.min.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/codemirror/javascript.js"></script>
+<script src="{{ .base_path }}assets/codemirror/jshint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/jsonlint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/lint/lint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/lint/javascript-lint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/hint/javascript-hint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/foldcode.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/foldgutter.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/brace-fold.js"></script>
+{{template "modals/outboundModal"}}
+{{template "component/aSidebar" .}}
+{{template "component/aThemeSwitch" .}}
+<script>
+  const columns = [
+    { title: '{{ i18n "pages.inbounds.operate" }}', align: 'center', width: 50, scopedSlots: { customRender: 'action' } },
+    { title: '{{ i18n "pages.inbounds.enable" }}', align: 'center', width: 50, scopedSlots: { customRender: 'enable' } },
+    { title: '{{ i18n "pages.inbounds.remark" }}', align: 'left', width: 100, dataIndex: "remark" },
+    { title: '{{ i18n "pages.xray.outbound.tag" }}', align: 'left', width: 100, dataIndex: "tag" },
+    { title: '{{ i18n "protocol" }}', align: 'center', width: 80, scopedSlots: { customRender: 'protocol' } },
+    { title: 'Nodes', align: 'left', width: 150, scopedSlots: { customRender: 'nodes' } },
+    { title: '{{ i18n "pages.xrayCoreConfigProfiles.coreConfigProfile" }}', align: 'left', width: 150, scopedSlots: { customRender: 'profile' } },
+  ];
+
+  const mobileColumns = [
+    { title: '{{ i18n "pages.inbounds.operate" }}', align: 'center', width: 30, scopedSlots: { customRender: 'action' } },
+    { title: '{{ i18n "pages.inbounds.remark" }}', align: 'left', width: 70, dataIndex: "remark" },
+  ];
+
+  const app = new Vue({
+    delimiters: ['[[', ']]'],
+    el: '#app',
+    mixins: [MediaQueryMixin],
+    data: {
+      get themeSwitcher() {
+        return typeof themeSwitcher !== 'undefined' ? themeSwitcher : { currentTheme: 'light' };
+      },
+      loadingStates: {
+        fetched: false,
+        spinning: false
+      },
+      outbounds: [],
+      availableNodes: [],
+      multiNodeMode: false,
+      refreshing: false,
+      allOutbounds: [], // Store all outbounds to check node conflicts
+      cmOptions: {
+        lineNumbers: true,
+        mode: "application/json",
+        lint: true,
+        styleActiveLine: true,
+        matchBrackets: true,
+        theme: "xq",
+        autoCloseTags: true,
+        lineWrapping: true,
+        indentUnit: 2,
+        indentWithTabs: true,
+        smartIndent: true,
+        tabSize: 2,
+        lineWiseCopyCut: false,
+        foldGutter: true,
+        gutters: [
+          "CodeMirror-lint-markers",
+          "CodeMirror-linenumbers",
+          "CodeMirror-foldgutter",
+        ],
+      },
+    },
+    async mounted() {
+      await this.loadMultiNodeMode();
+      await this.loadOutbounds();
+    },
+    methods: {
+      async loadMultiNodeMode() {
+        try {
+          const msg = await HttpUtil.post("/panel/setting/all");
+          if (msg && msg.success && msg.obj) {
+            this.multiNodeMode = Boolean(msg.obj.multiNodeMode) || false;
+            if (this.multiNodeMode) {
+              await this.loadAvailableNodes();
+            }
+          }
+        } catch (e) {
+          console.warn("Failed to load multi-node mode:", e);
+        }
+      },
+      async loadAvailableNodes() {
+        try {
+          const msg = await HttpUtil.get("/panel/node/list");
+          if (msg && msg.success && msg.obj) {
+            this.availableNodes = msg.obj.map(node => ({
+              id: node.id,
+              name: node.name,
+              address: node.address,
+              status: node.status
+            }));
+          }
+        } catch (e) {
+          console.warn("Failed to load nodes:", e);
+        }
+      },
+      async loadOutbounds() {
+        this.loadingStates.fetched = false;
+        try {
+          const msg = await HttpUtil.get("/panel/outbound/list");
+          if (msg && msg.success && msg.obj) {
+            this.outbounds = msg.obj;
+            this.allOutbounds = msg.obj; // Store for conflict checking
+            this.loadingStates.fetched = true;
+          } else {
+            this.$message.error(msg.msg || 'Failed to load outbounds');
+            this.loadingStates.fetched = true;
+          }
+        } catch (e) {
+          console.error("Failed to load outbounds:", e);
+          this.$message.error('Failed to load outbounds');
+          this.loadingStates.fetched = true;
+        }
+      },
+      getNodeName(nodeId) {
+        const node = this.availableNodes.find(n => n.id === nodeId);
+        return node ? node.name : `Node ${nodeId}`;
+      },
+      getProfileName(profileId) {
+        const profile = this.availableProfiles.find(p => p.id === profileId);
+        if (profile) {
+          return profile.isDefault ? `${profile.name} ({{ i18n "pages.xrayCoreConfigProfiles.default" }})` : profile.name;
+        }
+        return `Profile ${profileId}`;
+      },
+      async openAddOutbound() {
+        // Ensure outbound has nodeIds property
+        const outbound = new Outbound();
+        if (!outbound.nodeIds) {
+          outbound.nodeIds = [];
+        }
+        // Ensure we have loaded nodes and profiles if in multi-node mode
+        if (this.multiNodeMode) {
+          if (this.availableNodes.length === 0) {
+            await this.loadAvailableNodes();
+          }
+          if (this.availableProfiles.length === 0) {
+            await this.loadAvailableProfiles();
+          }
+        }
+        outboundModal.show({
+          title: 'Add Outbound',
+          okText: 'Add',
+          outbound: outbound,
+          confirm: async (outboundData) => {
+            await this.addOutbound(outboundData);
+          },
+          isEdit: false,
+          tags: [],
+          availableNodes: this.availableNodes,
+          allOutbounds: this.allOutbounds,
+          currentOutboundId: null,
+          availableProfiles: this.availableProfiles
+        });
+      },
+      async addOutbound(outboundData) {
+        try {
+          outboundModal.loading(true);
+          // Convert outbound data to form data format
+          const formData = new FormData();
+          formData.append('remark', outboundData.remark || '');
+          formData.append('enable', 'true');
+          formData.append('protocol', outboundData.protocol || '');
+          formData.append('tag', outboundData.tag || '');
+          formData.append('settings', JSON.stringify(outboundData.settings || {}));
+          formData.append('streamSettings', JSON.stringify(outboundData.streamSettings || {}));
+          if (outboundData.sendThrough) {
+            formData.append('sendThrough', outboundData.sendThrough);
+          }
+          if (outboundData.mux) {
+            formData.append('mux', JSON.stringify(outboundData.mux));
+          }
+          // Add nodeIds
+          if (outboundData.nodeIds && Array.isArray(outboundData.nodeIds)) {
+            outboundData.nodeIds.forEach(nodeId => {
+              formData.append('nodeIds', nodeId.toString());
+            });
+          }
+          
+          const msg = await HttpUtil.post("/panel/outbound/add", formData);
+          if (msg && msg.success) {
+            this.$message.success(msg.msg || 'Outbound added successfully');
+            await this.loadOutbounds();
+            outboundModal.close();
+          } else {
+            this.$message.error(msg.msg || 'Failed to add outbound');
+            outboundModal.loading(false);
+          }
+        } catch (e) {
+          console.error("Failed to add outbound:", e);
+          this.$message.error('Failed to add outbound');
+          outboundModal.loading(false);
+        }
+      },
+      clickAction(action, outbound) {
+        if (action.key === 'edit') {
+          this.editOutbound(outbound);
+        } else if (action.key === 'delete') {
+          this.deleteOutbound(outbound);
+        }
+      },
+      async editOutbound(outbound) {
+        // Ensure we have loaded nodes and profiles if in multi-node mode
+        if (this.multiNodeMode) {
+          if (this.availableNodes.length === 0) {
+            await this.loadAvailableNodes();
+          }
+          if (this.availableProfiles.length === 0) {
+            await this.loadAvailableProfiles();
+          }
+        }
+        outboundModal.show({
+          title: 'Edit Outbound',
+          okText: 'Update',
+          outbound: outbound,
+          confirm: async (outboundData) => {
+            await this.updateOutbound(outbound.id, outboundData);
+          },
+          isEdit: true,
+          availableNodes: this.availableNodes,
+          allOutbounds: this.allOutbounds,
+          currentOutboundId: outbound.id,
+          availableProfiles: this.availableProfiles
+        });
+      },
+      async updateOutbound(id, outboundData) {
+        try {
+          outboundModal.loading(true);
+          // Convert outbound data to object format (axios will handle form encoding)
+          const outbound = this.outbounds.find(o => o.id === id);
+          const data = {};
+          if (outbound) {
+            data.remark = outboundData.remark !== undefined ? outboundData.remark : outbound.remark;
+            data.enable = outboundData.enable !== undefined ? outboundData.enable : outbound.enable;
+            data.protocol = outboundData.protocol || outbound.protocol;
+            data.tag = outboundData.tag || outbound.tag;
+            data.settings = typeof outboundData.settings === 'string' ? outboundData.settings : JSON.stringify(outboundData.settings || {});
+            data.streamSettings = typeof outboundData.streamSettings === 'string' ? outboundData.streamSettings : JSON.stringify(outboundData.streamSettings || {});
+            if (outboundData.sendThrough !== undefined) {
+              data.sendThrough = outboundData.sendThrough;
+            }
+            if (outboundData.mux !== undefined) {
+              data.mux = typeof outboundData.mux === 'string' ? outboundData.mux : JSON.stringify(outboundData.mux);
+            }
+          }
+          // Add nodeIds as array (axios will convert to nodeIds=1&nodeIds=2 format)
+          if (outboundData.nodeIds && Array.isArray(outboundData.nodeIds)) {
+            data.nodeIds = outboundData.nodeIds;
+          }
+          
+          const msg = await HttpUtil.post(`/panel/outbound/update/${id}`, data);
+          if (msg && msg.success) {
+            this.$message.success(msg.msg || 'Outbound updated successfully');
+            await this.loadOutbounds();
+            outboundModal.close();
+          } else {
+            this.$message.error(msg.msg || 'Failed to update outbound');
+            outboundModal.loading(false);
+          }
+        } catch (e) {
+          console.error("Failed to update outbound:", e);
+          this.$message.error('Failed to update outbound');
+          outboundModal.loading(false);
+        }
+      },
+      async deleteOutbound(outbound) {
+        this.$confirm({
+          title: 'Delete Outbound',
+          content: `Are you sure you want to delete outbound "${outbound.remark || outbound.tag}"?`,
+          okText: 'Delete',
+          okType: 'danger',
+          cancelText: 'Cancel',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post(`/panel/outbound/del/${outbound.id}`);
+              if (msg && msg.success) {
+                this.$message.success(msg.msg || 'Outbound deleted successfully');
+                await this.loadOutbounds();
+              } else {
+                this.$message.error(msg.msg || 'Failed to delete outbound');
+              }
+            } catch (e) {
+              console.error("Failed to delete outbound:", e);
+              this.$message.error('Failed to delete outbound');
+            }
+          }
+        });
+      },
+      async switchEnable(id, enable) {
+        try {
+          const outbound = this.outbounds.find(o => o.id === id);
+          if (!outbound) return;
+          
+          const outboundData = {
+            enable: enable,
+            remark: outbound.remark,
+            protocol: outbound.protocol,
+            tag: outbound.tag,
+            settings: outbound.settings,
+            streamSettings: outbound.streamSettings,
+            nodeIds: outbound.nodeIds || [],
+            coreConfigProfileId: outbound.coreConfigProfileId || null
+          };
+          
+          const msg = await HttpUtil.post(`/panel/outbound/update/${id}`, outboundData);
+          if (msg && msg.success) {
+            this.$message.success('Outbound updated successfully');
+            await this.loadOutbounds();
+          } else {
+            // Revert on error
+            outbound.enable = !enable;
+            this.$message.error(msg.msg || 'Failed to update outbound');
+          }
+        } catch (e) {
+          console.error("Failed to update outbound:", e);
+          const outbound = this.outbounds.find(o => o.id === id);
+          if (outbound) {
+            outbound.enable = !enable;
+          }
+          this.$message.error('Failed to update outbound');
+        }
+      },
+    },
+  });
+</script>
+{{ template "page/body_end" .}}

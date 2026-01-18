@@ -92,6 +92,7 @@
 "ultraDark" = "超暗色"
 "dashboard" = "系统状态"
 "inbounds" = "入站列表"
+"outbounds" = "出站列表"
 "settings" = "面板设置"
 "xray" = "Xray 设置"
 "apiDocs" = "API 文档"

@@ -1,7 +1,7 @@
 {{define "form/outbound"}}
 <!-- base -->
-<a-tabs :active-key="outModal.activeKey" :style="{ padding: '0', backgroundColor: 'transparent' }"
-  @change="(activeKey) => {outModal.toggleJson(activeKey == '2'); }">
+<a-tabs :active-key="currentModal.activeKey" :style="{ padding: '0', backgroundColor: 'transparent' }"
+  @change="(activeKey) => { currentModal.toggleJson(activeKey == '2'); }">
   <a-tab-pane key="1" tab="Form">
     <a-form :colon="false" :label-col="{ md: {span:8} }" :wrapper-col="{ md: {span:14} }">
       <a-form-item label='{{ i18n "protocol" }}'>
@@ -9,13 +9,63 @@
           <a-select-option v-for="x,y in Protocols" :value="x">[[ y ]]</a-select-option>
         </a-select>
       </a-form-item>
+      <a-form-item label='{{ i18n "remark" }}' v-if="showRemark">
+        <a-input v-model.trim="outbound.remark"></a-input>
+      </a-form-item>
       <a-form-item label='{{ i18n "pages.xray.outbound.tag" }}' has-feedback
-        :validate-status="outModal.duplicateTag? 'warning' : 'success'">
-        <a-input v-model.trim="outbound.tag" @change="outModal.check()"
+        :validate-status="currentModal.duplicateTag? 'warning' : 'success'">
+        <a-input v-model.trim="outbound.tag" @change="currentModal.check()"
           placeholder='{{ i18n "pages.xray.outbound.tagDesc" }}'></a-input>
       </a-form-item>
       <a-form-item label='{{ i18n "pages.xray.outbound.sendThrough" }}'>
         <a-input v-model="outbound.sendThrough"></a-input>
+      </a-form-item>
+
+      <a-form-item v-if="showNodesSection" label="Nodes">
+        <template slot="extra">
+          <a-tooltip>
+            <template slot="title">
+              Select worker nodes where this outbound will run. A node cannot be assigned to multiple outbounds.
+            </template>
+            <a-icon type="question-circle"></a-icon>
+          </a-tooltip>
+        </template>
+        <a-select v-model="outbound.nodeIds" mode="multiple" :dropdown-class-name="themeSwitcher.currentTheme" 
+            placeholder="Select nodes (optional)" allow-clear
+            :filter-option="filterNodeOption"
+            @change="onNodeIdsChange">
+            <a-select-option v-for="node in availableNodesList" :key="node.id" :value="node.id"
+                :disabled="isNodeDisabled(node.id)">
+                [[ node.name ]] <a-tag :color="node.status === 'online' ? 'green' : 'red'" size="small" style="margin-left: 8px;">[[ node.status ]]</a-tag>
+                <a-tag v-if="isNodeDisabled(node.id)" color="orange" size="small" style="margin-left: 4px;">Assigned</a-tag>
+            </a-select-option>
+        </a-select>
+        <div v-if="availableNodesList.length === 0" style="margin-top: 4px; color: #ff4d4f; font-size: 12px;">
+            No nodes available. Please add nodes first.
+        </div>
+        <div v-if="nodeConflictErrorText" style="margin-top: 4px; color: #ff4d4f; font-size: 12px;">
+            [[ nodeConflictErrorText ]]
+        </div>
+      </a-form-item>
+
+      <a-form-item v-if="showNodesSection" label='{{ i18n "pages.xrayCoreConfigProfiles.coreConfigProfile" }}'>
+        <template slot="extra">
+          <a-tooltip>
+            <template slot="title">
+              {{ i18n "pages.xrayCoreConfigProfiles.coreConfigProfileHint" }}
+            </template>
+            <a-icon type="question-circle"></a-icon>
+          </a-tooltip>
+        </template>
+        <a-select v-model="outbound.coreConfigProfileId" :dropdown-class-name="themeSwitcher.currentTheme" 
+            placeholder='{{ i18n "pages.xrayCoreConfigProfiles.selectProfile" }}' allow-clear>
+            <a-select-option v-for="profile in availableProfilesList" :key="profile.id" :value="profile.id">
+                [[ profile.name ]] <a-tag v-if="profile.isDefault" color="green" size="small" style="margin-left: 8px;">{{ i18n "pages.xrayCoreConfigProfiles.default" }}</a-tag>
+            </a-select-option>
+        </a-select>
+        <div v-if="availableProfilesList.length === 0" style="margin-top: 4px; color: #ff4d4f; font-size: 12px;">
+            {{ i18n "pages.xrayCoreConfigProfiles.noProfilesAvailable" }}
+        </div>
       </a-form-item>
 
       <!-- freedom settings-->
@@ -576,7 +626,7 @@
   </a-tab-pane>
   <a-tab-pane key="2" tab="JSON" force-render="true">
     <a-space direction="vertical" :size="10" :style="{ marginTop: '10px' }">
-      <a-input addon-before='{{ i18n "pages.xray.outbound.link" }}' v-model.trim="outModal.link"
+      <a-input addon-before='{{ i18n "pages.xray.outbound.link" }}' v-model.trim="currentModal.link"
         placeholder="vmess:// vless:// trojan:// ss://">
         <a-icon slot="addonAfter" type="form" @click="convertLink"></a-icon>
       </a-input>

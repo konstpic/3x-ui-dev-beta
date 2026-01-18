@@ -1,0 +1,329 @@
+{{define "modals/outboundModal"}}
+<a-modal id="outbound-modal" v-model="outboundModal.visible" :title="outboundModal.title" @ok="outboundModal.ok"
+         :confirm-loading="outboundModal.confirmLoading" :closable="true" :mask-closable="false"
+         :ok-button-props="{ props: { disabled: !outboundModal.isValid } }" :style="{ overflow: 'hidden' }"
+         :ok-text="outboundModal.okText" cancel-text='{{ i18n "close" }}' :class="themeSwitcher.currentTheme"
+         width="800px">
+         {{template "form/outbound"}}
+</a-modal>
+<script>
+    const outboundModal = {
+        title: '',
+        visible: false,
+        confirmLoading: false,
+        okText: '{{ i18n "sure" }}',
+        isEdit: false,
+        confirm: null,
+        outbound: new Outbound(),
+        jsonMode: false,
+        link: '',
+        cm: null,
+        duplicateTag: false,
+        isValid: true,
+        activeKey: '1',
+        tags: [],
+        availableNodes: [],
+        allOutbounds: [],
+        currentOutboundId: null,
+        nodeConflictError: '',
+        multiNodeMode: false,
+        ok() {
+            // Validate node assignments before submitting
+            if (outboundModal.multiNodeMode && outboundModal.outbound && outboundModal.outbound.nodeIds && outboundModal.outbound.nodeIds.length > 0) {
+                const conflictingNodes = outboundModal.checkNodeConflicts(outboundModal.outbound.nodeIds);
+                if (conflictingNodes.length > 0) {
+                    const nodeNames = conflictingNodes.map(nodeId => {
+                        const node = outboundModal.availableNodes.find(n => n.id === nodeId);
+                        return node ? node.name : `Node ${nodeId}`;
+                    }).join(', ');
+                    if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
+                        Vue.prototype.$message.error(`Nodes already assigned to other outbound: ${nodeNames}`);
+                    }
+                    return;
+                }
+            }
+            // Include remark in the data if present
+            if (!outboundModal.outbound) {
+                if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
+                    Vue.prototype.$message.error('Outbound data is missing');
+                }
+                return;
+            }
+            const outboundData = outboundModal.outbound.toJson();
+            if (outboundModal.outbound.remark) {
+                outboundData.remark = outboundModal.outbound.remark;
+            }
+            ObjectUtil.execute(outboundModal.confirm, outboundData);
+        },
+        show({ title='', okText='{{ i18n "sure" }}', outbound, confirm=(outbound)=>{}, isEdit=false, tags=[], availableNodes=[], allOutbounds=[], currentOutboundId=null, availableProfiles=[] }) {
+            this.title = title;
+            this.okText = okText;
+            this.confirm = confirm;
+            this.jsonMode = false;
+            this.link = '';
+            this.activeKey = '1';
+            this.visible = true;
+            this.isEdit = isEdit;
+            this.tags = tags;
+            this.availableNodes = availableNodes || [];
+            this.allOutbounds = allOutbounds || [];
+            this.currentOutboundId = currentOutboundId;
+            this.availableProfiles = availableProfiles || [];
+            
+            if (outbound && typeof outbound === 'object' && outbound.id) {
+                // Database outbound - convert to Outbound model
+                const outboundJson = {
+                    tag: outbound.tag,
+                    protocol: outbound.protocol,
+                    settings: typeof outbound.settings === 'string' ? JSON.parse(outbound.settings) : outbound.settings,
+                    streamSettings: typeof outbound.streamSettings === 'string' ? JSON.parse(outbound.streamSettings || '{}') : (outbound.streamSettings || {}),
+                    sendThrough: outbound.sendThrough,
+                    mux: typeof outbound.mux === 'string' ? JSON.parse(outbound.mux || '{}') : (outbound.mux || {})
+                };
+                // Set nodeIds if present
+                if (outbound.nodeIds && Array.isArray(outbound.nodeIds)) {
+                    outboundJson.nodeIds = outbound.nodeIds;
+                }
+                // Set coreConfigProfileId if present
+                if (outbound.coreConfigProfileId !== undefined && outbound.coreConfigProfileId !== null) {
+                    outboundJson.coreConfigProfileId = outbound.coreConfigProfileId;
+                }
+                this.outbound = Outbound.fromJson(outboundJson);
+                // Set remark separately (not part of Outbound model)
+                if (outbound.remark !== undefined && outbound.remark !== null) {
+                    this.outbound.remark = outbound.remark;
+                } else {
+                    this.outbound.remark = '';
+                }
+            } else if (outbound) {
+                // JSON outbound
+                this.outbound = Outbound.fromJson(outbound);
+                if (!this.outbound.nodeIds) {
+                    this.outbound.nodeIds = [];
+                }
+            } else {
+                this.outbound = new Outbound();
+                this.outbound.nodeIds = [];
+            }
+            
+            this.check();
+        },
+        close() {
+            outboundModal.visible = false;
+            outboundModal.loading(false);
+            outboundModal.nodeConflictError = '';
+        },
+        loading(loading=true) {
+            outboundModal.confirmLoading = loading;
+        },
+        check(){
+            if(outboundModal.outbound.tag == '' || outboundModal.tags.includes(outboundModal.outbound.tag)){
+                this.duplicateTag = true;
+                this.isValid = false;
+            } else {
+                this.duplicateTag = false;
+                this.isValid = true;
+            }
+        },
+        checkNodeConflicts(nodeIds) {
+            if (!this.multiNodeMode || !nodeIds || nodeIds.length === 0) {
+                return [];
+            }
+            
+            const conflictingNodes = [];
+            for (const nodeId of nodeIds) {
+                // Check if this node is assigned to any other outbound
+                const assignedOutbound = this.allOutbounds.find(ob => {
+                    // Skip current outbound if editing
+                    if (this.currentOutboundId && ob.id === this.currentOutboundId) {
+                        return false;
+                    }
+                    return ob.nodeIds && Array.isArray(ob.nodeIds) && ob.nodeIds.includes(nodeId);
+                });
+                
+                if (assignedOutbound) {
+                    conflictingNodes.push(nodeId);
+                }
+            }
+            
+            return conflictingNodes;
+        },
+        isNodeAssignedToOtherOutbound(nodeId) {
+            if (!this.multiNodeMode || !nodeId) {
+                return false;
+            }
+            
+            // Check if node is assigned to any other outbound (excluding current)
+            return this.allOutbounds.some(ob => {
+                if (this.currentOutboundId && ob.id === this.currentOutboundId) {
+                    return false;
+                }
+                return ob.nodeIds && Array.isArray(ob.nodeIds) && ob.nodeIds.includes(nodeId);
+            });
+        },
+        onNodeIdsChange(selectedNodeIds) {
+            this.outbound.nodeIds = selectedNodeIds || [];
+            const conflictingNodes = this.checkNodeConflicts(selectedNodeIds);
+            if (conflictingNodes.length > 0) {
+                const nodeNames = conflictingNodes.map(nodeId => {
+                    const node = this.availableNodes.find(n => n.id === nodeId);
+                    return node ? node.name : `Node ${nodeId}`;
+                }).join(', ');
+                this.nodeConflictError = `Nodes already assigned: ${nodeNames}`;
+            } else {
+                this.nodeConflictError = '';
+            }
+        },
+        filterNodeOption(input, option) {
+            const node = this.availableNodes.find(n => n.id === option.componentOptions.propsData.value);
+            if (!node) return false;
+            return node.name.toLowerCase().indexOf(input.toLowerCase()) >= 0;
+        },
+        toggleJson(jsonTab) {
+            textAreaObj = document.getElementById('outboundJson');
+            if(jsonTab){
+                if(this.cm != null) {
+                        this.cm.toTextArea();
+                        this.cm=null;
+                }
+                textAreaObj.value = JSON.stringify(this.outbound.toJson(), null, 2);
+                const cmOptions = (typeof app !== 'undefined' && app.cmOptions) ? app.cmOptions : {
+                    lineNumbers: true,
+                    mode: "application/json",
+                    lint: true,
+                    styleActiveLine: true,
+                    matchBrackets: true,
+                    theme: "xq",
+                    autoCloseTags: true,
+                    lineWrapping: true,
+                    indentUnit: 2,
+                    indentWithTabs: true,
+                    smartIndent: true,
+                    tabSize: 2,
+                    lineWiseCopyCut: false,
+                    foldGutter: true,
+                    gutters: [
+                        "CodeMirror-lint-markers",
+                        "CodeMirror-linenumbers",
+                        "CodeMirror-foldgutter",
+                    ],
+                };
+                this.cm = CodeMirror.fromTextArea(textAreaObj, cmOptions);
+                this.cm.on('change',editor => {
+                    value = editor.getValue();
+                    if(this.isJsonString(value)){
+                        this.outbound = Outbound.fromJson(JSON.parse(value));
+                        this.check();
+                    }
+                });
+                this.activeKey = '2';
+            } else {
+                if(this.cm != null) {
+                        this.cm.toTextArea();
+                        this.cm=null;
+                }
+                this.activeKey = '1';
+            }
+        },
+        isJsonString(str) {
+            try {
+                JSON.parse(str);
+            } catch (e) {
+                return false;
+            }
+            return true;
+        },
+    };
+
+    new Vue({
+        delimiters: ['[[', ']]'],
+        el: '#outbound-modal',
+        data: {
+            outboundModal: outboundModal,
+            get themeSwitcher() {
+                return typeof themeSwitcher !== 'undefined' ? themeSwitcher : { currentTheme: 'light' };
+            },
+            multiNodeMode: false,
+            get outbound() {
+                return outboundModal.outbound;
+            },
+            get currentModal() {
+                return outboundModal;
+            },
+            get showRemark() {
+                return true; // Show remark in database mode
+            },
+            get showNodesSection() {
+                return this.multiNodeMode && outboundModal.availableNodes && outboundModal.availableNodes.length > 0;
+            },
+            get availableNodes() {
+                return outboundModal.availableNodes;
+            },
+            get availableNodesList() {
+                return outboundModal.availableNodes || [];
+            },
+            get availableProfilesList() {
+                return outboundModal.availableProfiles || [];
+            },
+            get nodeConflictError() {
+                return outboundModal.nodeConflictError;
+            },
+            get nodeConflictErrorText() {
+                return outboundModal.nodeConflictError || '';
+            },
+        },
+        async mounted() {
+            // Load multi-node mode
+            try {
+                const msg = await HttpUtil.post("/panel/setting/all");
+                if (msg && msg.success && msg.obj) {
+                    this.multiNodeMode = Boolean(msg.obj.multiNodeMode) || false;
+                    outboundModal.multiNodeMode = this.multiNodeMode;
+                }
+            } catch (e) {
+                console.warn("Failed to load multi-node mode:", e);
+            }
+        },
+        methods: {
+            streamNetworkChange() {
+                if (this.outboundModal.outbound.protocol == Protocols.VLESS && !outboundModal.outbound.canEnableTlsFlow()) {
+                    delete this.outboundModal.outbound.settings.flow;
+                }
+            },
+            canEnableTls() {
+                return this.outboundModal.outbound.canEnableTls();
+            },
+            convertLink(){
+                newOutbound = Outbound.fromLink(outboundModal.link);
+                if(newOutbound){
+                    this.outboundModal.outbound = newOutbound;
+                    this.outboundModal.toggleJson(true);
+                    this.outboundModal.check();
+                    if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
+                        Vue.prototype.$message.success('Link imported successfully...');
+                    }
+                    outboundModal.link = '';
+                } else {
+                    if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
+                        Vue.prototype.$message.error('Wrong Link!');
+                    }
+                    outboundModal.link = '';
+                }
+            },
+            isNodeDisabled(nodeId) {
+                return outboundModal.isNodeAssignedToOtherOutbound(nodeId);
+            },
+            isNodeAssignedToOtherOutbound(nodeId) {
+                return outboundModal.isNodeAssignedToOtherOutbound(nodeId);
+            },
+            onNodeIdsChange(selectedNodeIds) {
+                outboundModal.onNodeIdsChange(selectedNodeIds);
+            },
+            filterNodeOption(input, option) {
+                return outboundModal.filterNodeOption(input, option);
+            },
+        },
+    });
+
+</script>
+{{end}}

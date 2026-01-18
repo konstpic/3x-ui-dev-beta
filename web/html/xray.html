@@ -29,13 +29,22 @@
                 <a-row :style="{ display: 'flex', flexWrap: 'wrap', alignItems: 'center' }">
                   <a-col :xs="24" :sm="10" :style="{ padding: '4px' }">
                     <a-space direction="horizontal">
-                      <a-button type="primary" :disabled="saveBtnDisable" @click="updateXraySetting">
+                      <a-button v-if="!multiNodeMode" type="primary" :disabled="saveBtnDisable" @click="updateXraySetting">
                         {{ i18n "pages.xray.save" }}
                       </a-button>
-                      <a-button type="danger" :disabled="!saveBtnDisable" @click="restartXray">
+                      <a-button v-if="!multiNodeMode" type="danger" :disabled="!saveBtnDisable" @click="restartXray">
                         {{ i18n "pages.xray.restart" }}
                       </a-button>
-                      <a-popover v-if="restartResult" :overlay-class-name="themeSwitcher.currentTheme">
+                      <a-button v-if="multiNodeMode && !currentEditingProfileId" type="default" icon="save" @click="saveAsProfile">
+                        {{ i18n "pages.xray.saveAsProfile" }}
+                      </a-button>
+                      <a-button v-if="multiNodeMode && currentEditingProfileId" type="primary" icon="save" @click="updateProfile">
+                        {{ i18n "pages.xray.saveProfile" }}
+                      </a-button>
+                      <a-button v-if="multiNodeMode && currentEditingProfileId" type="default" icon="close" @click="cancelProfileEdit">
+                        {{ i18n "cancel" }}
+                      </a-button>
+                      <a-popover v-if="restartResult && !multiNodeMode" :overlay-class-name="themeSwitcher.currentTheme">
                         <span slot="title">{{ i18n "pages.index.xrayErrorPopoverTitle" }}</span>
                         <template slot="content">
                           <span :style="{ maxWidth: '400px' }" v-for="line in restartResult.split('\n')">[[ line
@@ -50,7 +59,13 @@
                       <div>
                         <a-back-top :target="() => document.getElementById('content-layout')"
                           visibility-height="200"></a-back-top>
-                        <a-alert type="warning" :style="{ float: 'right', width: 'fit-content' }"
+                        <a-alert v-if="multiNodeMode && !currentEditingProfileId" type="info" :style="{ float: 'right', width: 'fit-content', marginBottom: '10px' }"
+                          message='{{ i18n "pages.xray.nodeModeInfo" }}' show-icon>
+                        </a-alert>
+                        <a-alert v-if="multiNodeMode && currentEditingProfileId" type="warning" :style="{ float: 'right', width: 'fit-content', marginBottom: '10px' }"
+                          :message='`{{ i18n "pages.xray.editingProfile" }}: ${currentEditingProfileName}`' show-icon closable @close="cancelProfileEdit">
+                        </a-alert>
+                        <a-alert v-if="!multiNodeMode" type="warning" :style="{ float: 'right', width: 'fit-content' }"
                           message='{{ i18n "pages.settings.infoDesc" }}' show-icon>
                         </a-alert>
                       </div>
@@ -120,6 +135,16 @@
   </a-layout>
 </a-layout>
 {{template "page/body_scripts" .}}
+<script src="{{ .base_path }}assets/codemirror/codemirror.min.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/codemirror/javascript.js"></script>
+<script src="{{ .base_path }}assets/codemirror/jshint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/jsonlint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/lint/lint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/lint/javascript-lint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/hint/javascript-hint.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/foldcode.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/foldgutter.js"></script>
+<script src="{{ .base_path }}assets/codemirror/fold/brace-fold.js"></script>
 <script src="{{ .base_path }}assets/js/model/outbound.js?{{ .cur_ver }}"></script>
 <script src="{{ .base_path }}assets/codemirror/codemirror.min.js?{{ .cur_ver }}"></script>
 <script src="{{ .base_path }}assets/codemirror/javascript.js"></script>
@@ -143,6 +168,7 @@
 {{template "modals/dnsPresetsModal"}}
 {{template "modals/fakednsModal"}}
 {{template "modals/warpModal"}}
+{{template "modals/xrayCoreConfigProfileModal"}}
 <script>
   const rulesColumns = [
     { title: "#", align: 'center', width: 15, scopedSlots: { customRender: 'action' } },
@@ -234,6 +260,9 @@
       refreshing: false,
       restartResult: '',
       showAlert: false,
+      multiNodeMode: false,
+      currentEditingProfileId: null,
+      currentEditingProfileName: null,
       advSettings: 'xraySetting',
       obsSettings: '',
       cm: null,
@@ -356,6 +385,16 @@
       loading(spinning = true) {
         this.loadingStates.spinning = spinning;
       },
+      async loadMultiNodeMode() {
+        try {
+          const msg = await HttpUtil.post("/panel/setting/all");
+          if (msg && msg.success && msg.obj) {
+            this.multiNodeMode = Boolean(msg.obj.multiNodeMode) || false;
+          }
+        } catch (e) {
+          console.warn("Failed to load multi-node mode:", e);
+        }
+      },
       async getOutboundsTraffic() {
         const msg = await HttpUtil.get("/panel/xray/getOutboundsTraffic");
         if (msg.success) {
@@ -411,6 +450,246 @@
           this.templateSettings = JSON.parse(JSON.stringify(msg.obj, null, 2));
           this.saveBtnDisable = true;
         }
+      },
+      async loadProfileForEditing(profileId) {
+        try {
+          this.loading(true);
+          const msg = await HttpUtil.get(`/panel/xray-core-config-profile/get/${profileId}`);
+          if (msg && msg.success && msg.obj) {
+            const profile = msg.obj;
+            // Parse profile config and load into templateSettings
+            if (profile.configJson) {
+              try {
+                const profileConfig = JSON.parse(profile.configJson);
+                // Load profile config into templateSettings (this will also update xraySetting via setter)
+                this.templateSettings = JSON.parse(JSON.stringify(profileConfig));
+                // Update oldXraySetting to match, so saveBtnDisable is calculated correctly
+                this.oldXraySetting = this.xraySetting;
+                // Set editing mode
+                this.currentEditingProfileId = profile.id;
+                this.currentEditingProfileName = profile.name;
+                // Mark as fetched so page content is displayed
+                if (!this.loadingStates.fetched) {
+                  this.loadingStates.fetched = true;
+                }
+                // Update URL to reflect editing mode
+                const url = new URL(window.location);
+                url.searchParams.set('editProfile', profileId);
+                window.history.pushState({}, '', url);
+                Vue.prototype.$message.success('{{ i18n "pages.xray.profileLoaded" }}');
+              } catch (e) {
+                console.error("Failed to parse profile config:", e);
+                Vue.prototype.$message.error('Invalid profile configuration');
+                // Still mark as fetched to show page
+                if (!this.loadingStates.fetched) {
+                  this.loadingStates.fetched = true;
+                }
+              }
+            } else {
+              Vue.prototype.$message.error('Profile has no configuration');
+              // Still mark as fetched to show page
+              if (!this.loadingStates.fetched) {
+                this.loadingStates.fetched = true;
+              }
+            }
+          } else {
+            Vue.prototype.$message.error('Failed to load profile');
+            // Still mark as fetched to show page
+            if (!this.loadingStates.fetched) {
+              this.loadingStates.fetched = true;
+            }
+          }
+        } catch (e) {
+          console.error("Failed to load profile:", e);
+          Vue.prototype.$message.error('Failed to load profile: ' + (e.message || e));
+          // Still mark as fetched to show page
+          if (!this.loadingStates.fetched) {
+            this.loadingStates.fetched = true;
+          }
+        } finally {
+          this.loading(false);
+        }
+      },
+      async saveAsProfile() {
+        try {
+          // Get current template settings from page (what user sees and edits)
+          // templateSettings is a computed property that always has the latest values
+          if (!this.templateSettings) {
+            Vue.prototype.$message.error('No configuration available on page');
+            return;
+          }
+          
+          // Get full Xray config from server (includes inbounds, outbounds, etc.)
+          const msg = await HttpUtil.post("/panel/xray/getFullConfig");
+          if (msg && msg.success && msg.obj) {
+            const fullConfig = msg.obj;
+            
+            // Deep clone current template settings to avoid modifying the original
+            const currentSettings = JSON.parse(JSON.stringify(this.templateSettings));
+            
+            // Replace ALL core settings sections with current page configuration
+            // This ensures ALL user's current changes are included
+            if (currentSettings.log !== undefined) {
+              fullConfig.log = currentSettings.log;
+            }
+            if (currentSettings.routing !== undefined) {
+              fullConfig.routing = currentSettings.routing;
+            }
+            if (currentSettings.dns !== undefined) {
+              fullConfig.dns = currentSettings.dns;
+            }
+            if (currentSettings.policy !== undefined) {
+              fullConfig.policy = currentSettings.policy;
+            }
+            if (currentSettings.stats !== undefined) {
+              fullConfig.stats = currentSettings.stats;
+            }
+            if (currentSettings.fakedns !== undefined) {
+              fullConfig.fakedns = currentSettings.fakedns;
+            }
+            if (currentSettings.reverse !== undefined) {
+              fullConfig.reverse = currentSettings.reverse;
+            }
+            // Include inbounds and outbounds from template if they exist
+            // (though they should come from getFullConfig, but include template version as fallback)
+            if (currentSettings.inbounds !== undefined && Array.isArray(currentSettings.inbounds)) {
+              // Merge or replace inbounds - use template if it has them, otherwise keep from getFullConfig
+              if (currentSettings.inbounds.length > 0) {
+                fullConfig.inbounds = currentSettings.inbounds;
+              }
+            }
+            if (currentSettings.outbounds !== undefined && Array.isArray(currentSettings.outbounds)) {
+              // Merge or replace outbounds - use template if it has them, otherwise keep from getFullConfig
+              if (currentSettings.outbounds.length > 0) {
+                fullConfig.outbounds = currentSettings.outbounds;
+              }
+            }
+            
+            // Open modal to save as profile
+            if (typeof xrayCoreConfigProfileModal !== 'undefined') {
+              xrayCoreConfigProfileModal.show({
+                title: '{{ i18n "pages.xray.saveAsProfile" }}',
+                okText: '{{ i18n "create" }}',
+                profile: {
+                  name: '',
+                  description: '',
+                  configJson: JSON.stringify(fullConfig, null, 2),
+                  isDefault: false
+                },
+                confirm: async (profileData) => {
+                  const saveMsg = await HttpUtil.post("/panel/xray-core-config-profile/add", profileData);
+                  if (saveMsg && saveMsg.success) {
+                    Vue.prototype.$message.success(saveMsg.msg || 'Profile saved successfully');
+                    xrayCoreConfigProfileModal.close();
+                  } else {
+                    Vue.prototype.$message.error(saveMsg.msg || 'Failed to save profile');
+                  }
+                },
+                isEdit: false
+              });
+            } else {
+              Vue.prototype.$message.warning('Profile modal not available');
+            }
+          } else {
+            Vue.prototype.$message.error('Failed to get Xray config');
+          }
+        } catch (e) {
+          console.error("Failed to save as profile:", e);
+          Vue.prototype.$message.error('Failed to save as profile: ' + (e.message || e));
+        }
+      },
+      async updateProfile() {
+        if (!this.currentEditingProfileId) {
+          Vue.prototype.$message.error('No profile being edited');
+          return;
+        }
+        try {
+          this.loading(true);
+          // Get current template settings from page
+          if (!this.templateSettings) {
+            Vue.prototype.$message.error('No configuration available on page');
+            return;
+          }
+          
+          // Get full Xray config from server (includes inbounds, outbounds, etc.)
+          const msg = await HttpUtil.post("/panel/xray/getFullConfig");
+          if (msg && msg.success && msg.obj) {
+            const fullConfig = msg.obj;
+            
+            // Deep clone current template settings
+            const currentSettings = JSON.parse(JSON.stringify(this.templateSettings));
+            
+            // Replace ALL core settings sections with current page configuration
+            if (currentSettings.log !== undefined) {
+              fullConfig.log = currentSettings.log;
+            }
+            if (currentSettings.routing !== undefined) {
+              fullConfig.routing = currentSettings.routing;
+            }
+            if (currentSettings.dns !== undefined) {
+              fullConfig.dns = currentSettings.dns;
+            }
+            if (currentSettings.policy !== undefined) {
+              fullConfig.policy = currentSettings.policy;
+            }
+            if (currentSettings.stats !== undefined) {
+              fullConfig.stats = currentSettings.stats;
+            }
+            if (currentSettings.fakedns !== undefined) {
+              fullConfig.fakedns = currentSettings.fakedns;
+            }
+            if (currentSettings.reverse !== undefined) {
+              fullConfig.reverse = currentSettings.reverse;
+            }
+            if (currentSettings.inbounds !== undefined && Array.isArray(currentSettings.inbounds) && currentSettings.inbounds.length > 0) {
+              fullConfig.inbounds = currentSettings.inbounds;
+            }
+            if (currentSettings.outbounds !== undefined && Array.isArray(currentSettings.outbounds) && currentSettings.outbounds.length > 0) {
+              fullConfig.outbounds = currentSettings.outbounds;
+            }
+            
+            // Get profile to preserve name and description
+            const profileMsg = await HttpUtil.get(`/panel/xray-core-config-profile/get/${this.currentEditingProfileId}`);
+            if (profileMsg && profileMsg.success && profileMsg.obj) {
+              const profile = profileMsg.obj;
+              // Update profile with new config
+              const updateData = {
+                name: profile.name,
+                description: profile.description,
+                configJson: JSON.stringify(fullConfig, null, 2),
+                isDefault: profile.isDefault || false
+              };
+              
+              const updateMsg = await HttpUtil.post(`/panel/xray-core-config-profile/update/${this.currentEditingProfileId}`, updateData);
+              if (updateMsg && updateMsg.success) {
+                Vue.prototype.$message.success(updateMsg.msg || 'Profile updated successfully');
+                // Exit editing mode
+                this.cancelProfileEdit();
+              } else {
+                Vue.prototype.$message.error(updateMsg.msg || 'Failed to update profile');
+              }
+            } else {
+              Vue.prototype.$message.error('Failed to get profile data');
+            }
+          } else {
+            Vue.prototype.$message.error('Failed to get Xray config');
+          }
+        } catch (e) {
+          console.error("Failed to update profile:", e);
+          Vue.prototype.$message.error('Failed to update profile: ' + (e.message || e));
+        } finally {
+          this.loading(false);
+        }
+      },
+      cancelProfileEdit() {
+        this.currentEditingProfileId = null;
+        this.currentEditingProfileName = null;
+        // Remove URL parameter
+        const url = new URL(window.location);
+        url.searchParams.delete('editProfile');
+        window.history.pushState({}, '', url);
+        // Reload settings from server
+        this.getXraySetting();
       },
       changePage(pageKey) {
         if (pageKey == 'tpl-advanced') this.changeCode();
@@ -965,7 +1244,17 @@
       if (window.location.protocol !== "https:") {
         this.showAlert = true;
       }
-      await this.getXraySetting();
+      await this.loadMultiNodeMode();
+      
+      // Check if we should load a profile for editing
+      const urlParams = new URLSearchParams(window.location.search);
+      const editProfileId = urlParams.get('editProfile');
+      if (editProfileId && this.multiNodeMode) {
+        await this.loadProfileForEditing(parseInt(editProfileId));
+      } else {
+        await this.getXraySetting();
+      }
+      
       await this.getXrayResult();
       await this.getOutboundsTraffic();
 

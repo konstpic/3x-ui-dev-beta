@@ -75,6 +75,14 @@
             </template>
             <a-tag v-else color="default">{{ i18n "none" }}</a-tag>
           </template>
+          <template slot="profiles" slot-scope="text, node">
+            <template v-if="node.profiles && node.profiles.length > 0">
+              <a-tag v-for="(profile, index) in node.profiles" :key="profile.id" color="purple" :style="{ margin: '0 4px 4px 0' }">
+                [[ profile.name || `Profile ${profile.id}` ]]
+              </a-tag>
+            </template>
+            <a-tag v-else color="default">{{ i18n "none" }}</a-tag>
+          </template>
           <template slot="name" slot-scope="text, node">
             <template v-if="editingNodeId === node.id">
               <div style="display: inline-flex; align-items: center;">
@@ -154,6 +162,11 @@
     align: 'left',
     width: 300,
     scopedSlots: { customRender: 'inbounds' },
+  }, {
+    title: '{{ i18n "pages.nodes.assignedProfiles" }}',
+    align: 'left',
+    width: 300,
+    scopedSlots: { customRender: 'profiles' },
   }];
 
   const mobileColumns = [{
@@ -210,7 +223,8 @@
               address: node.address || '',
               status: node.status || 'unknown',
               responseTime: node.responseTime || 0,
-              inbounds: node.inbounds || []
+              inbounds: node.inbounds || [],
+              profiles: node.profiles || []
             }));
           }
         } catch (e) {
@@ -585,26 +599,11 @@
               address: node.address || '',
               status: node.status || 'unknown',
               responseTime: node.responseTime || 0,
-              inbounds: node.inbounds || []
+              inbounds: node.inbounds || [],
+              profiles: node.profiles || []
             }));
           }
         });
-
-        // Fallback to polling if WebSocket fails
-        window.wsClient.on('error', () => {
-          console.warn('WebSocket connection failed, falling back to polling');
-          this.startPolling();
-        });
-
-        window.wsClient.on('disconnected', () => {
-          if (window.wsClient.reconnectAttempts >= window.wsClient.maxReconnectAttempts) {
-            console.warn('WebSocket reconnection failed, falling back to polling');
-            this.startPolling();
-          }
-        });
-      } else {
-        // Fallback to polling if WebSocket is not available
-        this.startPolling();
       }
     }
   });

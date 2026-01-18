@@ -31,6 +31,7 @@ func (a *XraySettingController) initRouter(g *gin.RouterGroup) {
 	g.GET("/getXrayResult", a.getXrayResult)
 
 	g.POST("/", a.getXraySetting)
+	g.POST("/getFullConfig", a.getFullXrayConfig)
 	g.POST("/warp/:action", a.warp)
 	g.POST("/update", a.updateSetting)
 	g.POST("/resetOutboundsTraffic", a.resetOutboundsTraffic)
@@ -72,6 +73,16 @@ func (a *XraySettingController) getDefaultXrayConfig(c *gin.Context) {
 // getXrayResult retrieves the current Xray service result.
 func (a *XraySettingController) getXrayResult(c *gin.Context) {
 	jsonObj(c, a.XrayService.GetXrayResult(), nil)
+}
+
+// getFullXrayConfig retrieves the full Xray configuration including inbounds and outbounds.
+func (a *XraySettingController) getFullXrayConfig(c *gin.Context) {
+	xrayConfig, err := a.XrayService.GetXrayConfig()
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "pages.settings.toasts.getSettings"), err)
+		return
+	}
+	jsonObj(c, xrayConfig, nil)
 }
 
 // warp handles Warp-related operations based on the action parameter.

@@ -18,6 +18,8 @@ import (
 	"github.com/mhsanaei/3x-ui/v2/logger"
 	"github.com/mhsanaei/3x-ui/v2/util/random"
 	"github.com/mhsanaei/3x-ui/v2/xray"
+
+	"gorm.io/gorm"
 )
 
 // NodeService provides business logic for managing nodes in multi-node mode.
@@ -587,10 +589,93 @@ func (s *NodeService) UnassignInboundFromNode(inboundId int) error {
 	return db.Where("inbound_id = ?", inboundId).Delete(&model.InboundNodeMapping{}).Error
 }
 
+// GetNodesForOutbound retrieves all nodes assigned to a specific outbound.
+func (s *NodeService) GetNodesForOutbound(outboundId int) ([]*model.Node, error) {
+	db := database.GetDB()
+	var nodes []*model.Node
+
+	err := db.Model(model.Node{}).
+		Joins("INNER JOIN outbound_node_mappings ON nodes.id = outbound_node_mappings.node_id").
+		Where("outbound_node_mappings.outbound_id = ?", outboundId).
+		Find(&nodes).Error
+
+	if err != nil && err != gorm.ErrRecordNotFound {
+		return nil, err
+	}
+
+	return nodes, nil
+}
+
+// AssignOutboundToNode assigns an outbound to a node.
+func (s *NodeService) AssignOutboundToNode(outboundId, nodeId int) error {
+	db := database.GetDB()
+	mapping := &model.OutboundNodeMapping{
+		OutboundId: outboundId,
+		NodeId:     nodeId,
+	}
+	return db.Save(mapping).Error
+}
+
+// AssignOutboundToNodes assigns an outbound to multiple nodes.
+// Validates that nodes are not already assigned to other outbounds.
+func (s *NodeService) AssignOutboundToNodes(outboundId int, nodeIds []int) error {
+	if len(nodeIds) == 0 {
+		// Remove all assignments if no nodes provided
+		db := database.GetDB()
+		return db.Where("outbound_id = ?", outboundId).Delete(&model.OutboundNodeMapping{}).Error
+	}
+
+	// Check if any nodes are already assigned to other outbounds
+	outboundService := OutboundService{}
+	conflictingNodes, err := outboundService.checkNodeAssignedToOtherOutbound(nodeIds, outboundId)
+	if err != nil {
+		return fmt.Errorf("failed to check node assignments: %w", err)
+	}
+
+	if len(conflictingNodes) > 0 {
+		// Get node names for error message
+		db := database.GetDB()
+		var nodes []model.Node
+		db.Where("id IN ?", conflictingNodes).Find(&nodes)
+		nodeNames := make([]string, len(nodes))
+		for i, node := range nodes {
+			nodeNames[i] = node.Name
+		}
+		return fmt.Errorf("nodes already assigned to other outbound: %v", nodeNames)
+	}
+
+	db := database.GetDB()
+	// First, remove all existing assignments
+	if err := db.Where("outbound_id = ?", outboundId).Delete(&model.OutboundNodeMapping{}).Error; err != nil {
+		return err
+	}
+
+	// Then, create new assignments
+	for _, nodeId := range nodeIds {
+		if nodeId > 0 {
+			mapping := &model.OutboundNodeMapping{
+				OutboundId: outboundId,
+				NodeId:     nodeId,
+			}
+			if err := db.Create(mapping).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// UnassignOutboundFromNode removes the assignment of an outbound from its node.
+func (s *NodeService) UnassignOutboundFromNode(outboundId int) error {
+	db := database.GetDB()
+	return db.Where("outbound_id = ?", outboundId).Delete(&model.OutboundNodeMapping{}).Error
+}
+
 // ApplyConfigToNode sends XRAY configuration to a node.
 func (s *NodeService) ApplyConfigToNode(node *model.Node, xrayConfig []byte) error {
-	// Use longer timeout for apply-config as it may take time to apply XRAY config
-	client, err := s.createHTTPClient(node, 60*time.Second)
+	// Use reasonable timeout for apply-config (30 seconds should be enough for most cases)
+	// If config is very large or node is slow, this can be increased
+	client, err := s.createHTTPClient(node, 30*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP client: %w", err)
 	}

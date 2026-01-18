@@ -256,6 +256,19 @@ func (s *XrayService) RestartXray(isForce bool) error {
 	return nil
 }
 
+// RestartXrayAsync restarts Xray asynchronously in a goroutine.
+// This is useful when you don't want to block the HTTP response waiting for configs to be sent to nodes.
+// Errors are logged but not returned.
+func (s *XrayService) RestartXrayAsync(isForce bool) {
+	go func() {
+		if err := s.RestartXray(isForce); err != nil {
+			logger.Warningf("Failed to restart Xray asynchronously: %v", err)
+		} else {
+			logger.Debug("Xray restarted asynchronously")
+		}
+	}()
+}
+
 // restartXrayMultiMode handles Xray restart in multi-node mode by sending configs to nodes.
 func (s *XrayService) restartXrayMultiMode(isForce bool) error {
 	// Initialize nodeService if not already initialized
@@ -307,16 +320,61 @@ func (s *XrayService) restartXrayMultiMode(isForce bool) error {
 		}
 	}
 
-	// Send config to each node
-	for _, node := range nodes {
-		inbounds, ok := nodeInbounds[node.Id]
-		if !ok {
-			// No inbounds assigned to this node, skip
-			continue
-		}
+	// Send config to each node in parallel for better performance
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var errors []error
 
+	// Helper function to build config for a node
+	buildNodeConfig := func(node *model.Node, inbounds []*model.Inbound) ([]byte, error) {
+		// Determine which core config profile to use
+		// First, try to get profile directly assigned to this node
+		var coreConfigProfile *model.XrayCoreConfigProfile
+		profileService := XrayCoreConfigProfileService{}
+		
+		// Get all profiles for user (assuming all inbounds have same user)
+		if len(inbounds) > 0 {
+			profiles, err := profileService.GetAllProfiles(inbounds[0].UserId)
+			if err == nil {
+				// Find profile assigned to this node
+				for _, profile := range profiles {
+					for _, profileNodeId := range profile.NodeIds {
+						if profileNodeId == node.Id {
+							coreConfigProfile = profile
+							break
+						}
+					}
+					if coreConfigProfile != nil {
+						break
+					}
+				}
+			}
+			
+			// If no profile assigned to node, use default profile
+			if coreConfigProfile == nil {
+				profile, err := profileService.EnsureDefaultProfile(inbounds[0].UserId)
+				if err == nil && profile != nil {
+					coreConfigProfile = profile
+				}
+			}
+		}
+		
+		// Use profile config if available, otherwise use template
+		var configToUse *xray.Config
+		if coreConfigProfile != nil {
+			configToUse = &xray.Config{}
+			if err := json.Unmarshal([]byte(coreConfigProfile.ConfigJson), configToUse); err == nil {
+				// Successfully loaded profile config
+			} else {
+				// Fallback to base config if profile JSON is invalid
+				configToUse = baseConfig
+			}
+		} else {
+			configToUse = baseConfig
+		}
+		
 		// Build config for this node
-		nodeConfig := *baseConfig
+		nodeConfig := *configToUse
 		// Preserve API inbound from template (if exists)
 		apiInbound := xray.InboundConfig{}
 		hasAPIInbound := false
@@ -398,20 +456,62 @@ func (s *XrayService) restartXrayMultiMode(isForce bool) error {
 			nodeConfig.InboundConfigs = append(nodeConfig.InboundConfigs, *inboundConfig)
 		}
 
+		// Note: Outbounds are now included in the profile's ConfigJson
+		// They should be defined in the profile configuration itself
+
 		// Marshal config to JSON
-		configJSON, err := json.MarshalIndent(&nodeConfig, "", "  ")
-		if err != nil {
-			logger.Errorf("[Node: %s] Failed to marshal config: %v", node.Name, err)
+		return json.MarshalIndent(&nodeConfig, "", "  ")
+	}
+
+	// Send configs to all nodes in parallel
+	for _, node := range nodes {
+		inbounds, ok := nodeInbounds[node.Id]
+		if !ok {
+			// No inbounds assigned to this node, skip
 			continue
 		}
 
-		// Send to node
-		if err := s.nodeService.ApplyConfigToNode(node, configJSON); err != nil {
-			logger.Errorf("[Node: %s] Failed to apply config: %v", node.Name, err)
-			// Continue with other nodes even if one fails
-		} else {
-			logger.Infof("[Node: %s] Successfully applied config", node.Name)
+		wg.Add(1)
+		go func(n *model.Node, ibs []*model.Inbound) {
+			defer wg.Done()
+
+			// Build config for this node
+			configJSON, err := buildNodeConfig(n, ibs)
+			if err != nil {
+				logger.Errorf("[Node: %s] Failed to marshal config: %v", n.Name, err)
+				mu.Lock()
+				errors = append(errors, fmt.Errorf("node %s: failed to marshal config: %w", n.Name, err))
+				mu.Unlock()
+				return
+			}
+
+			// Send to node
+			if err := s.nodeService.ApplyConfigToNode(n, configJSON); err != nil {
+				logger.Errorf("[Node: %s] Failed to apply config: %v", n.Name, err)
+				mu.Lock()
+				errors = append(errors, fmt.Errorf("node %s: %w", n.Name, err))
+				mu.Unlock()
+			} else {
+				logger.Infof("[Node: %s] Successfully applied config", n.Name)
+			}
+		}(node, inbounds)
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+
+	// Log summary
+	if len(errors) > 0 {
+		logger.Warningf("Failed to apply config to %d node(s) out of %d", len(errors), len(nodes))
+		for _, err := range errors {
+			logger.Warningf("  - %v", err)
 		}
+		// Return error only if all nodes failed
+		if len(errors) == len(nodes) {
+			return fmt.Errorf("failed to apply config to all nodes: %d errors", len(errors))
+		}
+	} else {
+		logger.Infof("Successfully applied config to all %d node(s)", len(nodes))
 	}
 
 	return nil

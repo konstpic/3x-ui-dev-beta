@@ -93,18 +93,22 @@ func (a *NodeController) getNodes(c *gin.Context) {
 		return
 	}
 	
-	// Enrich nodes with assigned inbounds information
+	// Enrich nodes with assigned inbounds and profiles information
 	type NodeWithInbounds struct {
 		*model.Node
-		Inbounds []*model.Inbound `json:"inbounds,omitempty"`
+		Inbounds []*model.Inbound                    `json:"inbounds,omitempty"`
+		Profiles []*model.XrayCoreConfigProfile       `json:"profiles,omitempty"`
 	}
 	
+	profileService := service.XrayCoreConfigProfileService{}
 	result := make([]NodeWithInbounds, 0, len(nodes))
 	for _, node := range nodes {
 		inbounds, _ := a.nodeService.GetInboundsForNode(node.Id)
+		profiles, _ := profileService.GetProfilesForNode(node.Id)
 		result = append(result, NodeWithInbounds{
 			Node:     node,
 			Inbounds: inbounds,
+			Profiles: profiles,
 		})
 	}
 	

@@ -92,6 +92,7 @@
 "ultraDark" = "Ultra Oscuro"
 "dashboard" = "Estado del Sistema"
 "inbounds" = "Entradas"
+"outbounds" = "Salidas"
 "settings" = "Configuraciones"
 "xray" = "Ajustes Xray"
 "apiDocs" = "Documentación API"

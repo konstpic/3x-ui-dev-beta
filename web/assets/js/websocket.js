@@ -6,8 +6,8 @@ class WebSocketClient {
     this.basePath = basePath;
     this.ws = null;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 10;
     this.reconnectDelay = 1000;
+    this.maxReconnectDelay = 30000; // Maximum delay of 30 seconds
     this.listeners = new Map();
     this.isConnected = false;
     this.shouldReconnect = true;
@@ -70,10 +70,14 @@ class WebSocketClient {
         this.isConnected = false;
         this.emit('disconnected');
         
-        if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
+        if (this.shouldReconnect) {
           this.reconnectAttempts++;
-          const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-          console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+          // Exponential backoff with maximum delay cap
+          const delay = Math.min(
+            this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+            this.maxReconnectDelay
+          );
+          console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
           setTimeout(() => this.connect(), delay);
         }
       };

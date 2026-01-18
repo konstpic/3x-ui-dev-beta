@@ -92,6 +92,7 @@
 "ultraDark" = "ウルトラダーク"
 "dashboard" = "ダッシュボード"
 "inbounds" = "インバウンド一覧"
+"outbounds" = "アウトバウンド一覧"
 "settings" = "パネル設定"
 "xray" = "Xray設定"
 "apiDocs" = "API ドキュメント"
