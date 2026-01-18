@@ -54,6 +54,11 @@ class WebSocketClient {
             return;
           }
           
+          // Debug logging for clients events
+          if (message.type === 'clients') {
+            console.log('[WebSocket] Received clients message:', message.type, 'payload length:', Array.isArray(message.payload) ? message.payload.length : 'not array');
+          }
+          
           this.handleMessage(message);
         } catch (e) {
           console.error('Failed to parse WebSocket message:', e);
@@ -129,13 +134,21 @@ class WebSocketClient {
 
   emit(event, ...args) {
     if (this.listeners.has(event)) {
-      this.listeners.get(event).forEach(callback => {
+      const callbacks = this.listeners.get(event);
+      if (event === 'clients' || event === 'traffic') {
+        console.log('[WebSocket] Emitting', event, 'event to', callbacks.length, 'listeners');
+      }
+      callbacks.forEach(callback => {
         try {
           callback(...args);
         } catch (e) {
-          console.error('Error in WebSocket event handler:', e);
+          console.error('Error in WebSocket event handler:', e, 'event:', event);
         }
       });
+    } else {
+      if (event === 'clients' || event === 'traffic') {
+        console.warn('[WebSocket] No listeners registered for event:', event);
+      }
     }
   }
 

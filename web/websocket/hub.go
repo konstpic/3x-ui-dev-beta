@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mhsanaei/3x-ui/v2/database/model"
 	"github.com/mhsanaei/3x-ui/v2/logger"
 )
 
@@ -274,8 +275,27 @@ func (h *Hub) Broadcast(messageType MessageType, payload any) {
 		return
 	}
 
-	// Throttle frequent updates (except for critical messages)
-	if messageType == MessageTypeInbounds || messageType == MessageTypeTraffic || messageType == MessageTypeClients {
+	// Debug logging for clients events
+	if messageType == MessageTypeClients {
+		h.mu.RLock()
+		clientCount := len(h.clients)
+		h.mu.RUnlock()
+		// Try to get length from different possible types
+		var payloadLen int
+		switch v := payload.(type) {
+		case []interface{}:
+			payloadLen = len(v)
+		case []*model.ClientEntity:
+			payloadLen = len(v)
+		default:
+			payloadLen = -1
+		}
+		logger.Infof("Broadcasting clients event: %d clients (type %T) to %d WebSocket clients", payloadLen, payload, clientCount)
+	}
+
+	// Throttle frequent updates (except for critical messages and clients which need real-time updates)
+	// Clients updates should not be throttled to ensure real-time traffic updates
+	if messageType == MessageTypeInbounds || messageType == MessageTypeTraffic {
 		h.throttleMu.Lock()
 		lastTime, exists := h.throttleMap[messageType]
 		if exists && time.Since(lastTime) < h.throttleInterval {

@@ -27,7 +27,24 @@ func NewXrayTrafficJob() *XrayTrafficJob {
 }
 
 // Run collects traffic statistics from Xray and updates the database, triggering restart if needed.
+// In multi-node mode, it broadcasts WebSocket events using data from database (updated by CollectNodeStats).
+// In single-node mode, it collects traffic from local Xray and updates database.
 func (j *XrayTrafficJob) Run() {
+	// Check if multi-node mode is enabled
+	multiMode, err := j.settingService.GetMultiNodeMode()
+	if err != nil {
+		logger.Warningf("Failed to get multi-node mode setting: %v", err)
+		multiMode = false
+	}
+
+	if multiMode {
+		// In multi-node mode, traffic is collected by CollectNodeStats job
+		// We just need to broadcast WebSocket events using data from database
+		j.broadcastWebSocketEvents()
+		return
+	}
+
+	// Single-node mode: collect traffic from local Xray
 	if !j.xrayService.IsXrayRunning() {
 		return
 	}
@@ -35,6 +52,7 @@ func (j *XrayTrafficJob) Run() {
 	if err != nil {
 		return
 	}
+	
 	err, needRestart0 := j.inboundService.AddTraffic(traffics, clientTraffics)
 	if err != nil {
 		logger.Warning("add inbound traffic failed:", err)
@@ -52,6 +70,13 @@ func (j *XrayTrafficJob) Run() {
 		j.xrayService.SetToNeedRestart()
 	}
 
+	// Broadcast WebSocket events (same for both modes)
+	j.broadcastWebSocketEvents()
+}
+
+// broadcastWebSocketEvents broadcasts all WebSocket events (clients, inbounds, outbounds, traffic)
+// This works in both single-node and multi-node modes, using data from database.
+func (j *XrayTrafficJob) broadcastWebSocketEvents() {
 	// Get online clients and last online map for real-time status updates
 	onlineClients := j.inboundService.GetOnlineClients()
 	lastOnlineMap, err := j.inboundService.GetClientsLastOnline()
@@ -72,10 +97,11 @@ func (j *XrayTrafficJob) Run() {
 		logger.Warning("get all outbounds for websocket failed:", err)
 	}
 
-	// Broadcast traffic update via WebSocket with accumulated values from database
+	// Build traffic update (for compatibility, use empty arrays if no traffic data)
+	// In multi-node mode, traffic is aggregated in database, so we don't need to send raw traffic
 	trafficUpdate := map[string]interface{}{
-		"traffics":       traffics,
-		"clientTraffics": clientTraffics,
+		"traffics":       []interface{}{}, // Empty for multi-node, will be populated from inbounds/clients
+		"clientTraffics": []interface{}{}, // Empty for multi-node, will be populated from clients
 		"onlineClients":  onlineClients,
 		"lastOnlineMap":  lastOnlineMap,
 	}
@@ -97,21 +123,25 @@ func (j *XrayTrafficJob) Run() {
 	// We need to get all clients, so we'll query directly from DB
 	db := database.GetDB()
 	var allClients []*model.ClientEntity
-	err = db.Find(&allClients).Error
-	if err == nil && len(allClients) > 0 {
-		// Load inbound assignments and HWIDs for each client (like GetClients does)
-		for _, client := range allClients {
-			inboundIds, err := clientService.GetInboundIdsForClient(client.Id)
-			if err == nil {
-				client.InboundIds = inboundIds
+	clientsErr := db.Find(&allClients).Error
+	if clientsErr == nil {
+		if len(allClients) > 0 {
+			// Load inbound assignments for each client (like GetClients does)
+			for _, client := range allClients {
+				inboundIds, inboundErr := clientService.GetInboundIdsForClient(client.Id)
+				if inboundErr == nil {
+					client.InboundIds = inboundIds
+				}
+				// HWIDs are optional, skip for performance
 			}
-			// HWIDs are optional, skip for performance
+			logger.Infof("Broadcasting %d clients via WebSocket for real-time updates", len(allClients))
+			websocket.BroadcastClients(allClients)
+		} else {
+			logger.Debugf("No clients found to broadcast (empty database)")
 		}
-		websocket.BroadcastClients(allClients)
-	} else if err != nil {
-		logger.Warningf("get all clients for websocket failed: %v", err)
+	} else {
+		logger.Warningf("get all clients for websocket failed: %v", clientsErr)
 	}
-
 }
 
 func (j *XrayTrafficJob) informTrafficToExternalAPI(inboundTraffics []*xray.Traffic, clientTraffics []*xray.ClientTraffic) {

@@ -560,7 +560,9 @@ func (s *NodeService) CollectNodeStats() error {
 	results := make(chan nodeStatsResult, len(nodesWithInbounds))
 	for _, node := range nodesWithInbounds {
 		go func(n *model.Node) {
-			stats, err := s.GetNodeStats(n, false) // Don't reset counters on collection
+			// Use reset=true to get delta traffic (incremental values) instead of cumulative
+			// This prevents double-counting when adding to database
+			stats, err := s.GetNodeStats(n, true) // Reset counters to get delta
 			results <- nodeStatsResult{node: n, stats: stats, err: err}
 		}(node)
 	}
@@ -686,8 +688,39 @@ func (s *NodeService) CollectNodeStats() error {
 
 	// Convert client traffic map to slice
 	allClientTraffics := make([]*xray.ClientTraffic, 0, len(clientTrafficMap))
+	currentTime := time.Now().UnixMilli()
 	for _, traffic := range clientTrafficMap {
 		allClientTraffics = append(allClientTraffics, traffic)
+	}
+	
+	// Also add online clients that don't have traffic yet (to update lastOnline)
+	// This ensures that clients who just came online get their lastOnline updated
+	for email := range onlineClientsMap {
+		// Check if this client already has traffic data
+		found := false
+		for _, traffic := range allClientTraffics {
+			if strings.ToLower(traffic.Email) == email {
+				found = true
+				break
+			}
+		}
+		// If client is online but has no traffic data, add empty traffic entry to update lastOnline
+		if !found {
+			allClientTraffics = append(allClientTraffics, &xray.ClientTraffic{
+				Email:     email,
+				Up:        0,
+				Down:      0,
+				LastOnline: currentTime, // Update lastOnline for online clients
+			})
+		} else {
+			// Update lastOnline for clients with traffic
+			for _, traffic := range allClientTraffics {
+				if strings.ToLower(traffic.Email) == email {
+					traffic.LastOnline = currentTime
+					break
+				}
+			}
+		}
 	}
 
 	// Update client traffic in database
@@ -714,6 +747,23 @@ func (s *NodeService) CollectNodeStats() error {
 				}
 			}
 		}
+	}
+
+	// Update online clients in process for GetOnlineClients() to work in multi-node mode
+	// Convert onlineClientsMap to slice
+	onlineClientsList := make([]string, 0, len(onlineClientsMap))
+	for email := range onlineClientsMap {
+		onlineClientsList = append(onlineClientsList, email)
+	}
+	
+	// Update online clients in process (used by GetOnlineClients())
+	// This ensures that GetOnlineClients() returns correct data in multi-node mode
+	// Note: In multi-node mode, local Xray process may not be running, but we still need to
+	// update online clients for GetOnlineClients() to work.
+	// We use the global process variable 'p' from xray.go (same package)
+	// This is the same approach used in client_traffic.go
+	if p != nil {
+		p.SetOnlineClients(onlineClientsList)
 	}
 
 	logger.Debugf("Collected stats from nodes: %d node traffics updated, %d client traffics, %d online clients",

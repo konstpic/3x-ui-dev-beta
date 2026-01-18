@@ -1340,29 +1340,30 @@
         }
       });
 
-      // Setup WebSocket for real-time updates (always enabled for real-time data)
+      // Setup WebSocket for real-time updates (EXACT same as nodes page)
       if (window.wsClient) {
         window.wsClient.connect();
         
         // Listen for clients updates (direct from ClientEntity - real-time traffic)
-        // This is the primary method for updating client traffic
+        // Update clients directly like nodes page does - EXACT same approach
         window.wsClient.on('clients', (payload) => {
           if (payload && Array.isArray(payload)) {
             // Update client traffic directly from ClientEntity payload (real-time, no HTTP request)
+            // EXACT same approach as nodes page - update objects directly by reference
             payload.forEach(updatedClient => {
-              // Find client by id or email
+              // Find client in main array by id or email (like nodes page finds by id)
               const existingClient = this.clients.find(c => 
                 (c.id && c.id === updatedClient.id) || 
                 (c.email && c.email.toLowerCase() === (updatedClient.email || '').toLowerCase())
               );
               
               if (existingClient) {
-                // Update traffic in real-time from ClientEntity
-                if (updatedClient.up !== undefined) existingClient.up = updatedClient.up;
-                if (updatedClient.down !== undefined) existingClient.down = updatedClient.down;
-                if (updatedClient.allTime !== undefined) existingClient.allTime = updatedClient.allTime;
+                // Update traffic in real-time from ClientEntity (EXACT same as nodes page)
+                // Direct property assignment - Vue will detect changes (same as nodes page)
+                existingClient.up = updatedClient.up !== undefined ? updatedClient.up : existingClient.up;
+                existingClient.down = updatedClient.down !== undefined ? updatedClient.down : existingClient.down;
+                existingClient.allTime = updatedClient.allTime !== undefined ? updatedClient.allTime : existingClient.allTime;
                 if (updatedClient.lastOnline !== undefined) existingClient.lastOnline = updatedClient.lastOnline;
-                // Update other fields if needed
                 if (updatedClient.status !== undefined) existingClient.status = updatedClient.status;
                 if (updatedClient.hwids !== undefined) existingClient.hwids = updatedClient.hwids;
                 if (updatedClient.hwidEnabled !== undefined) existingClient.hwidEnabled = updatedClient.hwidEnabled;
@@ -1370,19 +1371,22 @@
               }
             });
             
-            // Also update searchedClients if it exists (for filtered/search view)
+            // searchedClients contains references to the same objects from clients array
+            // Since we update clients directly, searchedClients should also update automatically
+            // But we update it explicitly to ensure Vue reactivity (same as nodes page approach)
             if (this.searchedClients && Array.isArray(this.searchedClients)) {
               payload.forEach(updatedClient => {
-                const existingClient = this.searchedClients.find(c => 
+                const searchedClient = this.searchedClients.find(c => 
                   (c.id && c.id === updatedClient.id) || 
                   (c.email && c.email.toLowerCase() === (updatedClient.email || '').toLowerCase())
                 );
-                if (existingClient) {
-                  if (updatedClient.up !== undefined) existingClient.up = updatedClient.up;
-                  if (updatedClient.down !== undefined) existingClient.down = updatedClient.down;
-                  if (updatedClient.allTime !== undefined) existingClient.allTime = updatedClient.allTime;
-                  if (updatedClient.lastOnline !== undefined) existingClient.lastOnline = updatedClient.lastOnline;
-                  if (updatedClient.status !== undefined) existingClient.status = updatedClient.status;
+                if (searchedClient) {
+                  // Update the same object reference (EXACT same as nodes page)
+                  searchedClient.up = updatedClient.up !== undefined ? updatedClient.up : searchedClient.up;
+                  searchedClient.down = updatedClient.down !== undefined ? updatedClient.down : searchedClient.down;
+                  searchedClient.allTime = updatedClient.allTime !== undefined ? updatedClient.allTime : searchedClient.allTime;
+                  if (updatedClient.lastOnline !== undefined) searchedClient.lastOnline = updatedClient.lastOnline;
+                  if (updatedClient.status !== undefined) searchedClient.status = updatedClient.status;
                 }
               });
             }
