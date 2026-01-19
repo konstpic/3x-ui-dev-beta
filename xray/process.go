@@ -234,54 +234,14 @@ func (p *process) Start() (err error) {
 		}
 	}()
 
-	data, err := json.MarshalIndent(p.config, "", "  ")
-	if err != nil {
-		return common.NewErrorf("Failed to generate XRAY configuration files: %v", err)
-	}
-
 	err = os.MkdirAll(config.GetLogFolder(), 0o770)
 	if err != nil {
 		logger.Warningf("Failed to create log folder: %s", err)
 	}
 
-	configPath := GetConfigPath()
-	// Check if configPath exists and is a directory (can happen with Docker volume mounts)
-	// If it's a directory, we can't remove it (it's mounted), so use an alternative path
-	if stat, err := os.Stat(configPath); err == nil && stat.IsDir() {
-		logger.Warningf("Config path %s is a directory (likely a Docker volume mount), using alternative path", configPath)
-		// Try alternative paths in order of preference
-		alternativePaths := []string{
-			config.GetBinFolderPath() + "/xray-config.json",
-			"/app/config/config.json",
-			"/tmp/xray-config.json",
-		}
-		foundAlternative := false
-		for _, altPath := range alternativePaths {
-			// Check if this path is available (doesn't exist or is a file, not a directory)
-			if stat, err := os.Stat(altPath); err != nil {
-				// Path doesn't exist, we can use it
-				configPath = altPath
-				foundAlternative = true
-				break
-			} else if !stat.IsDir() {
-				// Path exists and is a file, we can use it
-				configPath = altPath
-				foundAlternative = true
-				break
-			}
-		}
-		if !foundAlternative {
-			return common.NewErrorf("Failed to find alternative config path: all paths are directories")
-		}
-		logger.Infof("Using alternative config path: %s", configPath)
-	}
-	// Ensure parent directory exists
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o770); err != nil {
-		return common.NewErrorf("Failed to create config directory: %v", err)
-	}
-	err = os.WriteFile(configPath, data, fs.ModePerm)
+	configPath, err := WriteConfigFile(p.config)
 	if err != nil {
-		return common.NewErrorf("Failed to write configuration file: %v", err)
+		return err
 	}
 
 	cmd := exec.Command(GetBinaryPath(), "-c", configPath)
@@ -311,6 +271,56 @@ func (p *process) Start() (err error) {
 	p.refreshAPIPort()
 
 	return nil
+}
+
+// WriteConfigFile writes the Xray configuration to a file.
+// This is used both for starting Xray and for pre-generating config at startup.
+// It returns the path to the written config file.
+func WriteConfigFile(xrayConfig *Config) (string, error) {
+	data, err := json.MarshalIndent(xrayConfig, "", "  ")
+	if err != nil {
+		return "", common.NewErrorf("Failed to generate XRAY configuration files: %v", err)
+	}
+
+	configPath := GetConfigPath()
+	// Check if configPath exists and is a directory (can happen with Docker volume mounts)
+	// If it's a directory, we can't remove it (it's mounted), so use an alternative path
+	if stat, err := os.Stat(configPath); err == nil && stat.IsDir() {
+		logger.Warningf("Config path %s is a directory (likely a Docker volume mount), using alternative path", configPath)
+		// Try alternative paths in order of preference
+		alternativePaths := []string{
+			config.GetBinFolderPath() + "/xray-config.json",
+			"/app/config/config.json",
+			"/tmp/xray-config.json",
+		}
+		foundAlternative := false
+		for _, altPath := range alternativePaths {
+			// Check if this path is available (doesn't exist or is a file, not a directory)
+			if stat, err := os.Stat(altPath); err != nil {
+				// Path doesn't exist, we can use it
+				configPath = altPath
+				foundAlternative = true
+				break
+			} else if !stat.IsDir() {
+				// Path exists and is a file, we can use it
+				configPath = altPath
+				foundAlternative = true
+				break
+			}
+		}
+		if !foundAlternative {
+			return "", common.NewErrorf("Failed to find alternative config path: all paths are directories")
+		}
+		logger.Infof("Using alternative config path: %s", configPath)
+	}
+	// Ensure parent directory exists
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o770); err != nil {
+		return "", common.NewErrorf("Failed to create config directory: %v", err)
+	}
+	if err := os.WriteFile(configPath, data, fs.ModePerm); err != nil {
+		return "", common.NewErrorf("Failed to write configuration file: %v", err)
+	}
+	return configPath, nil
 }
 
 // Stop terminates the running Xray process.

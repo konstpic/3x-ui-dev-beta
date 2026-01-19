@@ -372,7 +372,9 @@ func (a *InboundController) updateInbound(c *gin.Context) {
 	}
 	inbound, needRestart, err := a.inboundService.UpdateInbound(inbound)
 	if err != nil {
-		logger.Errorf("Failed to update inbound: %v", err)
+		// #region agent log
+		logger.Infof("[DEBUG-AGENT] updateInbound controller: ERROR from UpdateInbound, id=%d, error=%v", id, err)
+		// #endregion
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}

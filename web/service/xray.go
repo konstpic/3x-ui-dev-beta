@@ -32,6 +32,17 @@ type XrayService struct {
 	xrayAPI        xray.XrayAPI
 }
 
+// NewXrayService creates a new XrayService with default dependencies.
+// This is used in places (like application startup) where we don't have
+// an already-wired instance but need to operate on Xray configuration.
+func NewXrayService() XrayService {
+	return XrayService{
+		inboundService: InboundService{},
+		settingService: SettingService{},
+		nodeService:    NodeService{},
+	}
+}
+
 // IsXrayRunning checks if the Xray process is currently running.
 func (s *XrayService) IsXrayRunning() bool {
 	return p != nil && p.IsRunning()
@@ -93,14 +104,24 @@ func RemoveIndex(s []any, index int) []any {
 
 // GetXrayConfig retrieves and builds the Xray configuration from settings and inbounds.
 func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
+	// Ensure xrayTemplateConfig is valid before using it.
+	// This is critical when updating only the panel image without DB migrations,
+	// as old JSON in the DB may be incompatible with the new code.
+	if err := s.settingService.EnsureXrayTemplateConfigValid(); err != nil {
+		logger.Infof("[DEBUG-AGENT] GetXrayConfig: failed EnsureXrayTemplateConfigValid: %v", err)
+		// Continue anyway; GetXrayConfigTemplate() will still try to return something.
+	}
+
 	templateConfig, err := s.settingService.GetXrayConfigTemplate()
 	if err != nil {
+		logger.Infof("[DEBUG-AGENT] GetXrayConfig: GetXrayConfigTemplate error: %v", err)
 		return nil, err
 	}
 
 	xrayConfig := &xray.Config{}
 	err = json.Unmarshal([]byte(templateConfig), xrayConfig)
 	if err != nil {
+		logger.Infof("[DEBUG-AGENT] GetXrayConfig: failed to unmarshal template JSON: %v", err)
 		return nil, err
 	}
 
@@ -289,7 +310,12 @@ func (s *XrayService) restartXrayMultiMode(isForce bool) error {
 		return fmt.Errorf("failed to get inbounds: %w", err)
 	}
 
-	// Get template config
+	// Get template config (ensure it's valid first)
+	if err := s.settingService.EnsureXrayTemplateConfigValid(); err != nil {
+		logger.Warningf("Failed to ensure xrayTemplateConfig is valid in restartXrayMultiMode: %v", err)
+		// Continue anyway; we'll still try to use what we have.
+	}
+
 	templateConfig, err := s.settingService.GetXrayConfigTemplate()
 	if err != nil {
 		return err
@@ -514,6 +540,29 @@ func (s *XrayService) restartXrayMultiMode(isForce bool) error {
 		logger.Infof("Successfully applied config to all %d node(s)", len(nodes))
 	}
 
+	return nil
+}
+
+// EnsureXrayConfigFile generates and saves the Xray configuration file from database.
+// This ensures the config file is ready before Xray starts, even if Xray is not yet running.
+// The configuration is built from xrayTemplateConfig in database and current inbounds.
+func (s *XrayService) EnsureXrayConfigFile() error {
+	// Ensure template config is valid in DB
+	if err := s.settingService.EnsureXrayTemplateConfigValid(); err != nil {
+		logger.Warningf("Failed to ensure xrayTemplateConfig is valid in EnsureXrayConfigFile: %v", err)
+		// Continue; GetXrayConfig may still succeed.
+	}
+
+	cfg, err := s.GetXrayConfig()
+	if err != nil {
+		return err
+	}
+
+	if _, err := xray.WriteConfigFile(cfg); err != nil {
+		return err
+	}
+
+	logger.Info("Xray configuration file pre-generated from database")
 	return nil
 }
 

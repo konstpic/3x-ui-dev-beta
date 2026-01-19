@@ -34,6 +34,7 @@ func (a *XraySettingController) initRouter(g *gin.RouterGroup) {
 	g.POST("/getFullConfig", a.getFullXrayConfig)
 	g.POST("/warp/:action", a.warp)
 	g.POST("/update", a.updateSetting)
+	g.POST("/resetToDefault", a.resetToDefault)
 	g.POST("/resetOutboundsTraffic", a.resetOutboundsTraffic)
 }
 
@@ -57,6 +58,13 @@ func (a *XraySettingController) getXraySetting(c *gin.Context) {
 func (a *XraySettingController) updateSetting(c *gin.Context) {
 	xraySetting := c.PostForm("xraySetting")
 	err := a.XraySettingService.SaveXraySetting(xraySetting)
+	jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), err)
+}
+
+// resetToDefault resets the Xray template configuration to default values stored in the application.
+// It overwrites the current xrayTemplateConfig value in the settings table.
+func (a *XraySettingController) resetToDefault(c *gin.Context) {
+	err := a.SettingService.ResetXrayTemplateConfigToDefault()
 	jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), err)
 }
 

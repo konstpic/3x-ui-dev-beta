@@ -23,10 +23,14 @@ import (
 )
 
 //go:embed config.json
-var xrayTemplateConfig string
+var defaultXrayTemplateConfig string
 
 var defaultValueMap = map[string]string{
-	"xrayTemplateConfig":          xrayTemplateConfig,
+	// Default Xray template configuration. At runtime, the real source of truth
+	// is always the "xrayTemplateConfig" record in the settings table; this
+	// value is only used as an initial/default template when there is no valid
+	// value in the database.
+	"xrayTemplateConfig":          defaultXrayTemplateConfig,
 	"webListen":                   "",
 	"webDomain":                   "",
 	"webPort":                     "2053",
@@ -106,9 +110,51 @@ var defaultValueMap = map[string]string{
 // It handles configuration storage, retrieval, and validation for all system settings.
 type SettingService struct{}
 
+// EnsureXrayTemplateConfigValid ensures that xrayTemplateConfig in the database is valid.
+// If it's missing or invalid, it updates it from the default template.
+// This is critical when updating only the panel image without updating the database,
+// as the old config structure might be incompatible with the new code.
+// All configuration is now stored in database, not in embedded files.
+func (s *SettingService) EnsureXrayTemplateConfigValid() error {
+	db := database.GetDB()
+
+	current := &model.Setting{}
+	err := db.Model(&model.Setting{}).Where("key = ?", "xrayTemplateConfig").First(current).Error
+	if database.IsNotFound(err) {
+		// No record: initialize from default template
+		logger.Infof("xrayTemplateConfig not found in DB, initializing with default template")
+		return s.saveSetting("xrayTemplateConfig", defaultXrayTemplateConfig)
+	}
+	if err != nil {
+		return err
+	}
+
+	value := strings.TrimSpace(current.Value)
+	if value == "" || value == "{}" {
+		logger.Warning("xrayTemplateConfig in DB is empty or placeholder, resetting to default template")
+		return s.saveSetting("xrayTemplateConfig", defaultXrayTemplateConfig)
+	}
+
+	// Validate JSON by unmarshalling into xray.Config; if invalid, reset to default
+	cfg := &xray.Config{}
+	if err := json.Unmarshal([]byte(value), cfg); err != nil {
+		logger.Warningf("Invalid xrayTemplateConfig in DB, resetting to default template: %v", err)
+		return s.saveSetting("xrayTemplateConfig", defaultXrayTemplateConfig)
+	}
+
+	return nil
+}
+
+// ResetXrayTemplateConfigToDefault resets the xrayTemplateConfig setting to the
+// built-in default template. Intended to be called from admin UI / API.
+func (s *SettingService) ResetXrayTemplateConfigToDefault() error {
+	logger.Info("Resetting xrayTemplateConfig to default template")
+	return s.saveSetting("xrayTemplateConfig", defaultXrayTemplateConfig)
+}
+
 func (s *SettingService) GetDefaultJsonConfig() (any, error) {
 	var jsonData any
-	err := json.Unmarshal([]byte(xrayTemplateConfig), &jsonData)
+	err := json.Unmarshal([]byte(defaultXrayTemplateConfig), &jsonData)
 	if err != nil {
 		return nil, err
 	}
@@ -808,7 +854,7 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 
 func (s *SettingService) GetDefaultXrayConfig() (any, error) {
 	var jsonData any
-	err := json.Unmarshal([]byte(xrayTemplateConfig), &jsonData)
+	err := json.Unmarshal([]byte(defaultXrayTemplateConfig), &jsonData)
 	if err != nil {
 		return nil, err
 	}
