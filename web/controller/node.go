@@ -177,6 +177,25 @@ func (a *NodeController) addNode(c *gin.Context) {
 	// Broadcast nodes update via WebSocket
 	a.broadcastNodesUpdate()
 
+	// Send notification to Telegram bot if multi-node mode is enabled
+	settingService := service.SettingService{}
+	multiMode, err := settingService.GetMultiNodeMode()
+	if err == nil && multiMode {
+		tgbotService := service.Tgbot{}
+		if tgbotService.IsRunning() {
+			msg := fmt.Sprintf("✅ <b>Node Registered Successfully</b>\n\n"+
+				"<b>Name:</b> %s\n"+
+				"<b>Address:</b> %s\n"+
+				"<b>Status:</b> %s\n"+
+				"<b>Time:</b> %s",
+				node.Name,
+				node.Address,
+				node.Status,
+				time.Now().Format("2006-01-02 15:04:05"))
+			tgbotService.SendMsgToTgbotAdmins(msg)
+		}
+	}
+
 	logger.Infof("[Node: %s] Node added and registered successfully", node.Name)
 	jsonMsgObj(c, "Node added and registered successfully", node, nil)
 }

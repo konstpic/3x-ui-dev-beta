@@ -202,6 +202,9 @@ func (s *NodeService) DeleteNode(id int) error {
 
 // CheckNodeHealth checks if a node is online and updates its status and response time.
 func (s *NodeService) CheckNodeHealth(node *model.Node) error {
+	// Get previous status before checking (to detect status changes)
+	previousStatus := node.Status
+	
 	status, responseTime, err := s.CheckNodeStatus(node)
 	if err != nil {
 		node.Status = "error"
@@ -210,8 +213,21 @@ func (s *NodeService) CheckNodeHealth(node *model.Node) error {
 		if updateErr := s.UpdateNode(node); updateErr != nil {
 			logger.Errorf("[Node: %s] Failed to update node status: %v", node.Name, updateErr)
 		}
+		// Send notification if status changed to error/offline
+		if previousStatus != "error" && previousStatus != "offline" {
+			s.notifyNodeStatusChange(node, previousStatus, "error")
+		}
 		return err
 	}
+	
+	// Determine if status actually changed (online <-> offline/error)
+	oldStatus := previousStatus
+	newStatus := status
+	if (oldStatus == "online" && (newStatus == "offline" || newStatus == "error")) ||
+		((oldStatus == "offline" || oldStatus == "error") && newStatus == "online") {
+		s.notifyNodeStatusChange(node, oldStatus, newStatus)
+	}
+	
 	node.Status = status
 	node.ResponseTime = responseTime
 	node.LastCheck = time.Now().Unix()
@@ -221,6 +237,62 @@ func (s *NodeService) CheckNodeHealth(node *model.Node) error {
 		return updateErr
 	}
 	return nil
+}
+
+// notifyNodeStatusChange sends a Telegram notification when a node's status changes.
+func (s *NodeService) notifyNodeStatusChange(node *model.Node, oldStatus, newStatus string) {
+	// Check if multi-node mode is enabled
+	settingService := SettingService{}
+	multiMode, err := settingService.GetMultiNodeMode()
+	if err != nil || !multiMode {
+		return // Skip if multi-node mode is not enabled
+	}
+
+	// Check if Telegram bot is running
+	tgbotService := Tgbot{}
+	if !tgbotService.IsRunning() {
+		return // Skip if bot is not running
+	}
+
+	// Build notification message
+	var msg string
+	var emoji string
+	if newStatus == "online" {
+		emoji = "✅"
+		msg = fmt.Sprintf("%s <b>Node Online</b>\n\n"+
+			"<b>Name:</b> %s\n"+
+			"<b>Address:</b> %s\n"+
+			"<b>Previous Status:</b> %s\n"+
+			"<b>Current Status:</b> %s\n"+
+			"<b>Response Time:</b> %d ms\n"+
+			"<b>Time:</b> %s",
+			emoji,
+			node.Name,
+			node.Address,
+			oldStatus,
+			newStatus,
+			node.ResponseTime,
+			time.Now().Format("2006-01-02 15:04:05"))
+	} else if newStatus == "offline" || newStatus == "error" {
+		emoji = "❌"
+		msg = fmt.Sprintf("%s <b>Node Offline/Error</b>\n\n"+
+			"<b>Name:</b> %s\n"+
+			"<b>Address:</b> %s\n"+
+			"<b>Previous Status:</b> %s\n"+
+			"<b>Current Status:</b> %s\n"+
+			"<b>Time:</b> %s",
+			emoji,
+			node.Name,
+			node.Address,
+			oldStatus,
+			newStatus,
+			time.Now().Format("2006-01-02 15:04:05"))
+	} else {
+		return // Don't notify for other status changes
+	}
+
+	// Send notification to all admins
+	tgbotService.SendMsgToTgbotAdmins(msg)
 }
 
 // createHTTPClient creates an HTTP client configured for the node's TLS settings.

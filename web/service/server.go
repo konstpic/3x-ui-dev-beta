@@ -96,6 +96,15 @@ type Status struct {
 		Online int `json:"online"`
 		Total  int `json:"total"`
 	} `json:"nodes"`
+	Database struct {
+		Size          uint64 `json:"size"`          // Database size in bytes
+		Tables        int    `json:"tables"`        // Number of tables
+		TotalRows     uint64 `json:"totalRows"`     // Total number of rows across all tables
+		OpenConns     int    `json:"openConns"`     // Current open connections
+		IdleConns     int    `json:"idleConns"`     // Current idle connections
+		MaxOpenConns  int    `json:"maxOpenConns"`  // Maximum open connections
+		MaxIdleConns  int    `json:"maxIdleConns"`  // Maximum idle connections
+	} `json:"database"`
 }
 
 // Release represents information about a software release from GitHub.
@@ -472,6 +481,10 @@ func (s *ServerService) GetStatus(lastStatus *Status) *Status {
 		status.Nodes.Total = 0
 		status.Nodes.Online = 0
 	}
+
+	// Database statistics
+	dbStats := s.getDatabaseStats()
+	status.Database = dbStats
 
 	return status
 }
@@ -1814,6 +1827,82 @@ func (s *ServerService) GetNewUUID() (map[string]string, error) {
 	return map[string]string{
 		"uuid": newUUID.String(),
 	}, nil
+}
+
+// getDatabaseStats retrieves database statistics including size, table count, row count, and connection pool info.
+func (s *ServerService) getDatabaseStats() struct {
+	Size         uint64 `json:"size"`
+	Tables       int    `json:"tables"`
+	TotalRows    uint64 `json:"totalRows"`
+	OpenConns    int    `json:"openConns"`
+	IdleConns    int    `json:"idleConns"`
+	MaxOpenConns int    `json:"maxOpenConns"`
+	MaxIdleConns int    `json:"maxIdleConns"`
+} {
+	db := database.GetDB()
+	if db == nil {
+		return struct {
+			Size         uint64 `json:"size"`
+			Tables       int    `json:"tables"`
+			TotalRows    uint64 `json:"totalRows"`
+			OpenConns    int    `json:"openConns"`
+			IdleConns    int    `json:"idleConns"`
+			MaxOpenConns int    `json:"maxOpenConns"`
+			MaxIdleConns int    `json:"maxIdleConns"`
+		}{}
+	}
+
+	stats := struct {
+		Size         uint64 `json:"size"`
+		Tables       int    `json:"tables"`
+		TotalRows    uint64 `json:"totalRows"`
+		OpenConns    int    `json:"openConns"`
+		IdleConns    int    `json:"idleConns"`
+		MaxOpenConns int    `json:"maxOpenConns"`
+		MaxIdleConns int    `json:"maxIdleConns"`
+	}{}
+
+	// Get connection pool statistics
+	sqlDB, err := db.DB()
+	if err == nil {
+		dbStats := sqlDB.Stats()
+		stats.OpenConns = dbStats.OpenConnections
+		stats.IdleConns = dbStats.Idle
+		stats.MaxOpenConns = dbStats.MaxOpenConnections
+		// MaxIdleConns is set during initialization, we need to get it from config or use a reasonable default
+		// Since we can't easily get it from Stats(), we'll use a default value (5 as set in InitDB)
+		stats.MaxIdleConns = 5 // Default from database/db.go
+	}
+
+	// Get database size (PostgreSQL)
+	var dbSize uint64
+	err = db.Raw(`SELECT pg_database_size(current_database())`).Scan(&dbSize).Error
+	if err == nil {
+		stats.Size = dbSize
+	}
+
+	// Get table count
+	var tableCount int64
+	err = db.Raw(`
+		SELECT COUNT(*) 
+		FROM information_schema.tables 
+		WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+	`).Scan(&tableCount).Error
+	if err == nil {
+		stats.Tables = int(tableCount)
+	}
+
+	// Get total row count across all tables
+	var totalRows uint64
+	err = db.Raw(`
+		SELECT SUM(n_live_tup)::BIGINT
+		FROM pg_stat_user_tables
+	`).Scan(&totalRows).Error
+	if err == nil {
+		stats.TotalRows = totalRows
+	}
+
+	return stats
 }
 
 func (s *ServerService) GetNewmlkem768() (any, error) {

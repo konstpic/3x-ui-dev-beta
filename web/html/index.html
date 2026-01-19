@@ -23,7 +23,7 @@
               <a-col>
                 <a-card hoverable>
                   <a-row :gutter="[0, isMobile ? 16 : 0]">
-                    <a-col :sm="24" :md="12">
+                    <a-col :sm="24" :md="multiNodeMode ? 8 : 12">
                       <a-row>
                         <a-col :span="12" class="text-center">
                           <a-progress type="dashboard" status="normal" :stroke-color="status.cpu.color"
@@ -55,7 +55,7 @@
                         </a-col>
                       </a-row>
                     </a-col>
-                    <a-col :sm="24" :md="12">
+                    <a-col :sm="24" :md="multiNodeMode ? 8 : 12">
                       <a-row>
                         <a-col :span="12" class="text-center">
                           <a-progress type="dashboard" status="normal" :stroke-color="status.swap.color"
@@ -75,18 +75,16 @@
                         </a-col>
                       </a-row>
                     </a-col>
-                  </a-row>
-                </a-card>
-              </a-col>
-              <a-col v-if="multiNodeMode" :sm="24" :lg="12">
-                <a-card hoverable>
-                  <a-row :gutter="[0, isMobile ? 16 : 0]">
-                    <a-col :span="24" class="text-center">
-                      <a-progress type="dashboard" status="normal" :stroke-color="status.nodesColor"
-                        :percent="status.nodesPercent"></a-progress>
-                      <div>
-                        <b>{{ i18n "pages.index.nodesAvailability" }}:</b> [[ status.nodes.online ]] / [[ status.nodes.total ]]
-                      </div>
+                    <a-col v-if="multiNodeMode" :sm="24" :md="8">
+                      <a-row>
+                        <a-col :span="24" class="text-center">
+                          <a-progress type="dashboard" status="normal" :stroke-color="status.nodesColor"
+                            :percent="status.nodesPercent"></a-progress>
+                          <div>
+                            <b>{{ i18n "pages.index.nodesAvailability" }}:</b> [[ status.nodes.online ]] / [[ status.nodes.total ]]
+                          </div>
+                        </a-col>
+                      </a-row>
                     </a-col>
                   </a-row>
                 </a-card>
@@ -306,6 +304,40 @@
                       <a-custom-statistic title="UDP" :value="status.udpCount">
                         <template #prefix>
                           <a-icon type="swap" />
+                        </template>
+                      </a-custom-statistic>
+                    </a-col>
+                  </a-row>
+                </a-card>
+              </a-col>
+              <a-col :sm="24" :lg="12">
+                <a-card title='{{ i18n "pages.index.database" }}' hoverable>
+                  <a-row :gutter="isMobile ? [8,8] : 0">
+                    <a-col :span="12">
+                      <a-custom-statistic title='{{ i18n "pages.index.dbSize" }}' :value="SizeFormatter.sizeFormat(status.database.size)">
+                        <template #prefix>
+                          <a-icon type="database" />
+                        </template>
+                      </a-custom-statistic>
+                    </a-col>
+                    <a-col :span="12">
+                      <a-custom-statistic title='{{ i18n "pages.index.dbTables" }}' :value="status.database.tables">
+                        <template #prefix>
+                          <a-icon type="table" />
+                        </template>
+                      </a-custom-statistic>
+                    </a-col>
+                    <a-col :span="12">
+                      <a-custom-statistic title='{{ i18n "pages.index.dbRows" }}' :value="(status.database.totalRows || 0).toLocaleString()">
+                        <template #prefix>
+                          <a-icon type="file-text" />
+                        </template>
+                      </a-custom-statistic>
+                    </a-col>
+                    <a-col :span="12">
+                      <a-custom-statistic title='{{ i18n "pages.index.dbConnections" }}' :value="`${status.database.openConns}/${status.database.maxOpenConns}`">
+                        <template #prefix>
+                          <a-icon type="link" />
                         </template>
                       </a-custom-statistic>
                     </a-col>
@@ -713,6 +745,7 @@
 
       this.xray = { state: 'stop', stateMsg: "", errorMsg: "", version: "", color: "" };
       this.nodes = { online: 0, total: 0 };
+      this.database = { size: 0, tables: 0, totalRows: 0, openConns: 0, idleConns: 0, maxOpenConns: 0, maxIdleConns: 0 };
 
       if (data == null) {
         return;
@@ -739,6 +772,19 @@
         this.nodes = { online: data.nodes.online || 0, total: data.nodes.total || 0 };
       } else {
         this.nodes = { online: 0, total: 0 };
+      }
+      if (data.database) {
+        this.database = {
+          size: data.database.size || 0,
+          tables: data.database.tables || 0,
+          totalRows: data.database.totalRows || 0,
+          openConns: data.database.openConns || 0,
+          idleConns: data.database.idleConns || 0,
+          maxOpenConns: data.database.maxOpenConns || 0,
+          maxIdleConns: data.database.maxIdleConns || 0
+        };
+      } else {
+        this.database = { size: 0, tables: 0, totalRows: 0, openConns: 0, idleConns: 0, maxOpenConns: 0, maxIdleConns: 0 };
       }
       switch (this.xray.state) {
         case 'running':
