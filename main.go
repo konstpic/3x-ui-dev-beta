@@ -50,6 +50,22 @@ func runWebServer() {
 		log.Fatalf("Error initializing database: %v", err)
 	}
 
+	// Ensure xrayTemplateConfig is present and valid in the database.
+	// This is critical when the panel image is updated without applying DB migrations.
+	settingService := service.SettingService{}
+	if err := settingService.EnsureXrayTemplateConfigValid(); err != nil {
+		logger.Warningf("Failed to ensure xrayTemplateConfig is valid: %v", err)
+		// Do not abort startup; Xray-related operations may still try to recover later.
+	}
+
+	// Pre-generate Xray configuration file from database at startup.
+	// This ensures the config file is ready before Xray starts.
+	xrayService := service.NewXrayService()
+	if err := xrayService.EnsureXrayConfigFile(); err != nil {
+		logger.Warningf("Failed to pre-generate Xray config file: %v", err)
+		// Don't fail startup - Xray will attempt to generate config when it starts.
+	}
+
 	// Initialize Redis cache (embedded mode by default)
 	err = web.InitRedisCache("")
 	if err != nil {
