@@ -354,14 +354,66 @@
         }
       },
       async updateAllSetting() {
-        this.loading(true);
-        const msg = await HttpUtil.post("/panel/setting/update", this.allSetting);
-        this.loading(false);
-        if (msg.success) {
-          Vue.prototype.$message.success('{{ i18n "pages.settings.toasts.modifySettings" }}');
-          await this.getAllSetting();
+        // Check if coreType changed
+        const oldCoreType = this.oldAllSetting.coreType || 'xray';
+        const newCoreType = this.allSetting.coreType || 'xray';
+        const coreTypeChanged = oldCoreType !== newCoreType;
+        
+        if (coreTypeChanged) {
+          // Show confirmation for core switch
+          this.$confirm({
+            title: 'Switch Core',
+            content: `Are you sure you want to switch from ${oldCoreType} to ${newCoreType}? This will stop the current core, convert the configuration, and start the new core.`,
+            class: themeSwitcher.currentTheme,
+            okText: 'Switch and Save',
+            cancelText: 'Cancel',
+            onOk: async () => {
+              this.loading(true);
+              try {
+                // First switch the core
+                const switchMsg = await HttpUtil.post("/panel/xray/core/switch", { coreType: newCoreType });
+                if (!switchMsg || !switchMsg.success) {
+                  this.loading(false);
+                  Vue.prototype.$message.error(switchMsg?.msg || 'Failed to switch core');
+                  // Revert coreType
+                  this.allSetting.coreType = oldCoreType;
+                  return;
+                }
+                
+                // Then update all settings
+                const msg = await HttpUtil.post("/panel/setting/update", this.allSetting);
+                this.loading(false);
+                if (msg.success) {
+                  Vue.prototype.$message.success('{{ i18n "pages.settings.toasts.modifySettings" }}');
+                  await this.getAllSetting();
+                } else {
+                  Vue.prototype.$message.error(msg.msg || '{{ i18n "pages.settings.toasts.getSettings" }}');
+                  // Revert coreType
+                  this.allSetting.coreType = oldCoreType;
+                }
+              } catch (error) {
+                this.loading(false);
+                Vue.prototype.$message.error('Failed to update settings: ' + error.message);
+                // Revert coreType
+                this.allSetting.coreType = oldCoreType;
+              }
+            },
+            onCancel: () => {
+              // Revert coreType
+              this.allSetting.coreType = oldCoreType;
+            }
+          });
         } else {
-          Vue.prototype.$message.error(msg.msg || '{{ i18n "pages.settings.toasts.getSettings" }}');
+          // Normal update without core switch
+          this.loading(true);
+          const msg = await HttpUtil.post("/panel/setting/update", this.allSetting);
+          this.loading(false);
+          if (msg.success) {
+            Vue.prototype.$message.success('{{ i18n "pages.settings.toasts.modifySettings" }}');
+            await this.getAllSetting();
+          } else {
+            Vue.prototype.$message.error(msg.msg || '{{ i18n "pages.settings.toasts.getSettings" }}');
+          }
         }
       },
       async updateUser() {

@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"fmt"
+
 	"github.com/mhsanaei/3x-ui/v2/web/service"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +38,10 @@ func (a *XraySettingController) initRouter(g *gin.RouterGroup) {
 	g.POST("/update", a.updateSetting)
 	g.POST("/resetToDefault", a.resetToDefault)
 	g.POST("/resetOutboundsTraffic", a.resetOutboundsTraffic)
+	
+	// Core switching endpoints
+	g.GET("/core/type", a.getCoreType)
+	g.POST("/core/switch", a.switchCore)
 }
 
 // getXraySetting retrieves the Xray configuration template and inbound tags.
@@ -136,4 +142,31 @@ func (a *XraySettingController) resetOutboundsTraffic(c *gin.Context) {
 		return
 	}
 	jsonObj(c, "", nil)
+}
+
+// getCoreType returns the current core type (xray or sing-box).
+func (a *XraySettingController) getCoreType(c *gin.Context) {
+	coreType, err := a.SettingService.GetCoreType()
+	if err != nil {
+		jsonMsg(c, "Failed to get core type", err)
+		return
+	}
+	jsonObj(c, map[string]string{"coreType": coreType}, nil)
+}
+
+// switchCore switches between xray and sing-box cores with automatic configuration conversion.
+func (a *XraySettingController) switchCore(c *gin.Context) {
+	newType := c.PostForm("coreType")
+	if newType != "xray" && newType != "sing-box" {
+		jsonMsg(c, "Invalid core type. Must be 'xray' or 'sing-box'", fmt.Errorf("invalid core type: %s", newType))
+		return
+	}
+	
+	err := a.SettingService.SwitchCoreWithConversion(newType)
+	if err != nil {
+		jsonMsg(c, "Failed to switch core", err)
+		return
+	}
+	
+	jsonObj(c, map[string]string{"message": "Core switched successfully", "coreType": newType}, nil)
 }

@@ -2,8 +2,11 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 
+	"github.com/mhsanaei/3x-ui/v2/logger"
+	"github.com/mhsanaei/3x-ui/v2/singbox"
 	"github.com/mhsanaei/3x-ui/v2/util/json_util"
 	"github.com/mhsanaei/3x-ui/v2/xray"
 )
@@ -21,6 +24,15 @@ const (
 	Shadowsocks Protocol = "shadowsocks"
 	Mixed       Protocol = "mixed"
 	WireGuard   Protocol = "wireguard"
+)
+
+// CoreType represents the proxy core type.
+type CoreType string
+
+// CoreType constants
+const (
+	CoreTypeXray    CoreType = "xray"
+	CoreTypeSingBox CoreType = "sing-box"
 )
 
 // User represents a user account in the 3x-ui panel.
@@ -94,6 +106,289 @@ func (i *Inbound) GenXrayInboundConfig() *xray.InboundConfig {
 		Tag:            i.Tag,
 		Sniffing:       json_util.RawMessage(i.Sniffing),
 	}
+}
+
+// GenSingBoxInboundConfig generates a sing-box inbound configuration from the Inbound model.
+// Returns nil if the protocol is not supported by sing-box.
+func (i *Inbound) GenSingBoxInboundConfig() *singbox.InboundConfig {
+	// Check if protocol is supported by sing-box
+	// According to https://sing-box.sagernet.org/configuration/, supported inbound types:
+	// direct, mixed, socks, http, shadowsocks, vmess, trojan, naive, hysteria, shadowtls,
+	// tuic, hysteria2, vless, anytls, tun, redirect, tproxy
+	// Not supported: tunnel, wireguard (different format)
+	supportedProtocols := map[Protocol]bool{
+		VMESS:       true, // vmess
+		VLESS:       true, // vless
+		Trojan:      true, // trojan
+		Shadowsocks: true, // shadowsocks
+		HTTP:        true, // http
+		Mixed:       true, // mixed
+		// Note: direct, socks, naive, hysteria, shadowtls, tuic, hysteria2, anytls,
+		// tun, redirect, tproxy are supported but may need special handling
+		// WireGuard is supported but has different format, so we skip it for now
+	}
+	
+	// Convert protocol name to lowercase for comparison
+	protocolStr := string(i.Protocol)
+	
+	// Explicitly check for unsupported protocols first
+	if i.Protocol == Tunnel || i.Protocol == WireGuard {
+		// Return nil for unsupported protocols (like "tunnel")
+		logger.Warningf("GenSingBoxInboundConfig: protocol '%s' (tag: %s, remark: %s) is not supported by sing-box, returning nil", protocolStr, i.Tag, i.Remark)
+		return nil
+	}
+	
+	// Check if protocol is in supported list
+	if !supportedProtocols[i.Protocol] {
+		// Return nil for unsupported protocols
+		logger.Warningf("GenSingBoxInboundConfig: protocol '%s' (tag: %s, remark: %s) is not in supported list, returning nil", protocolStr, i.Tag, i.Remark)
+		return nil
+	}
+	
+	inbound := &singbox.InboundConfig{
+		Type:       protocolStr,
+		Tag:        i.Tag,
+		ListenPort: i.Port,
+	}
+
+	// Set listen address
+	if i.Listen != "" {
+		inbound.Listen = json_util.RawMessage(fmt.Sprintf(`"%s"`, i.Listen))
+	} else {
+		inbound.Listen = json_util.RawMessage("null")
+	}
+
+	// Parse and convert settings based on protocol
+	var settings map[string]interface{}
+	if err := json.Unmarshal([]byte(i.Settings), &settings); err == nil {
+		switch i.Protocol {
+		case VMESS, VLESS:
+			// Convert users array
+			// In sing-box, VLESS users use "name" instead of "email"
+			// VMESS doesn't use email/name field in sing-box
+			if clients, ok := settings["clients"].([]interface{}); ok {
+				users := make([]map[string]interface{}, 0)
+				for _, client := range clients {
+					if c, ok := client.(map[string]interface{}); ok {
+						user := make(map[string]interface{})
+						if uuid, ok := c["id"].(string); ok {
+							user["uuid"] = uuid
+						}
+						// sing-box VLESS uses "name" field, not "email"
+						// VMESS in sing-box doesn't use email/name field
+						if email, ok := c["email"].(string); ok && email != "" {
+							if i.Protocol == VLESS {
+								user["name"] = email // VLESS uses "name"
+							}
+							// VMESS doesn't use email/name in sing-box, skip it
+						}
+						if flow, ok := c["flow"].(string); ok && flow != "" {
+							user["flow"] = flow
+						}
+						users = append(users, user)
+					}
+				}
+				if len(users) > 0 {
+					usersJSON, _ := json.Marshal(users)
+					inbound.Users = json_util.RawMessage(usersJSON)
+				}
+			}
+		case Trojan:
+			// Trojan uses password field directly
+			if clients, ok := settings["clients"].([]interface{}); ok && len(clients) > 0 {
+				if c, ok := clients[0].(map[string]interface{}); ok {
+					if password, ok := c["password"].(string); ok {
+						inbound.Password = password
+					}
+				}
+			}
+		case Shadowsocks:
+			// Shadowsocks uses method and password
+			if method, ok := settings["method"].(string); ok {
+				inbound.Method = method
+			}
+			if password, ok := settings["password"].(string); ok {
+				inbound.Password = password
+			} else if clients, ok := settings["clients"].([]interface{}); ok && len(clients) > 0 {
+				if c, ok := clients[0].(map[string]interface{}); ok {
+					if pwd, ok := c["password"].(string); ok {
+						inbound.Password = pwd
+					}
+				}
+			}
+		}
+	}
+
+	// Parse and convert streamSettings
+	if len(i.StreamSettings) > 0 {
+		var stream map[string]interface{}
+		if err := json.Unmarshal([]byte(i.StreamSettings), &stream); err == nil {
+			transport := make(map[string]interface{})
+			
+			// Convert network type
+			if network, ok := stream["network"].(string); ok && network != "" {
+				if network != "tcp" {
+					transport["type"] = network
+					// Convert network-specific settings
+					switch network {
+					case "ws":
+						if wsSettings, ok := stream["wsSettings"].(map[string]interface{}); ok {
+							transport["path"] = wsSettings["path"]
+							if headers, ok := wsSettings["headers"].(map[string]interface{}); ok {
+								transport["headers"] = headers
+							}
+						}
+					case "grpc":
+						if grpcSettings, ok := stream["grpcSettings"].(map[string]interface{}); ok {
+							transport["service_name"] = grpcSettings["serviceName"]
+						}
+					case "quic":
+						// QUIC settings conversion
+						if quicSettings, ok := stream["quicSettings"].(map[string]interface{}); ok {
+							transport["quic"] = quicSettings
+						}
+					}
+				}
+			}
+
+			// Convert TLS/Reality settings
+			// In sing-box, TLS and Reality are in separate "tls" field at inbound level, NOT in transport
+			// Transport is only for V2Ray transport types (ws, grpc, quic, http, httpupgrade)
+			if security, ok := stream["security"].(string); ok {
+				if security == "tls" {
+					if tlsSettings, ok := stream["tlsSettings"].(map[string]interface{}); ok {
+						tls := make(map[string]interface{})
+						if certPath, ok := tlsSettings["certificateFile"].(string); ok {
+							tls["certificate_path"] = certPath
+						}
+						if keyPath, ok := tlsSettings["keyFile"].(string); ok {
+							tls["key_path"] = keyPath
+						}
+						if serverName, ok := tlsSettings["serverName"].(string); ok {
+							tls["server_name"] = serverName
+						}
+						if alpn, ok := tlsSettings["alpn"].([]interface{}); ok {
+							tls["alpn"] = alpn
+						}
+						tls["enabled"] = true
+						tlsJSON, _ := json.Marshal(tls)
+						inbound.TLS = json_util.RawMessage(tlsJSON)
+					}
+				} else if security == "reality" {
+					if realitySettings, ok := stream["realitySettings"].(map[string]interface{}); ok {
+						// sing-box Reality structure for inbound:
+						// - server_name goes at tls level, NOT in tls.reality
+						// - tls.reality contains: enabled, handshake, private_key, short_id (array), max_time_difference
+						tls := map[string]interface{}{
+							"enabled": true,
+						}
+						
+						// server_name goes at tls level (not in reality)
+						if dest, ok := realitySettings["dest"].(string); ok {
+							tls["server_name"] = dest
+						} else if serverNames, ok := realitySettings["serverNames"].([]interface{}); ok && len(serverNames) > 0 {
+							// Use the first server name
+							if firstServerName, ok := serverNames[0].(string); ok {
+								tls["server_name"] = firstServerName
+							}
+						}
+						
+						// Reality-specific fields go in tls.reality
+						reality := map[string]interface{}{
+							"enabled": true,
+						}
+						
+						// handshake is required for Reality inbound
+						// Use dest as handshake server if available
+						if dest, ok := realitySettings["dest"].(string); ok {
+							reality["handshake"] = map[string]interface{}{
+								"server": dest,
+							}
+						} else if serverNames, ok := realitySettings["serverNames"].([]interface{}); ok && len(serverNames) > 0 {
+							if firstServerName, ok := serverNames[0].(string); ok {
+								reality["handshake"] = map[string]interface{}{
+									"server": firstServerName,
+								}
+							}
+						}
+						
+						if privateKey, ok := realitySettings["privateKey"].(string); ok {
+							reality["private_key"] = privateKey
+						}
+						
+						// short_id must be an array for inbound Reality
+						if shortIds, ok := realitySettings["shortIds"].([]interface{}); ok && len(shortIds) > 0 {
+							// Convert to array of strings
+							shortIdArray := make([]string, 0, len(shortIds))
+							for _, sid := range shortIds {
+								if shortId, ok := sid.(string); ok {
+									shortIdArray = append(shortIdArray, shortId)
+								}
+							}
+							if len(shortIdArray) > 0 {
+								reality["short_id"] = shortIdArray
+							}
+						}
+						
+						// max_time_difference (optional)
+						if maxTimeDiff, ok := realitySettings["maxTimeDiff"].(int64); ok && maxTimeDiff > 0 {
+							reality["max_time_difference"] = fmt.Sprintf("%dms", maxTimeDiff)
+						}
+						
+						tls["reality"] = reality
+						tlsJSON, _ := json.Marshal(tls)
+						inbound.TLS = json_util.RawMessage(tlsJSON)
+					}
+				}
+			}
+
+			// Only add transport if it has V2Ray transport type (ws, grpc, quic, http, httpupgrade)
+			// Transport is NOT used for TLS/Reality - those go in inbound.tls
+			// Make sure transport doesn't contain reality or tls (those should be in inbound.TLS)
+			_, hasRealityInTransport := transport["reality"]
+			_, hasTLSInTransport := transport["tls"]
+			if hasRealityInTransport || hasTLSInTransport {
+				logger.Warningf("GenSingBoxInboundConfig: found reality/tls in transport for inbound %s (tag: %s), removing from transport (should be in tls field)", i.Remark, i.Tag)
+				delete(transport, "reality")
+				delete(transport, "tls")
+			}
+			
+			// Only add transport if it has a valid V2Ray transport type and is not empty
+			transportType, hasType := transport["type"].(string)
+			if hasType && transportType != "" {
+				// Validate transport type is a valid V2Ray transport
+				validTransportTypes := map[string]bool{
+					"ws":         true,
+					"grpc":       true,
+					"quic":       true,
+					"http":       true,
+					"httpupgrade": true,
+				}
+				if validTransportTypes[transportType] {
+					transportJSON, _ := json.Marshal(transport)
+					inbound.Transport = json_util.RawMessage(transportJSON)
+				} else {
+					logger.Warningf("GenSingBoxInboundConfig: invalid transport type '%s' for inbound %s (tag: %s), skipping transport", transportType, i.Remark, i.Tag)
+				}
+			}
+			// If no network type or invalid type, don't add transport (TCP default)
+		}
+	}
+
+	// Parse sniffing settings
+	if len(i.Sniffing) > 0 {
+		var sniff map[string]interface{}
+		if err := json.Unmarshal([]byte(i.Sniffing), &sniff); err == nil {
+			if enabled, ok := sniff["enabled"].(bool); ok {
+				inbound.Sniff = enabled
+			}
+			if destOverride, ok := sniff["destOverride"].([]interface{}); ok && len(destOverride) > 0 {
+				inbound.SniffOverrideDestination = true
+			}
+		}
+	}
+
+	return inbound
 }
 
 // Setting stores key-value configuration settings for the 3x-ui panel.

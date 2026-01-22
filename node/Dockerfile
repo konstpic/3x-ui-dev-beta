@@ -62,6 +62,41 @@ RUN mkdir -p bin && \
     echo "Verifying xray binary:" && \
     ls -lh "xray-linux-${FNAME}" && \
     test -f "xray-linux-${FNAME}" && echo "✓ xray-linux-${FNAME} exists" && \
+    echo "Downloading sing-box for ${TARGETARCH}..." && \
+    case ${FNAME} in \
+        amd64) \
+            SINGBOX_ARCH="amd64" \
+            ;; \
+        arm64) \
+            SINGBOX_ARCH="arm64" \
+            ;; \
+        arm32) \
+            SINGBOX_ARCH="armv7" \
+            ;; \
+        armv6) \
+            SINGBOX_ARCH="armv6" \
+            ;; \
+        i386) \
+            SINGBOX_ARCH="386" \
+            ;; \
+        *) \
+            SINGBOX_ARCH="amd64" \
+            ;; \
+    esac && \
+    SINGBOX_VERSION="1.12.17" && \
+    curl -sfLRO "https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-${SINGBOX_ARCH}.tar.gz" && \
+    if [ -f "sing-box-${SINGBOX_VERSION}-linux-${SINGBOX_ARCH}.tar.gz" ]; then \
+        tar -xzf "sing-box-${SINGBOX_VERSION}-linux-${SINGBOX_ARCH}.tar.gz" && \
+        rm -f "sing-box-${SINGBOX_VERSION}-linux-${SINGBOX_ARCH}.tar.gz" && \
+        if [ -d "sing-box-${SINGBOX_VERSION}-linux-${SINGBOX_ARCH}" ]; then \
+            mv "sing-box-${SINGBOX_VERSION}-linux-${SINGBOX_ARCH}/sing-box" "sing-box-linux-${FNAME}" && \
+            rm -rf "sing-box-${SINGBOX_VERSION}-linux-${SINGBOX_ARCH}"; \
+        elif [ -f "sing-box" ]; then \
+            mv sing-box "sing-box-linux-${FNAME}"; \
+        fi && \
+        chmod +x "sing-box-linux-${FNAME}" && \
+        echo "✓ sing-box-linux-${FNAME} downloaded and made executable"; \
+    fi && \
     echo "Downloading geo files..." && \
     curl -sfLRO https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat && \
     curl -sfLRO https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat && \
@@ -107,6 +142,17 @@ RUN echo "Contents of /app/bin after COPY:" && \
         echo "All files in bin directory:" && \
         find ./bin -type f -o -type l && \
         exit 1; \
+    fi && \
+    echo "Looking for sing-box binary..." && \
+    if [ -f ./bin/sing-box-linux-amd64 ]; then \
+        chmod +x ./bin/sing-box-linux-amd64 && \
+        echo "✓ Found and made executable: sing-box-linux-amd64"; \
+    elif [ -f ./bin/sing-box ]; then \
+        chmod +x ./bin/sing-box && \
+        mv ./bin/sing-box ./bin/sing-box-linux-amd64 && \
+        echo "✓ Found sing-box, renamed to sing-box-linux-amd64"; \
+    else \
+        echo "⚠ WARNING: No sing-box binary found (optional)"; \
     fi
 
 # Create directories for config and logs

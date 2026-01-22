@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,7 +15,9 @@ import (
 	"github.com/mhsanaei/3x-ui/v2/database"
 	"github.com/mhsanaei/3x-ui/v2/database/model"
 	"github.com/mhsanaei/3x-ui/v2/logger"
+	"github.com/mhsanaei/3x-ui/v2/singbox"
 	"github.com/mhsanaei/3x-ui/v2/util/common"
+	"github.com/mhsanaei/3x-ui/v2/util/json_util"
 	"github.com/mhsanaei/3x-ui/v2/util/random"
 	"github.com/mhsanaei/3x-ui/v2/util/reflect_util"
 	"github.com/mhsanaei/3x-ui/v2/web/cache"
@@ -25,12 +28,16 @@ import (
 //go:embed config.json
 var defaultXrayTemplateConfig string
 
+//go:embed singbox_config.json
+var defaultSingBoxTemplateConfig string
+
 var defaultValueMap = map[string]string{
 	// Default Xray template configuration. At runtime, the real source of truth
 	// is always the "xrayTemplateConfig" record in the settings table; this
 	// value is only used as an initial/default template when there is no valid
 	// value in the database.
 	"xrayTemplateConfig":          defaultXrayTemplateConfig,
+	"singboxTemplateConfig":       defaultSingBoxTemplateConfig,
 	"webListen":                   "",
 	"webDomain":                   "",
 	"webPort":                     "2053",
@@ -104,6 +111,8 @@ var defaultValueMap = map[string]string{
 	"multiNodeMode": "false", // "true" for multi-mode, "false" for single-mode
 	// HWID tracking mode
 	"hwidMode": "client_header", // "off" = disabled, "client_header" = use x-hwid header (default), "legacy_fingerprint" = deprecated fingerprint-based (deprecated)
+	// Core type selection
+	"coreType": "xray", // "xray" or "sing-box"
 }
 
 // SettingService provides business logic for application settings management.
@@ -140,6 +149,373 @@ func (s *SettingService) EnsureXrayTemplateConfigValid() error {
 	if err := json.Unmarshal([]byte(value), cfg); err != nil {
 		logger.Warningf("Invalid xrayTemplateConfig in DB, resetting to default template: %v", err)
 		return s.saveSetting("xrayTemplateConfig", defaultXrayTemplateConfig)
+	}
+
+	return nil
+}
+
+// EnsureSingBoxTemplateConfigValid ensures that singboxTemplateConfig in the database is valid.
+// If it's missing or invalid, it updates it from the default template.
+// This is critical when updating only the panel image without updating the database,
+// as the old config structure might be incompatible with the new code.
+func (s *SettingService) EnsureSingBoxTemplateConfigValid() error {
+	db := database.GetDB()
+
+	current := &model.Setting{}
+	err := db.Model(&model.Setting{}).Where("key = ?", "singboxTemplateConfig").First(current).Error
+	if database.IsNotFound(err) {
+		// No record: initialize from default template
+		logger.Infof("singboxTemplateConfig not found in DB, initializing with default template")
+		return s.saveSetting("singboxTemplateConfig", defaultSingBoxTemplateConfig)
+	}
+	if err != nil {
+		return err
+	}
+
+	value := strings.TrimSpace(current.Value)
+	if value == "" || value == "{}" {
+		logger.Warning("singboxTemplateConfig in DB is empty or placeholder, resetting to default template")
+		return s.saveSetting("singboxTemplateConfig", defaultSingBoxTemplateConfig)
+	}
+
+	// Validate JSON by unmarshalling into singbox.Config; if invalid, reset to default
+	var cfg map[string]interface{}
+	if err := json.Unmarshal([]byte(value), &cfg); err != nil {
+		logger.Warningf("Invalid singboxTemplateConfig in DB, resetting to default template: %v", err)
+		return s.saveSetting("singboxTemplateConfig", defaultSingBoxTemplateConfig)
+	}
+
+	// Clean up invalid fields in log section (sing-box doesn't support "error" field)
+	needsUpdate := false
+	if logSection, ok := cfg["log"].(map[string]interface{}); ok {
+		// Remove "error" field if present (sing-box only uses "output")
+		if _, hasError := logSection["error"]; hasError {
+			delete(logSection, "error")
+			needsUpdate = true
+		}
+		// Ensure "timestamp" is set
+		if _, hasTimestamp := logSection["timestamp"]; !hasTimestamp {
+			logSection["timestamp"] = true
+			needsUpdate = true
+		}
+		// Ensure "level" is set
+		if _, hasLevel := logSection["level"]; !hasLevel {
+			logSection["level"] = "warn"
+			needsUpdate = true
+		}
+		// If we removed "error" but don't have "output", set a default
+		if _, hasOutput := logSection["output"]; !hasOutput && needsUpdate {
+			logSection["output"] = "sing-box.log"
+			needsUpdate = true
+		}
+	}
+
+	// Clean up unsupported inbounds from template (like tunnel, wireguard)
+	// This can happen if the template was converted from Xray config
+	// Also clean up invalid transport objects in inbounds
+	if inbounds, ok := cfg["inbounds"].([]interface{}); ok {
+		filteredInbounds := make([]interface{}, 0, len(inbounds))
+		for i, ib := range inbounds {
+			if ibMap, ok := ib.(map[string]interface{}); ok {
+				ibType, _ := ibMap["type"].(string)
+				ibTag, _ := ibMap["tag"].(string)
+				if ibType == "tunnel" || ibType == "wireguard" {
+					logger.Warningf("EnsureSingBoxTemplateConfigValid: removing unsupported inbound from template: type=%s, tag=%s (index %d)", ibType, ibTag, i)
+					needsUpdate = true
+					continue
+				}
+				
+				// Clean up invalid transport objects in inbound
+				if transport, ok := ibMap["transport"].(map[string]interface{}); ok {
+					// Remove reality/tls from transport (should be in tls field)
+					if _, hasReality := transport["reality"]; hasReality {
+						logger.Warningf("EnsureSingBoxTemplateConfigValid: removing reality from transport in template inbound %s (tag: %s, index %d)", ibType, ibTag, i)
+						delete(transport, "reality")
+						needsUpdate = true
+					}
+					if _, hasTLS := transport["tls"]; hasTLS {
+						logger.Warningf("EnsureSingBoxTemplateConfigValid: removing tls from transport in template inbound %s (tag: %s, index %d)", ibType, ibTag, i)
+						delete(transport, "tls")
+						needsUpdate = true
+					}
+					
+					// Check if transport has valid type
+					transportType, hasType := transport["type"].(string)
+					validTransportTypes := map[string]bool{
+						"ws":         true,
+						"grpc":       true,
+						"quic":       true,
+						"http":       true,
+						"httpupgrade": true,
+					}
+					
+					// If transport is empty or has invalid type, remove it
+					if !hasType || transportType == "" || !validTransportTypes[transportType] {
+						if len(transport) == 0 || (!hasType && len(transport) == 0) {
+							logger.Warningf("EnsureSingBoxTemplateConfigValid: removing empty/invalid transport from template inbound %s (tag: %s, index %d)", ibType, ibTag, i)
+							delete(ibMap, "transport")
+							needsUpdate = true
+						} else if hasType && !validTransportTypes[transportType] {
+							logger.Warningf("EnsureSingBoxTemplateConfigValid: removing invalid transport type '%s' from template inbound %s (tag: %s, index %d)", transportType, ibType, ibTag, i)
+							delete(ibMap, "transport")
+							needsUpdate = true
+						}
+					}
+				}
+				
+				// Clean up users: VLESS uses "name" instead of "email" in sing-box
+				if users, ok := ibMap["users"].([]interface{}); ok {
+					for _, user := range users {
+						if userMap, ok := user.(map[string]interface{}); ok {
+							// Convert "email" to "name" for VLESS
+							if ibType == "vless" {
+								if email, ok := userMap["email"].(string); ok && email != "" {
+									userMap["name"] = email
+									delete(userMap, "email")
+									needsUpdate = true
+								}
+							}
+							// Remove "email" for VMESS (not used in sing-box)
+							if ibType == "vmess" {
+								if _, ok := userMap["email"]; ok {
+									delete(userMap, "email")
+									needsUpdate = true
+								}
+							}
+						}
+					}
+				}
+				
+				// Clean up Reality fields: server_name goes at tls level, short_id must be array
+				if tls, ok := ibMap["tls"].(map[string]interface{}); ok {
+					if reality, ok := tls["reality"].(map[string]interface{}); ok {
+						// server_name should be at tls level, not in reality
+						if serverName, ok := reality["server_name"].(string); ok {
+							// Move server_name to tls level
+							tls["server_name"] = serverName
+							delete(reality, "server_name")
+							needsUpdate = true
+							logger.Warningf("EnsureSingBoxTemplateConfigValid: moved server_name from reality to tls level in template inbound %s (tag: %s, index %d)", ibType, ibTag, i)
+						}
+						// Remove server_names from reality (should be at tls level)
+						if serverNames, ok := reality["server_names"].([]interface{}); ok && len(serverNames) > 0 {
+							// Move first server name to tls level
+							if firstServerName, ok := serverNames[0].(string); ok {
+								tls["server_name"] = firstServerName
+							}
+							delete(reality, "server_names")
+							needsUpdate = true
+							logger.Warningf("EnsureSingBoxTemplateConfigValid: moved server_names to server_name at tls level in template inbound %s (tag: %s, index %d)", ibType, ibTag, i)
+						}
+						// Ensure short_id is an array (required for inbound Reality)
+						if shortId, ok := reality["short_id"].(string); ok {
+							// Convert string to array
+							reality["short_id"] = []string{shortId}
+							needsUpdate = true
+							logger.Warningf("EnsureSingBoxTemplateConfigValid: converted short_id from string to array in template inbound %s (tag: %s, index %d)", ibType, ibTag, i)
+						}
+						// Ensure handshake exists (required for Reality inbound)
+						if _, hasHandshake := reality["handshake"]; !hasHandshake {
+							// Add default handshake if server_name is available
+							if serverName, ok := tls["server_name"].(string); ok && serverName != "" {
+								reality["handshake"] = map[string]interface{}{
+									"server": serverName,
+								}
+								needsUpdate = true
+								logger.Warningf("EnsureSingBoxTemplateConfigValid: added handshake to reality in template inbound %s (tag: %s, index %d)", ibType, ibTag, i)
+							}
+						}
+					}
+				}
+				
+				filteredInbounds = append(filteredInbounds, ib)
+			} else {
+				filteredInbounds = append(filteredInbounds, ib)
+			}
+		}
+		if needsUpdate {
+			cfg["inbounds"] = filteredInbounds
+		}
+	}
+
+	// Clean up unsupported outbounds from template
+	// Xray uses "freedom" (direct), "blackhole" (block), and may have "tun"/"tunnel"
+	// sing-box uses "direct", "block", and doesn't support "tun"/"tunnel" outbounds
+	if outbounds, ok := cfg["outbounds"].([]interface{}); ok {
+		filteredOutbounds := make([]interface{}, 0, len(outbounds))
+		for i, ob := range outbounds {
+			if obMap, ok := ob.(map[string]interface{}); ok {
+				obType, _ := obMap["type"].(string)
+				obProtocol, _ := obMap["protocol"].(string) // Xray uses "protocol"
+				obTag, _ := obMap["tag"].(string)
+				
+				// Check both "type" (sing-box) and "protocol" (Xray) fields
+				actualType := obType
+				if actualType == "" {
+					actualType = obProtocol
+				}
+				
+				if actualType == "tun" || actualType == "tunnel" {
+					logger.Warningf("EnsureSingBoxTemplateConfigValid: removing unsupported outbound from template: type=%s, tag=%s (index %d)", actualType, obTag, i)
+					needsUpdate = true
+					continue
+				}
+				
+				// Convert Xray protocol names to sing-box type names
+				if obProtocol != "" && obType == "" {
+					switch obProtocol {
+					case "freedom":
+						obMap["type"] = "direct"
+						delete(obMap, "protocol")
+						// Clean up Xray-specific settings
+						if settings, ok := obMap["settings"].(map[string]interface{}); ok {
+							delete(settings, "domainStrategy")
+							delete(settings, "redirect")
+							delete(settings, "noises")
+						}
+						needsUpdate = true
+					case "blackhole":
+						obMap["type"] = "block"
+						delete(obMap, "protocol")
+						// Clean up settings for block
+						obMap["settings"] = map[string]interface{}{}
+						needsUpdate = true
+					}
+				}
+				
+				// Convert domainStrategy from settings to domain_strategy at outbound level
+				// sing-box uses domain_strategy at outbound level, not in settings
+				if settings, ok := obMap["settings"].(map[string]interface{}); ok {
+					if domainStrategy, ok := settings["domainStrategy"].(string); ok {
+						obMap["domain_strategy"] = domainStrategy
+						delete(settings, "domainStrategy")
+						needsUpdate = true
+						logger.Warningf("EnsureSingBoxTemplateConfigValid: moved domainStrategy from settings to domain_strategy at outbound level for outbound %s (tag: %s, index %d)", actualType, obTag, i)
+					}
+				}
+				
+				filteredOutbounds = append(filteredOutbounds, ob)
+			} else {
+				filteredOutbounds = append(filteredOutbounds, ob)
+			}
+		}
+		if needsUpdate {
+			cfg["outbounds"] = filteredOutbounds
+		}
+	}
+
+	// Clean up route: remove domainStrategy/domain_strategy and clean up rules
+	if route, ok := cfg["route"].(map[string]interface{}); ok {
+		if _, ok := route["domainStrategy"]; ok {
+			delete(route, "domainStrategy")
+			needsUpdate = true
+			logger.Warningf("EnsureSingBoxTemplateConfigValid: removed domainStrategy from route (not supported by sing-box)")
+		}
+		if _, ok := route["domain_strategy"]; ok {
+			delete(route, "domain_strategy")
+			needsUpdate = true
+			logger.Warningf("EnsureSingBoxTemplateConfigValid: removed domain_strategy from route (not supported by sing-box)")
+		}
+		
+		// Check if geoip is configured in route (required for geoip rules in sing-box 1.12.0+)
+		hasGeoipConfig := false
+		if _, ok := route["geoip"].(map[string]interface{}); ok {
+			hasGeoipConfig = true
+		}
+		
+		// Clean up route rules: remove "type": "field" and convert Xray-specific fields
+		if rules, ok := route["rules"].([]interface{}); ok {
+			filteredRules := make([]interface{}, 0, len(rules))
+			for _, rule := range rules {
+				if ruleMap, ok := rule.(map[string]interface{}); ok {
+					// Remove "type": "field" (Xray-specific, not supported by sing-box)
+					if _, ok := ruleMap["type"]; ok {
+						delete(ruleMap, "type")
+						needsUpdate = true
+						logger.Warningf("EnsureSingBoxTemplateConfigValid: removed type field from route rule (not supported by sing-box)")
+					}
+					// Convert Xray field names to sing-box field names
+					// Xray uses "outboundTag", sing-box uses "outbound"
+					if outboundTag, ok := ruleMap["outboundTag"].(string); ok {
+						ruleMap["outbound"] = outboundTag
+						delete(ruleMap, "outboundTag")
+						needsUpdate = true
+					}
+					// Xray uses "inboundTag", sing-box uses "inbound"
+					if inboundTag, ok := ruleMap["inboundTag"].([]interface{}); ok {
+						ruleMap["inbound"] = inboundTag
+						delete(ruleMap, "inboundTag")
+						needsUpdate = true
+					}
+					// Xray uses "ip" with "geoip:private", sing-box uses "geoip" array
+					// But in sing-box 1.12.0+, geoip requires geoip database to be configured
+					if ip, ok := ruleMap["ip"].([]interface{}); ok {
+						geoipList := make([]string, 0)
+						regularIPs := make([]interface{}, 0)
+						for _, ipItem := range ip {
+							if ipStr, ok := ipItem.(string); ok {
+								if strings.HasPrefix(ipStr, "geoip:") {
+									// Extract geoip value (e.g., "geoip:private" -> "private")
+									geoipValue := strings.TrimPrefix(ipStr, "geoip:")
+									geoipList = append(geoipList, geoipValue)
+								} else {
+									// Regular IP, keep as is
+									regularIPs = append(regularIPs, ipStr)
+								}
+							}
+						}
+						if len(geoipList) > 0 {
+							if hasGeoipConfig {
+								// geoip is configured, can use geoip rules
+								ruleMap["geoip"] = geoipList
+								delete(ruleMap, "ip")
+								needsUpdate = true
+							} else {
+								// geoip not configured, remove this rule (sing-box 1.12.0+ requires geoip database)
+								logger.Warningf("EnsureSingBoxTemplateConfigValid: removing route rule with geoip (geoip database not configured, required in sing-box 1.12.0+)")
+								needsUpdate = true
+								continue
+							}
+						}
+						if len(regularIPs) > 0 {
+							ruleMap["ip"] = regularIPs
+						} else if len(geoipList) == 0 {
+							delete(ruleMap, "ip")
+						}
+					}
+					// Check if rule has geoip field directly (from template or already converted)
+					if geoip, ok := ruleMap["geoip"].([]interface{}); ok && len(geoip) > 0 {
+						if !hasGeoipConfig {
+							// geoip not configured, remove this rule
+							logger.Warningf("EnsureSingBoxTemplateConfigValid: removing route rule with geoip (geoip database not configured, required in sing-box 1.12.0+)")
+							needsUpdate = true
+							continue
+						}
+					} else if geoipStr, ok := ruleMap["geoip"].(string); ok && geoipStr != "" {
+						if !hasGeoipConfig {
+							// geoip not configured, remove this rule
+							logger.Warningf("EnsureSingBoxTemplateConfigValid: removing route rule with geoip (geoip database not configured, required in sing-box 1.12.0+)")
+							needsUpdate = true
+							continue
+						}
+					}
+					filteredRules = append(filteredRules, ruleMap)
+				} else {
+					filteredRules = append(filteredRules, rule)
+				}
+			}
+			if len(filteredRules) != len(rules) {
+				route["rules"] = filteredRules
+			}
+		}
+	}
+
+	if needsUpdate {
+		cleanedJSON, err := json.MarshalIndent(cfg, "", "  ")
+		if err == nil {
+			logger.Infof("Cleaned singboxTemplateConfig: removed invalid fields and unsupported inbounds")
+			return s.saveSetting("singboxTemplateConfig", string(cleanedJSON))
+		}
 	}
 
 	return nil
@@ -298,6 +674,25 @@ func (s *SettingService) saveSetting(key string, value string) error {
 		// Invalidate computed settings that depend on this setting
 		if key == "multiNodeMode" {
 			cache.Delete("computed:ipLimitEnable")
+			
+			// Check if switching from multi-node to single-node mode
+			// Need to clean up duplicate inbounds with same port
+			// Get old value before it's updated
+			oldSetting, oldErr := s.getSetting("multiNodeMode")
+			oldValue := false
+			if oldErr == nil && oldSetting != nil {
+				oldValue, _ = strconv.ParseBool(oldSetting.Value)
+			}
+			
+			// Get new value
+			newValue, err := strconv.ParseBool(value)
+			if err == nil && oldValue && !newValue {
+				// We're switching from multi-node (true) to single-node (false)
+				logger.Infof("Switching from multi-node to single-node mode - cleaning up duplicate inbounds")
+				if err := s.cleanupDuplicateInbounds(); err != nil {
+					logger.Warningf("Failed to cleanup duplicate inbounds: %v", err)
+				}
+			}
 		}
 	}
 	
@@ -364,6 +759,11 @@ func (s *SettingService) setInt(key string, value int) error {
 
 func (s *SettingService) GetXrayConfigTemplate() (string, error) {
 	return s.getString("xrayTemplateConfig")
+}
+
+// GetSingBoxConfigTemplate returns the sing-box template configuration from the database.
+func (s *SettingService) GetSingBoxConfigTemplate() (string, error) {
+	return s.getString("singboxTemplateConfig")
 }
 
 func (s *SettingService) GetListen() (string, error) {
@@ -696,9 +1096,24 @@ func (s *SettingService) GetIpLimitEnable() (bool, error) {
 			return false, nil
 		}
 		
+		// Check core type - IP limiting works differently for sing-box
+		coreType, err := s.GetCoreType()
+		if err != nil {
+			coreType = "xray" // Default to xray
+		}
+		
+		if coreType == "sing-box" {
+			// For sing-box, check if access log is enabled in config
+			// For now, return false as sing-box doesn't use the same log format
+			// TODO: Implement sing-box access log path detection if needed
+			return false, nil
+		}
+		
+		// For Xray, check access log path from config file
 		accessLogPath, err := xray.GetAccessLogPath()
 		if err != nil {
-			return false, err
+			// If config file doesn't exist (e.g., using sing-box), return false
+			return false, nil
 		}
 		return (accessLogPath != "none" && accessLogPath != ""), nil
 	})
@@ -836,6 +1251,11 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 		return err
 	}
 
+	// Check if coreType is being changed
+	oldCoreType, _ := s.GetCoreType()
+	newCoreType := allSetting.CoreType
+	coreTypeChanged := oldCoreType != newCoreType
+
 	v := reflect.ValueOf(allSetting).Elem()
 	t := reflect.TypeOf(allSetting).Elem()
 	fields := reflect_util.GetFields(t)
@@ -849,6 +1269,16 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 			errs = append(errs, err)
 		}
 	}
+	
+	// If coreType changed, switch cores
+	if coreTypeChanged && newCoreType != "" {
+		logger.Infof("Core type changed from %s to %s, switching cores...", oldCoreType, newCoreType)
+		if err := s.SwitchCoreWithConversion(newCoreType); err != nil {
+			logger.Errorf("Failed to switch core after settings update: %v", err)
+			errs = append(errs, fmt.Errorf("failed to switch core: %w", err))
+		}
+	}
+	
 	return common.Combine(errs...)
 }
 
@@ -947,4 +1377,293 @@ func (s *SettingService) GetDefaultSettings(host string) (any, error) {
 	}
 
 	return result, nil
+}
+
+// GetCoreType returns the current core type setting (xray or sing-box).
+func (s *SettingService) GetCoreType() (string, error) {
+	coreType, err := s.getString("coreType")
+	if err != nil {
+		return "xray", err // Default to xray if not set
+	}
+	if coreType != "xray" && coreType != "sing-box" {
+		// Invalid value, reset to default
+		return "xray", s.SetCoreType("xray")
+	}
+	return coreType, nil
+}
+
+// SetCoreType sets the core type setting.
+func (s *SettingService) SetCoreType(coreType string) error {
+	if coreType != "xray" && coreType != "sing-box" {
+		return fmt.Errorf("invalid core type: %s (must be 'xray' or 'sing-box')", coreType)
+	}
+	return s.setString("coreType", coreType)
+}
+
+// SwitchCoreType switches the core type and returns the previous type.
+// This method is intended to be used when switching cores, and the actual
+// conversion logic should be handled by the caller (e.g., XrayService or SingBoxService).
+func (s *SettingService) SwitchCoreType(newType string) (string, error) {
+	oldType, err := s.GetCoreType()
+	if err != nil {
+		return "", err
+	}
+	if oldType == newType {
+		return oldType, nil // No change needed
+	}
+	if err := s.SetCoreType(newType); err != nil {
+		return oldType, err
+	}
+	return oldType, nil
+}
+
+// SwitchCoreWithConversion switches the core type and performs automatic configuration conversion.
+// It stops the current core, converts the configuration, and starts the new core.
+func (s *SettingService) SwitchCoreWithConversion(newType string) error {
+	oldType, err := s.GetCoreType()
+	if err != nil {
+		return err
+	}
+	if oldType == newType {
+		return nil // No change needed
+	}
+
+	// Get current configuration directly from services (works even if core is not running)
+	var currentConfig interface{}
+	if oldType == "xray" {
+		xrayService := NewXrayService()
+		currentConfig, err = xrayService.GetXrayConfig()
+		if err != nil {
+			return fmt.Errorf("failed to get xray config: %w", err)
+		}
+	} else if oldType == "sing-box" {
+		singboxService := NewSingBoxService()
+		currentConfig, err = singboxService.GetSingBoxConfig()
+		if err != nil {
+			return fmt.Errorf("failed to get sing-box config: %w", err)
+		}
+	} else {
+		return fmt.Errorf("unknown old core type: %s", oldType)
+	}
+
+	// Stop both cores to ensure no port conflicts
+	// Stop old core first
+	oldCore, err := GetCoreService()
+	if err == nil && oldCore.IsRunning() {
+		logger.Infof("Stopping %s core before switching to %s", oldType, newType)
+		if err := oldCore.Stop(); err != nil {
+			logger.Warningf("Failed to stop %s core: %v", oldType, err)
+			// Continue anyway
+		}
+	}
+	
+	// Also stop the new core if it's running (might be leftover from previous switch)
+	xrayService := NewXrayService()
+	singboxService := NewSingBoxService()
+	if newType == "sing-box" {
+		// If switching to sing-box, make sure Xray is stopped
+		if xrayService.IsXrayRunning() {
+			logger.Infof("Stopping Xray core (switching to sing-box)")
+			if err := xrayService.StopXray(); err != nil {
+				logger.Warningf("Failed to stop Xray core: %v", err)
+			}
+		}
+	} else if newType == "xray" {
+		// If switching to Xray, make sure sing-box is stopped
+		if singboxService.IsSingBoxRunning() {
+			logger.Infof("Stopping sing-box core (switching to Xray)")
+			if err := singboxService.StopSingBox(); err != nil {
+				logger.Warningf("Failed to stop sing-box core: %v", err)
+			}
+		}
+	}
+	
+	// Wait for processes to fully stop and ports to be released
+	// Check that both cores are stopped before proceeding
+	maxWait := 3 * time.Second
+	waitInterval := 100 * time.Millisecond
+	waited := 0 * time.Millisecond
+	for waited < maxWait {
+		xrayRunning := xrayService.IsXrayRunning()
+		singboxRunning := singboxService.IsSingBoxRunning()
+		if !xrayRunning && !singboxRunning {
+			logger.Debugf("Both cores stopped after %v", waited)
+			break
+		}
+		time.Sleep(waitInterval)
+		waited += waitInterval
+	}
+	if waited >= maxWait {
+		logger.Warningf("Some cores may still be running after %v wait time", maxWait)
+	}
+
+	// Convert configuration
+	var newConfig interface{}
+	if oldType == "xray" && newType == "sing-box" {
+		xrayConfig := currentConfig.(*xray.Config)
+		newConfig, err = singbox.ConvertXrayToSingBox(xrayConfig)
+		if err != nil {
+			return fmt.Errorf("failed to convert xray config to sing-box: %w", err)
+		}
+	} else if oldType == "sing-box" && newType == "xray" {
+		singboxConfig := currentConfig.(*singbox.Config)
+		newConfig, err = singbox.ConvertSingBoxToXray(singboxConfig)
+		if err != nil {
+			return fmt.Errorf("failed to convert sing-box config to xray: %w", err)
+		}
+	} else {
+		return fmt.Errorf("unsupported core type conversion: %s -> %s", oldType, newType)
+	}
+
+	// Update template config in database
+	if newType == "xray" {
+		xrayConfig := newConfig.(*xray.Config)
+		configJSON, err := json.MarshalIndent(xrayConfig, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal xray config: %w", err)
+		}
+		if err := s.saveSetting("xrayTemplateConfig", string(configJSON)); err != nil {
+			return fmt.Errorf("failed to save xray template config: %w", err)
+		}
+	} else if newType == "sing-box" {
+		singboxConfig := newConfig.(*singbox.Config)
+		// Clean up log section to remove any invalid fields before saving
+		if len(singboxConfig.Log) > 0 {
+			var logSection map[string]interface{}
+			if err := json.Unmarshal(singboxConfig.Log, &logSection); err == nil {
+				// Remove "error" field if present (sing-box doesn't support it)
+				if _, hasError := logSection["error"]; hasError {
+					delete(logSection, "error")
+					// If we removed "error" but don't have "output", ensure we have one
+					if _, hasOutput := logSection["output"]; !hasOutput {
+						// Try to use access log path, or set default
+						logSection["output"] = "sing-box.log"
+					}
+					cleanedLogJSON, _ := json.Marshal(logSection)
+					singboxConfig.Log = json_util.RawMessage(cleanedLogJSON)
+				}
+			}
+		}
+		configJSON, err := json.MarshalIndent(singboxConfig, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal sing-box config: %w", err)
+		}
+		if err := s.saveSetting("singboxTemplateConfig", string(configJSON)); err != nil {
+			return fmt.Errorf("failed to save sing-box template config: %w", err)
+		}
+	}
+
+	// Switch core type
+	if err := s.SetCoreType(newType); err != nil {
+		return fmt.Errorf("failed to set core type: %w", err)
+	}
+
+	// Get new core service and restart
+	newCore, err := GetCoreService()
+	if err != nil {
+		return fmt.Errorf("failed to get new core service: %w", err)
+	}
+
+	// Restart with new core
+	if err := newCore.Restart(true); err != nil {
+		return fmt.Errorf("failed to restart with new core: %w", err)
+	}
+
+	logger.Infof("Successfully switched from %s to %s core", oldType, newType)
+	return nil
+}
+
+// cleanupDuplicateInbounds removes duplicate inbounds with the same port when switching from multi-node to single-node mode.
+// In multi-node mode, multiple inbounds can have the same port (with different SNI), but in single-node mode, ports must be unique.
+// This function keeps the first inbound (by ID) for each port and deletes the rest.
+func (s *SettingService) cleanupDuplicateInbounds() error {
+	inboundService := InboundService{}
+	allInbounds, err := inboundService.GetAllInbounds()
+	if err != nil {
+		return fmt.Errorf("failed to get all inbounds: %w", err)
+	}
+	
+	// Group inbounds by port (and listen address if specified)
+	portGroups := make(map[string][]*model.Inbound)
+	for _, inbound := range allInbounds {
+		// Normalize listen address for grouping
+		listen := inbound.Listen
+		if listen == "" || listen == "0.0.0.0" || listen == "::" || listen == "::0" {
+			listen = ""
+		}
+		key := fmt.Sprintf("%s:%d", listen, inbound.Port)
+		portGroups[key] = append(portGroups[key], inbound)
+	}
+	
+	// Find and delete duplicates (keep first by ID, delete rest)
+	var toDelete []int
+	for key, inbounds := range portGroups {
+		if len(inbounds) > 1 {
+			// Sort by ID to keep the first one
+			sort.Slice(inbounds, func(i, j int) bool {
+				return inbounds[i].Id < inbounds[j].Id
+			})
+			
+			// Keep first, mark rest for deletion
+			keepInbound := inbounds[0]
+			logger.Infof("Found %d inbounds with same port %s, keeping inbound-%d (ID: %d), will delete %d duplicates", 
+				len(inbounds), key, keepInbound.Id, keepInbound.Id, len(inbounds)-1)
+			
+			for i := 1; i < len(inbounds); i++ {
+				toDelete = append(toDelete, inbounds[i].Id)
+				logger.Infof("Marking inbound-%d (ID: %d, port: %d) for deletion (duplicate)", 
+					inbounds[i].Id, inbounds[i].Id, inbounds[i].Port)
+			}
+		}
+	}
+	
+	// Delete duplicate inbounds
+	if len(toDelete) > 0 {
+		logger.Infof("Deleting %d duplicate inbounds", len(toDelete))
+		for _, id := range toDelete {
+			needRestart, err := inboundService.DelInbound(id)
+			if err != nil {
+				logger.Warningf("Failed to delete duplicate inbound %d: %v", id, err)
+				continue
+			}
+			if needRestart {
+				// Note: We don't restart here, as the caller should handle restart after mode switch
+				logger.Debugf("Inbound %d deletion requires restart", id)
+			}
+		}
+		logger.Infof("Successfully deleted %d duplicate inbounds", len(toDelete))
+	} else {
+		logger.Debugf("No duplicate inbounds found")
+	}
+	
+	// Update tags for remaining inbounds (from ID-based to port-based)
+	// This is done automatically when inbounds are accessed, but we can trigger it here
+	allInbounds, err = inboundService.GetAllInbounds()
+	if err == nil {
+		multiMode, _ := s.GetMultiNodeMode()
+		for _, inbound := range allInbounds {
+			// Regenerate tag based on current mode - use InboundService method
+			// We need to access the private method, so we'll update tags directly
+			var newTag string
+			if multiMode {
+				newTag = fmt.Sprintf("inbound-%d", inbound.Id)
+			} else {
+				if inbound.Listen == "" || inbound.Listen == "0.0.0.0" || inbound.Listen == "::" || inbound.Listen == "::0" {
+					newTag = fmt.Sprintf("inbound-%d", inbound.Port)
+				} else {
+					newTag = fmt.Sprintf("inbound-%s:%d", inbound.Listen, inbound.Port)
+				}
+			}
+			if inbound.Tag != newTag {
+				db := database.GetDB()
+				if err := db.Model(inbound).Update("tag", newTag).Error; err != nil {
+					logger.Warningf("Failed to update tag for inbound %d: %v", inbound.Id, err)
+				} else {
+					logger.Debugf("Updated tag for inbound %d from %s to %s", inbound.Id, inbound.Tag, newTag)
+				}
+			}
+		}
+	}
+	
+	return nil
 }

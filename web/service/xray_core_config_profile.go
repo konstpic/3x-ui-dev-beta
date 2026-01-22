@@ -7,6 +7,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v2/database"
 	"github.com/mhsanaei/3x-ui/v2/database/model"
 	"github.com/mhsanaei/3x-ui/v2/logger"
+	"github.com/mhsanaei/3x-ui/v2/singbox"
 	"github.com/mhsanaei/3x-ui/v2/util/common"
 	"github.com/mhsanaei/3x-ui/v2/xray"
 
@@ -267,19 +268,29 @@ func (s *XrayCoreConfigProfileService) ResetToDefault(id int) (*model.XrayCoreCo
 	return s.UpdateProfile(profile)
 }
 
-// validateConfigJson validates that the JSON string is a valid Xray configuration.
+// validateConfigJson validates that the JSON string is a valid configuration.
+// It tries to validate as both xray and sing-box format to support both cores.
 func (s *XrayCoreConfigProfileService) validateConfigJson(configJson string) error {
 	if configJson == "" {
 		return common.NewError("config JSON cannot be empty")
 	}
 
+	// Try to validate as xray config first
 	xrayConfig := &xray.Config{}
-	err := json.Unmarshal([]byte(configJson), xrayConfig)
-	if err != nil {
-		return fmt.Errorf("invalid JSON: %w", err)
+	if err := json.Unmarshal([]byte(configJson), xrayConfig); err == nil {
+		// Valid xray config
+		return nil
 	}
 
-	return nil
+	// Try to validate as sing-box config
+	singboxConfig := &singbox.Config{}
+	if err := json.Unmarshal([]byte(configJson), singboxConfig); err == nil {
+		// Valid sing-box config
+		return nil
+	}
+
+	// Neither format is valid
+	return fmt.Errorf("invalid config JSON: not a valid xray or sing-box configuration")
 }
 
 // EnsureDefaultProfile ensures that a default profile exists for a user.

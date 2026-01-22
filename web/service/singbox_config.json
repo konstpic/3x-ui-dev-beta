@@ -1,0 +1,30 @@
+﻿{
+  "log": {
+    "level": "warn",
+    "timestamp": true
+  },
+  "dns": {
+    "servers": [
+      {
+        "tag": "local",
+        "address": "local",
+        "detour": "direct"
+      }
+    ]
+  },
+  "inbounds": [],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    }
+  ],
+  "route": {
+    "rules": []
+  },
+  "experimental": {}
+}

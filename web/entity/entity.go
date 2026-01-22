@@ -102,6 +102,9 @@ type AllSetting struct {
 	// Multi-node mode setting
 	MultiNodeMode bool `json:"multiNodeMode" form:"multiNodeMode"` // Enable multi-node architecture mode
 	
+	// Core type setting
+	CoreType string `json:"coreType" form:"coreType"` // Proxy core type: "xray" or "sing-box"
+	
 	// HWID tracking mode
 	// "off" = HWID tracking disabled
 	// "client_header" = HWID provided by client via x-hwid header (default, recommended)

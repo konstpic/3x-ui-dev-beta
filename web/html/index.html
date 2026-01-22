@@ -93,7 +93,7 @@
                 <a-card hoverable>
                   <template #title>
                     <a-space direction="horizontal">
-                      <span>{{ i18n "pages.index.xrayStatus" }}</span>
+                      <span>[[ status.xray.coreName || 'Xray' ]]</span>
                       <a-tag v-if="isMobile && status.xray.version != 'Unknown'" color="green">
                         v[[ status.xray.version ]]
                       </a-tag>
@@ -187,7 +187,7 @@
               </a-col>
               <a-col :sm="24" :lg="12">
                 <a-card title='{{ i18n "pages.index.operationHours" }}' hoverable>
-                  <a-tag :color="status.xray.color">Xray: [[ TimeFormatter.formatSecond(status.appStats.uptime)
+                  <a-tag :color="status.xray.color">[[ status.xray.coreName || 'Xray' ]]: [[ TimeFormatter.formatSecond(status.appStats.uptime)
                     ]]</a-tag>
                   <a-tag color="green">OS: [[ TimeFormatter.formatSecond(status.uptime) ]]</a-tag>
                 </a-card>
@@ -743,7 +743,7 @@
       this.appUptime = 0;
       this.appStats = { threads: 0, mem: 0, uptime: 0 };
 
-      this.xray = { state: 'stop', stateMsg: "", errorMsg: "", version: "", color: "" };
+      this.xray = { state: 'stop', stateMsg: "", errorMsg: "", version: "", color: "", coreType: "xray", coreName: "Xray" };
       this.nodes = { online: 0, total: 0 };
       this.database = { size: 0, tables: 0, totalRows: 0, openConns: 0, idleConns: 0, maxOpenConns: 0, maxIdleConns: 0 };
 
@@ -1398,6 +1398,12 @@
           if (this.status && this.status.xray) {
             this.status.xray.state = payload.state;
             this.status.xray.errorMsg = payload.errorMsg || '';
+            if (payload.coreType) {
+              this.status.xray.coreType = payload.coreType;
+            }
+            if (payload.coreName) {
+              this.status.xray.coreName = payload.coreName;
+            }
             switch (payload.state) {
               case 'running':
                 this.status.xray.color = "green";

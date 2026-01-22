@@ -13,6 +13,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v2/logger"
 	nodeConfig "github.com/mhsanaei/3x-ui/v2/node/config"
 	nodeLogs "github.com/mhsanaei/3x-ui/v2/node/logs"
+	"github.com/mhsanaei/3x-ui/v2/node/singbox"
 	"github.com/mhsanaei/3x-ui/v2/node/xray"
 	"github.com/gin-gonic/gin"
 )
@@ -29,20 +30,22 @@ func try(fn func()) {
 
 // Server provides REST API for managing the node.
 type Server struct {
-	port       int
-	apiKey     string
-	xrayManager *xray.Manager
-	httpServer *http.Server
-	certFile   string
-	keyFile    string
+	port         int
+	apiKey       string
+	xrayManager  *xray.Manager
+	singboxManager *singbox.Manager
+	httpServer   *http.Server
+	certFile     string
+	keyFile      string
 }
 
 // NewServer creates a new API server instance.
-func NewServer(port int, apiKey string, xrayManager *xray.Manager) *Server {
+func NewServer(port int, apiKey string, xrayManager *xray.Manager, singboxManager *singbox.Manager) *Server {
 	return &Server{
-		port:        port,
-		apiKey:      apiKey,
-		xrayManager: xrayManager,
+		port:          port,
+		apiKey:        apiKey,
+		xrayManager:   xrayManager,
+		singboxManager: singboxManager,
 	}
 }
 
@@ -176,7 +179,33 @@ func (s *Server) health(c *gin.Context) {
 	})
 }
 
-// applyConfig applies a new XRAY configuration.
+// detectCoreType detects the core type (xray or sing-box) from the config JSON.
+func detectCoreType(configJSON []byte) string {
+	// Try to detect by structure
+	// Xray config has "inbounds" as array of objects with "protocol" field
+	// Sing-box config has "inbounds" as array of objects with "type" field
+	var testConfig map[string]interface{}
+	if err := json.Unmarshal(configJSON, &testConfig); err != nil {
+		return "xray" // Default to xray
+	}
+	
+	// Check for sing-box specific fields
+	if _, hasLog := testConfig["log"]; hasLog {
+		// Check if it's sing-box format (has "inbounds" with "type" field)
+		if inbounds, ok := testConfig["inbounds"].([]interface{}); ok && len(inbounds) > 0 {
+			if firstInbound, ok := inbounds[0].(map[string]interface{}); ok {
+				if _, hasType := firstInbound["type"]; hasType {
+					return "sing-box"
+				}
+			}
+		}
+	}
+	
+	// Default to xray
+	return "xray"
+}
+
+// applyConfig applies a new configuration (Xray or Sing-box).
 func (s *Server) applyConfig(c *gin.Context) {
 	logger.Infof("Apply config request received")
 	
@@ -216,44 +245,94 @@ func (s *Server) applyConfig(c *gin.Context) {
 		}
 	}
 
-	logger.Infof("Applying XRAY configuration...")
-	if err := s.xrayManager.ApplyConfig(body); err != nil {
-		logger.Errorf("Failed to apply config: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
+	// Detect core type from config
+	coreType := detectCoreType(body)
+	logger.Infof("Detected core type: %s", coreType)
+	
+	if coreType == "sing-box" {
+		logger.Infof("Applying Sing-box configuration...")
+		if err := s.singboxManager.ApplyConfig(body); err != nil {
+			logger.Errorf("Failed to apply Sing-box config: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	} else {
+		logger.Infof("Applying Xray configuration...")
+		if err := s.xrayManager.ApplyConfig(body); err != nil {
+			logger.Errorf("Failed to apply Xray config: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 	}
 
 	logger.Infof("Configuration applied successfully, sending response")
-	c.JSON(http.StatusOK, gin.H{"message": "Configuration applied successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Configuration applied successfully", "coreType": coreType})
 	logger.Infof("Apply config response sent")
 }
 
-// reload reloads XRAY configuration.
+// reload reloads configuration (Xray or Sing-box).
 func (s *Server) reload(c *gin.Context) {
-	if err := s.xrayManager.Reload(); err != nil {
-		logger.Errorf("Failed to reload: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// Try both managers, use the one that's running
+	if s.xrayManager.IsRunning() {
+		if err := s.xrayManager.Reload(); err != nil {
+			logger.Errorf("Failed to reload Xray: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "Xray reloaded successfully", "coreType": "xray"})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "XRAY reloaded successfully"})
+	if s.singboxManager.IsRunning() {
+		if err := s.singboxManager.Reload(); err != nil {
+			logger.Errorf("Failed to reload Sing-box: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "Sing-box reloaded successfully", "coreType": "sing-box"})
+		return
+	}
+	c.JSON(http.StatusBadRequest, gin.H{"error": "No core is running"})
 }
 
-// forceReload forcefully reloads XRAY even if it's hung or not running.
+// forceReload forcefully reloads configuration even if it's hung or not running.
 func (s *Server) forceReload(c *gin.Context) {
-	if err := s.xrayManager.ForceReload(); err != nil {
-		logger.Errorf("Failed to force reload: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// Try both managers, use the one that's running
+	if s.xrayManager.IsRunning() {
+		if err := s.xrayManager.ForceReload(); err != nil {
+			logger.Errorf("Failed to force reload Xray: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "Xray force reloaded successfully", "coreType": "xray"})
 		return
 	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "XRAY force reloaded successfully"})
+	if s.singboxManager.IsRunning() {
+		if err := s.singboxManager.ForceReload(); err != nil {
+			logger.Errorf("Failed to force reload Sing-box: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "Sing-box force reloaded successfully", "coreType": "sing-box"})
+		return
+	}
+	c.JSON(http.StatusBadRequest, gin.H{"error": "No core is running"})
 }
 
-// status returns the current status of XRAY.
+// status returns the current status of the running core.
 func (s *Server) status(c *gin.Context) {
-	status := s.xrayManager.GetStatus()
-	c.JSON(http.StatusOK, status)
+	if s.xrayManager.IsRunning() {
+		status := s.xrayManager.GetStatus()
+		status["coreType"] = "xray"
+		c.JSON(http.StatusOK, status)
+		return
+	}
+	if s.singboxManager.IsRunning() {
+		status := s.singboxManager.GetStatus()
+		status["coreType"] = "sing-box"
+		c.JSON(http.StatusOK, status)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"running": false, "coreType": "none"})
 }
 
 // stats returns traffic and online clients statistics from XRAY.
@@ -264,16 +343,30 @@ func (s *Server) stats(c *gin.Context) {
 	reset := c.DefaultQuery("reset", "false") == "true"
 	logger.Debugf("Getting stats (reset=%v)", reset)
 
-	stats, err := s.xrayManager.GetStats(reset)
-	if err != nil {
-		logger.Errorf("Failed to get stats: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// Try both managers, use the one that's running
+	if s.xrayManager.IsRunning() {
+		stats, err := s.xrayManager.GetStats(reset)
+		if err != nil {
+			logger.Errorf("Failed to get Xray stats: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		logger.Debugf("Xray stats retrieved successfully, sending response")
+		c.JSON(http.StatusOK, stats)
 		return
 	}
-
-	logger.Debugf("Stats retrieved successfully, sending response")
-	c.JSON(http.StatusOK, stats)
-	logger.Debugf("Stats response sent")
+	if s.singboxManager.IsRunning() {
+		stats, err := s.singboxManager.GetNodeStats(reset)
+		if err != nil {
+			logger.Errorf("Failed to get Sing-box stats: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		logger.Debugf("Sing-box stats retrieved successfully, sending response")
+		c.JSON(http.StatusOK, stats)
+		return
+	}
+	c.JSON(http.StatusBadRequest, gin.H{"error": "No core is running"})
 }
 
 // getLogs returns XRAY access logs from the node.

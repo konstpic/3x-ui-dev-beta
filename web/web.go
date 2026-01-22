@@ -320,23 +320,41 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	return engine, nil
 }
 
-// startTask schedules background jobs (Xray checks, traffic jobs, cron
+// startTask schedules background jobs (Core checks, traffic jobs, cron
 // jobs) which the panel relies on for periodic maintenance and monitoring.
 func (s *Server) startTask() {
-	err := s.xrayService.RestartXray(true)
+	// Get current core service and restart it
+	coreService, err := service.GetCoreService()
 	if err != nil {
-		logger.Warning("start xray failed:", err)
+		logger.Warningf("Failed to get core service: %v", err)
+	} else {
+		err = coreService.Restart(true)
+		if err != nil {
+			logger.Warningf("Failed to start core: %v", err)
+		}
 	}
-	// Check whether xray is running every second
+	
+	// Check whether core is running every second
 	s.cron.AddJob("@every 1s", job.NewCheckXrayRunningJob())
 
-	// Check if xray needs to be restarted every 30 seconds
+	// Check if core needs to be restarted every 30 seconds
 	s.cron.AddFunc("@every 30s", func() {
-		if s.xrayService.IsNeedRestartAndSetFalse() {
-			err := s.xrayService.RestartXray(false)
-			if err != nil {
-				logger.Error("restart xray failed:", err)
+		coreService, err := service.GetCoreService()
+		if err != nil {
+			logger.Warningf("Failed to get core service in cron: %v", err)
+			return
+		}
+		// Check if restart is needed (works for both xray and sing-box)
+		if xrayAdapter, ok := coreService.(*service.XrayCoreAdapter); ok {
+			if xrayAdapter.IsNeedRestartAndSetFalse() {
+				err := coreService.Restart(false)
+				if err != nil {
+					logger.Error("restart core failed:", err)
+				}
 			}
+		} else {
+			// For sing-box, we don't have IsNeedRestartAndSetFalse yet, so we'll skip this check
+			// TODO: Add similar mechanism for sing-box if needed
 		}
 	})
 
@@ -490,7 +508,14 @@ func (s *Server) Start() (err error) {
 // Stop gracefully shuts down the web server, stops Xray, cron jobs, and Telegram bot.
 func (s *Server) Stop() error {
 	s.cancel()
-	s.xrayService.StopXray()
+	// Stop current core service
+	coreService, err := service.GetCoreService()
+	if err == nil {
+		coreService.Stop()
+	} else {
+		// Fallback to Xray if GetCoreService fails
+		s.xrayService.StopXray()
+	}
 	if s.cron != nil {
 		s.cron.Stop()
 	}

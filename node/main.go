@@ -14,6 +14,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v2/node/api"
 	nodeConfig "github.com/mhsanaei/3x-ui/v2/node/config"
 	nodeLogs "github.com/mhsanaei/3x-ui/v2/node/logs"
+	"github.com/mhsanaei/3x-ui/v2/node/singbox"
 	"github.com/mhsanaei/3x-ui/v2/node/xray"
 	"github.com/op/go-logging"
 )
@@ -96,7 +97,8 @@ func main() {
 	logger.SetLogPusher(nodeLogs.PushLog)
 
 	xrayManager := xray.NewManager()
-	server := api.NewServer(port, apiKey, xrayManager)
+	singboxManager := singbox.NewManager()
+	server := api.NewServer(port, apiKey, xrayManager, singboxManager)
 
 	// Get TLS certificate paths from environment variables
 	certFile := os.Getenv("NODE_TLS_CERT_FILE")
@@ -117,6 +119,7 @@ func main() {
 
 	log.Println("Shutting down...")
 	xrayManager.Stop()
+	singboxManager.Stop()
 	server.Stop()
 	log.Println("Shutdown complete")
 }

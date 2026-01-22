@@ -169,6 +169,26 @@
             </template>
         </a-alert>
     </a-collapse-panel>
+    <a-collapse-panel key="8" header="Core Selection">
+        <a-setting-list-item paddings="small">
+            <template #title>Proxy Core</template>
+            <template #description>Select the proxy core engine (xray or sing-box). Configuration will be automatically converted when switching.</template>
+            <template #control>
+                <a-select v-model="allSetting.coreType" :dropdown-class-name="themeSwitcher.currentTheme" :style="{ width: '100%' }">
+                    <a-select-option value="xray">Xray</a-select-option>
+                    <a-select-option value="sing-box">Sing-box</a-select-option>
+                </a-select>
+            </template>
+        </a-setting-list-item>
+        <a-alert type="warning" :style="{ marginTop: '10px' }" show-icon>
+            <template slot="message">
+                Core Switching Warning
+            </template>
+            <template slot="description">
+                Switching cores will stop the current core, convert the configuration, and start the new core. This may cause a brief service interruption.
+            </template>
+        </a-alert>
+    </a-collapse-panel>
     <a-collapse-panel key="7" header='LDAP'>
         <a-setting-list-item paddings="small">
             <template #title>Enable LDAP sync</template>

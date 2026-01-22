@@ -25,6 +25,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v2/logger"
 	"github.com/mhsanaei/3x-ui/v2/util/common"
 	"github.com/mhsanaei/3x-ui/v2/util/sys"
+	"github.com/mhsanaei/3x-ui/v2/web/entity"
 	"github.com/mhsanaei/3x-ui/v2/xray"
 
 	"github.com/google/uuid"
@@ -70,6 +71,8 @@ type Status struct {
 		State    ProcessState `json:"state"`
 		ErrorMsg string       `json:"errorMsg"`
 		Version  string       `json:"version"`
+		CoreType string       `json:"coreType"` // "xray" or "sing-box"
+		CoreName string       `json:"coreName"` // Display name: "Xray" or "Sing-box"
 	} `json:"xray"`
 	Uptime   uint64    `json:"uptime"`
 	Loads    []float64 `json:"loads"`
@@ -430,20 +433,53 @@ func (s *ServerService) GetStatus(lastStatus *Status) *Status {
 	status.PublicIP.IPv4 = s.cachedIPv4
 	status.PublicIP.IPv6 = s.cachedIPv6
 
-	// Xray status
-	if s.xrayService.IsXrayRunning() {
-		status.Xray.State = Running
-		status.Xray.ErrorMsg = ""
-	} else {
-		err := s.xrayService.GetXrayErr()
-		if err != nil {
-			status.Xray.State = Error
-		} else {
-			status.Xray.State = Stop
-		}
-		status.Xray.ErrorMsg = s.xrayService.GetXrayResult()
+	// Core status (Xray or Sing-box)
+	settingService := SettingService{}
+	coreType, err := settingService.GetCoreType()
+	if err != nil {
+		coreType = "xray" // Default to xray
 	}
-	status.Xray.Version = s.xrayService.GetXrayVersion()
+	
+	coreService, err := GetCoreService()
+	if err != nil {
+		logger.Warningf("Failed to get core service in GetStatus: %v", err)
+		status.Xray.State = Error
+		status.Xray.ErrorMsg = "Failed to get core service"
+		status.Xray.Version = "Unknown"
+		status.Xray.CoreType = coreType
+		if coreType == "sing-box" {
+			status.Xray.CoreName = "Sing-box"
+		} else {
+			status.Xray.CoreName = "Xray"
+		}
+	} else {
+		if coreService.IsRunning() {
+			status.Xray.State = Running
+			status.Xray.ErrorMsg = ""
+		} else {
+			// Check if it's an error state (for xray we can check GetXrayErr)
+			if coreType == "xray" {
+				err := s.xrayService.GetXrayErr()
+				if err != nil {
+					status.Xray.State = Error
+				} else {
+					status.Xray.State = Stop
+				}
+				status.Xray.ErrorMsg = s.xrayService.GetXrayResult()
+			} else {
+				// For sing-box, we don't have error tracking yet, so just mark as stopped
+				status.Xray.State = Stop
+				status.Xray.ErrorMsg = ""
+			}
+		}
+		status.Xray.Version = coreService.GetVersion()
+		status.Xray.CoreType = coreType
+		if coreType == "sing-box" {
+			status.Xray.CoreName = "Sing-box"
+		} else {
+			status.Xray.CoreName = "Xray"
+		}
+	}
 
 	// Application stats
 	var rtm runtime.MemStats
@@ -457,8 +493,8 @@ func (s *ServerService) GetStatus(lastStatus *Status) *Status {
 	}
 
 	// Node statistics (only if multi-node mode is enabled)
-	settingService := SettingService{}
-	allSetting, err := settingService.GetAllSetting()
+	var allSetting *entity.AllSetting
+	allSetting, err = settingService.GetAllSetting()
 	if err == nil && allSetting != nil && allSetting.MultiNodeMode {
 		nodeService := NodeService{}
 		nodes, err := nodeService.GetAllNodes()
@@ -1017,7 +1053,21 @@ func logEntryContains(line string, suffixes []string) bool {
 }
 
 func (s *ServerService) GetConfigJson() (any, error) {
-	config, err := s.xrayService.GetXrayConfig()
+	// Get the active core service (Xray or sing-box)
+	settingService := SettingService{}
+	coreType, err := settingService.GetCoreType()
+	if err != nil {
+		coreType = "xray" // Default to xray
+	}
+	
+	var config interface{}
+	if coreType == "sing-box" {
+		singboxService := NewSingBoxService()
+		config, err = singboxService.GetSingBoxConfig()
+	} else {
+		config, err = s.xrayService.GetXrayConfig()
+	}
+	
 	if err != nil {
 		return nil, err
 	}

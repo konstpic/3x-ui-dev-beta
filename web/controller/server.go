@@ -381,19 +381,37 @@ func (a *ServerController) getXrayLogs(c *gin.Context) {
 	var freedoms []string
 	var blackholes []string
 
-	//getting tags for freedom and blackhole outbounds
-	config, err := a.settingService.GetDefaultXrayConfig()
+	//getting tags for freedom/direct and blackhole/block outbounds
+	// Get the active core service (Xray or sing-box)
+	coreType, err := a.settingService.GetCoreType()
+	if err != nil {
+		coreType = "xray" // Default to xray
+	}
+	
+	var config interface{}
+	if coreType == "sing-box" {
+		singboxService := service.NewSingBoxService()
+		config, err = singboxService.GetSingBoxConfig()
+	} else {
+		config, err = a.settingService.GetDefaultXrayConfig()
+	}
+	
 	if err == nil && config != nil {
 		if cfgMap, ok := config.(map[string]any); ok {
 			if outbounds, ok := cfgMap["outbounds"].([]any); ok {
 				for _, outbound := range outbounds {
 					if obMap, ok := outbound.(map[string]any); ok {
-						switch obMap["protocol"] {
-						case "freedom":
+						// For Xray: "freedom" and "blackhole"
+						// For sing-box: "direct" and "block"
+						protocol, _ := obMap["protocol"].(string)
+						obType, _ := obMap["type"].(string)
+						
+						if protocol == "freedom" || obType == "direct" {
 							if tag, ok := obMap["tag"].(string); ok {
 								freedoms = append(freedoms, tag)
 							}
-						case "blackhole":
+						}
+						if protocol == "blackhole" || obType == "block" {
 							if tag, ok := obMap["tag"].(string); ok {
 								blackholes = append(blackholes, tag)
 							}

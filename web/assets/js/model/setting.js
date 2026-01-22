@@ -75,6 +75,9 @@ class AllSetting {
         // Multi-node mode settings
         this.multiNodeMode = false; // Multi-node mode setting
         
+        // Core type setting (xray or sing-box)
+        this.coreType = "xray"; // Default to xray
+        
         // HWID tracking mode
         // "off" = HWID tracking disabled
         // "client_header" = HWID provided by client via x-hwid header (default, recommended)
