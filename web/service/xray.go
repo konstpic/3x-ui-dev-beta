@@ -51,6 +51,22 @@ func (s *XrayService) IsXrayRunning() bool {
 	return p != nil && p.IsRunning()
 }
 
+// GetAPIPort returns the API port of the running Xray process.
+func (s *XrayService) GetAPIPort() int {
+	if p != nil && p.IsRunning() {
+		return p.GetAPIPort()
+	}
+	return 0
+}
+
+// GetConfig returns the current Xray configuration.
+func (s *XrayService) GetConfig() *xray.Config {
+	if p != nil && p.IsRunning() {
+		return p.GetConfig()
+	}
+	return nil
+}
+
 // GetOrCreateAPI gets or creates a cached XrayAPI connection for the given API port.
 // This reuses connections to avoid the overhead of creating new gRPC connections.
 // Returns the API client and a cleanup function that should be called when done.

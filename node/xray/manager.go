@@ -577,6 +577,21 @@ func (m *Manager) AddUser(protocol, inboundTag string, user map[string]interface
 		return fmt.Errorf("failed to add user: %w", err)
 	}
 
+	// Update config file and restart Xray asynchronously in background to sync config
+	// This ensures config file is fully synchronized without blocking the response
+	go func() {
+		// Update config file first
+		if err := m.updateConfigFileAfterUserAddition(inboundTag, user); err != nil {
+			logger.Warningf("Failed to update config file after adding user: %v", err)
+		}
+		// Then reload to apply updated config
+		if err := m.Reload(); err != nil {
+			logger.Warningf("Failed to reload Xray after adding user: %v", err)
+		} else {
+			logger.Debugf("Xray reloaded successfully after adding user (config synced)")
+		}
+	}()
+
 	return nil
 }
 
@@ -609,6 +624,21 @@ func (m *Manager) RemoveUser(inboundTag, email string) error {
 		}
 		return fmt.Errorf("failed to remove user: %w", err)
 	}
+
+	// Update config file and restart Xray asynchronously in background to sync config
+	// This ensures config file is fully synchronized without blocking the response
+	go func() {
+		// Update config file first
+		if err := m.updateConfigFileAfterUserRemoval(inboundTag, email); err != nil {
+			logger.Warningf("Failed to update config file after removing user %s: %v", email, err)
+		}
+		// Then reload to apply updated config
+		if err := m.Reload(); err != nil {
+			logger.Warningf("Failed to reload Xray after removing user %s: %v", email, err)
+		} else {
+			logger.Debugf("Xray reloaded successfully after removing user %s (config synced)", email)
+		}
+	}()
 
 	return nil
 }
@@ -693,6 +723,191 @@ func (m *Manager) DelInbound(tag string) error {
 	}
 
 	logger.Infof("Inbound %s removed successfully via API (instant)", tag)
+	return nil
+}
+
+// updateConfigFileAfterUserRemoval updates the config file after removing a user via API.
+// This ensures the config file stays in sync with the running Xray instance.
+func (m *Manager) updateConfigFileAfterUserRemoval(inboundTag, email string) error {
+	if m.config == nil {
+		return errors.New("no config available to update")
+	}
+
+	// Find the inbound by tag
+	for i := range m.config.InboundConfigs {
+		if m.config.InboundConfigs[i].Tag == inboundTag {
+			// Parse settings JSON
+			var settings map[string]interface{}
+			if err := json.Unmarshal(m.config.InboundConfigs[i].Settings, &settings); err != nil {
+				return fmt.Errorf("failed to parse settings: %w", err)
+			}
+
+			// Get clients array
+			clients, ok := settings["clients"].([]interface{})
+			if !ok {
+				// Try to handle case where clients might be a different type
+				if clientsRaw, ok := settings["clients"]; ok {
+					if clientsArray, ok := clientsRaw.([]interface{}); ok {
+						clients = clientsArray
+					} else {
+						return fmt.Errorf("clients is not an array")
+					}
+				} else {
+					return nil // No clients to remove
+				}
+			}
+
+			// Remove user by email
+			found := false
+			newClients := make([]interface{}, 0, len(clients))
+			for _, client := range clients {
+				clientMap, ok := client.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				clientEmail, ok := clientMap["email"].(string)
+				if !ok {
+					continue
+				}
+				if strings.EqualFold(clientEmail, email) {
+					found = true
+					continue // Skip this client
+				}
+				newClients = append(newClients, client)
+			}
+
+			if !found {
+				logger.Debugf("User %s not found in config file for inbound %s (may have been already removed)", email, inboundTag)
+				return nil // User not in config, that's OK
+			}
+
+			// Update settings with new clients array
+			settings["clients"] = newClients
+			updatedSettings, err := json.Marshal(settings)
+			if err != nil {
+				return fmt.Errorf("failed to marshal updated settings: %w", err)
+			}
+
+			m.config.InboundConfigs[i].Settings = updatedSettings
+
+			// Save config to file
+			return m.saveConfigToFile()
+		}
+	}
+
+	logger.Debugf("Inbound %s not found in config", inboundTag)
+	return nil // Inbound not in config, that's OK
+}
+
+// updateConfigFileAfterUserAddition updates the config file after adding a user via API.
+// This ensures the config file stays in sync with the running Xray instance.
+func (m *Manager) updateConfigFileAfterUserAddition(inboundTag string, user map[string]interface{}) error {
+	if m.config == nil {
+		return errors.New("no config available to update")
+	}
+
+	userEmail, ok := user["email"].(string)
+	if !ok {
+		return errors.New("user email not found")
+	}
+
+	// Find the inbound by tag
+	for i := range m.config.InboundConfigs {
+		if m.config.InboundConfigs[i].Tag == inboundTag {
+			// Parse settings JSON
+			var settings map[string]interface{}
+			if err := json.Unmarshal(m.config.InboundConfigs[i].Settings, &settings); err != nil {
+				return fmt.Errorf("failed to parse settings: %w", err)
+			}
+
+			// Get clients array
+			clients, ok := settings["clients"].([]interface{})
+			if !ok {
+				// Initialize clients array if it doesn't exist
+				clients = make([]interface{}, 0)
+			}
+
+			// Check if user already exists
+			for _, client := range clients {
+				clientMap, ok := client.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				clientEmail, ok := clientMap["email"].(string)
+				if !ok {
+					continue
+				}
+				if strings.EqualFold(clientEmail, userEmail) {
+					logger.Debugf("User %s already exists in config file for inbound %s", userEmail, inboundTag)
+					return nil // User already in config, that's OK
+				}
+			}
+
+			// Add user to clients array
+			clients = append(clients, user)
+
+			// Update settings with new clients array
+			settings["clients"] = clients
+			updatedSettings, err := json.Marshal(settings)
+			if err != nil {
+				return fmt.Errorf("failed to marshal updated settings: %w", err)
+			}
+
+			m.config.InboundConfigs[i].Settings = updatedSettings
+
+			// Save config to file
+			return m.saveConfigToFile()
+		}
+	}
+
+	logger.Debugf("Inbound %s not found in config", inboundTag)
+	return nil // Inbound not in config, that's OK
+}
+
+// saveConfigToFile saves the current config to the config file.
+func (m *Manager) saveConfigToFile() error {
+	if m.config == nil {
+		return errors.New("no config to save")
+	}
+
+	// Marshal config to JSON
+	configJSON, err := json.MarshalIndent(m.config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	// Try to find config file path
+	configPaths := []string{
+		"bin/config.json",
+		"config/config.json",
+		"./config.json",
+		"/app/bin/config.json",
+		"/app/config/config.json",
+	}
+
+	var configPath string
+	for _, path := range configPaths {
+		if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
+			configPath = path
+			break
+		}
+	}
+
+	if configPath == "" {
+		// No existing config file found, try to use default path
+		configPath = "bin/config.json"
+		// Create directory if it doesn't exist
+		if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+			return fmt.Errorf("failed to create config directory: %w", err)
+		}
+	}
+
+	// Write config to file
+	if err := os.WriteFile(configPath, configJSON, 0644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
+
+	logger.Debugf("Config file updated: %s", configPath)
 	return nil
 }
 

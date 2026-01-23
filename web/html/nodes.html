@@ -575,12 +575,22 @@
               modal.steps.connecting = 'error';
               app.$message.error(checkMsg?.msg || 'Нода недоступна. Проверьте адрес и порт.');
               modal.registering = false;
+              modal.hasError = true;
+              // Принудительное обновление Vue компонента
+              if (window.nodeModalVueInstance && window.nodeModalVueInstance.$forceUpdate) {
+                window.nodeModalVueInstance.$forceUpdate();
+              }
               return;
             }
           } catch (e) {
             modal.steps.connecting = 'error';
             app.$message.error('Нода недоступна. Проверьте адрес и порт.');
             modal.registering = false;
+            modal.hasError = true;
+            // Принудительное обновление Vue компонента
+            if (window.nodeModalVueInstance && window.nodeModalVueInstance.$forceUpdate) {
+              window.nodeModalVueInstance.$forceUpdate();
+            }
             return;
           }
           
@@ -626,6 +636,11 @@
             modal.steps.registering = 'error';
             app.$message.error((msg && msg.msg) || '{{ i18n "pages.nodes.addError" }}');
             modal.registering = false;
+            modal.hasError = true;
+            // Принудительное обновление Vue компонента
+            if (window.nodeModalVueInstance && window.nodeModalVueInstance.$forceUpdate) {
+              window.nodeModalVueInstance.$forceUpdate();
+            }
           }
         } catch (e) {
           console.error('Failed to add node:', e);
@@ -639,6 +654,11 @@
           }
           app.$message.error('{{ i18n "pages.nodes.addError" }}');
           modal.registering = false;
+          modal.hasError = true;
+          // Принудительное обновление Vue компонента
+          if (window.nodeModalVueInstance && window.nodeModalVueInstance.$forceUpdate) {
+            window.nodeModalVueInstance.$forceUpdate();
+          }
         }
       },
     },
