@@ -45,8 +45,41 @@
                     <a-form layout="vertical">
                         <a-form-item>
                             <a-space direction="vertical" align="center">
-                                <a-row type="flex" :gutter="[8,8]" justify="center" style="width:100%">
-                                    <a-col :xs="24" :sm="app.subJsonUrl ? 12 : 24" style="text-align:center;">
+                                <a-row type="flex" :gutter="isMobile ? [16,16] : [64,16]" justify="center" style="width:100%">
+                                    <!-- Show dual QR codes for Happ and V2RayTun when encryption is enabled and showOnlyHappV2RayTun is true -->
+                                    <template v-if="showDualEncryptedQR">
+                                        <!-- First container: Happ QR code -->
+                                        <a-col :xs="24" :sm="12" style="display:flex; justify-content:center; align-items:center;">
+                                            <tr-qr-box class="qr-box">
+                                                <a-tag color="purple" class="qr-tag">
+                                                    <span>Happ</span>
+                                                </a-tag>
+                                                <tr-qr-bg class="qr-bg-sub">
+                                                    <tr-qr-bg-inner class="qr-bg-sub-inner">
+                                                        <canvas id="qrcode-happ" class="qr-cv" title='{{ i18n "copy" }}'
+                                                            @click="copy(app.happEncryptedUrl)"></canvas>
+                                                    </tr-qr-bg-inner>
+                                                </tr-qr-bg>
+                                            </tr-qr-box>
+                                        </a-col>
+                                        <!-- Second container: V2RayTun QR code -->
+                                        <a-col :xs="24" :sm="12" style="display:flex; justify-content:center; align-items:center;">
+                                            <tr-qr-box class="qr-box">
+                                                <a-tag color="purple" class="qr-tag">
+                                                    <span>V2RayTun</span>
+                                                </a-tag>
+                                                <tr-qr-bg class="qr-bg-sub">
+                                                    <tr-qr-bg-inner class="qr-bg-sub-inner">
+                                                        <canvas id="qrcode-v2raytun" class="qr-cv" title='{{ i18n "copy" }}'
+                                                            @click="copy(app.v2raytunEncryptedUrl)"></canvas>
+                                                    </tr-qr-bg-inner>
+                                                </tr-qr-bg>
+                                            </tr-qr-box>
+                                        </a-col>
+                                    </template>
+                                    <!-- Default QR code display (when not showing dual encrypted QR) -->
+                                    <template v-else>
+                                    <a-col :xs="24" :sm="app.subJsonUrl ? 12 : 24" style="text-align:center; display:flex; justify-content:center;">
                                         <tr-qr-box class="qr-box">
                                             <a-tag color="purple" class="qr-tag">
                                                 <span>{{ i18n
@@ -60,7 +93,7 @@
                                             </tr-qr-bg>
                                         </tr-qr-box>
                                     </a-col>
-                                    <a-col v-if="app.subJsonUrl" :xs="24" :sm="12" style="text-align:center;">
+                                    <a-col v-if="app.subJsonUrl" :xs="24" :sm="12" style="text-align:center; display:flex; justify-content:center;">
                                         <tr-qr-box class="qr-box">
                                             <a-tag color="purple" class="qr-tag">
                                                 <span>{{ i18n
@@ -69,12 +102,13 @@
                                             </a-tag>
                                             <tr-qr-bg class="qr-bg-sub">
                                                 <tr-qr-bg-inner class="qr-bg-sub-inner">
-                                                    <canvas id="qrcode-subjson" class="qr-cv" title='{{ i18n "copy" }}'
-                                                        @click="copy(app.subJsonUrl)"></canvas>
-                                                </tr-qr-bg-inner>
-                                            </tr-qr-bg>
-                                        </tr-qr-box>
-                                    </a-col>
+                                                <canvas id="qrcode-subjson" class="qr-cv" title='{{ i18n "copy" }}'
+                                                    @click="copy(app.subJsonUrl)"></canvas>
+                                            </tr-qr-bg-inner>
+                                        </tr-qr-bg>
+                                    </tr-qr-box>
+                                </a-col>
+                                </template>
                                 </a-row>
                             </a-space>
                         </a-form-item>

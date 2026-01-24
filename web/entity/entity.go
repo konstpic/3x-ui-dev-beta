@@ -79,6 +79,8 @@ type AllSetting struct {
 	SubOnlyHappV2RayTun         bool   `json:"subOnlyHappV2RayTun" form:"subOnlyHappV2RayTun"`                // Only include Happ and V2RayTun compatible links
 	SubHideConfigLinks          bool   `json:"subHideConfigLinks" form:"subHideConfigLinks"`                  // Hide configuration links on subscription page
 	SubShowOnlyHappV2RayTun     bool   `json:"subShowOnlyHappV2RayTun" form:"subShowOnlyHappV2RayTun"`        // Show only Happ and V2RayTun applications on subscription page
+	SubHeaders                  string `json:"subHeaders" form:"subHeaders"`                                    // JSON string containing subscription headers configuration
+	SubProviderID               string `json:"subProviderID" form:"subProviderID"`                             // Provider ID for Happ extended headers (required for new-url, new-domain, etc.)
 
 	// LDAP settings
 	LdapEnable     bool   `json:"ldapEnable" form:"ldapEnable"`
@@ -192,4 +194,74 @@ func (s *AllSetting) CheckValid() error {
 	}
 
 	return nil
+}
+
+// SubscriptionHeaders represents subscription HTTP headers configuration
+// This structure is used to store and manage custom headers for subscription responses
+type SubscriptionHeaders struct {
+	// Standard headers (supported by both Happ and V2RayTun)
+	ProfileTitle          string `json:"profileTitle,omitempty"`          // Subscription name (max 25 chars for Happ)
+	SubscriptionUserinfo  string `json:"subscriptionUserinfo,omitempty"`  // Traffic info: upload=X; download=Y; total=Z; expire=T
+	ProfileUpdateInterval string `json:"profileUpdateInterval,omitempty"` // Update interval in hours
+	SupportUrl            string `json:"supportUrl,omitempty"`            // Support button URL
+	ProfileWebPageUrl     string `json:"profileWebPageUrl,omitempty"`     // Subscription website URL
+	Announce              string `json:"announce,omitempty"`               // Announcement text (max 200 chars)
+	AnnounceUrl           string `json:"announceUrl,omitempty"`           // Announcement click URL (V2RayTun)
+	Routing               string `json:"routing,omitempty"`               // Base64 encoded routing config
+	RoutingEnable         string `json:"routingEnable,omitempty"`          // Enable/disable routing (0/1)
+	CustomTunnelConfig    string `json:"customTunnelConfig,omitempty"`    // Custom tunnel config JSON (Happ)
+
+	// Extended Happ headers (require Provider ID)
+	NewUrl                string `json:"newUrl,omitempty"`                // New subscription URL
+	NewDomain             string `json:"newDomain,omitempty"`              // New domain for subscription
+	ServerDescription     string `json:"serverDescription,omitempty"`      // Server description (max 30 chars, base64)
+	SubExpire             string `json:"subExpire,omitempty"`             // Enable expire notifications (true/1)
+	SubExpireButtonLink   string `json:"subExpireButtonLink,omitempty"`   // Expire notification button link
+	SubInfoColor          string `json:"subInfoColor,omitempty"`          // Info block color (red/blue/green)
+	SubInfoText           string `json:"subInfoText,omitempty"`            // Info block text (max 200 chars)
+	SubInfoButtonText     string `json:"subInfoButtonText,omitempty"`     // Info block button text (max 25 chars)
+	SubInfoButtonLink     string `json:"subInfoButtonLink,omitempty"`     // Info block button link
+	SubscriptionAlwaysHwidEnable string `json:"subscriptionAlwaysHwidEnable,omitempty"` // Force HWID enable (true/1)
+	NotificationSubsExpire        string `json:"notificationSubsExpire,omitempty"`        // Enable expire notifications (true/1)
+	HideSettings                  string `json:"hideSettings,omitempty"`                 // Hide settings in app (true/1)
+	ServerAddressResolveEnable    string `json:"serverAddressResolveEnable,omitempty"`  // Enable DNS resolve (true/1)
+	ServerAddressResolveDnsDomain string `json:"serverAddressResolveDnsDomain,omitempty"` // DoH server URL
+	ServerAddressResolveDnsIP     string `json:"serverAddressResolveDnsIP,omitempty"`     // DoH server IP
+	SubscriptionAutoconnect       string `json:"subscriptionAutoconnect,omitempty"`       // Auto-connect on start (true/1)
+	SubscriptionAutoconnectType   string `json:"subscriptionAutoconnectType,omitempty"`   // Auto-connect type (lastused/lowestdelay)
+	SubscriptionPingOnopenEnabled  string `json:"subscriptionPingOnopenEnabled,omitempty"` // Ping on open (true/1)
+	SubscriptionAutoUpdateEnable  string `json:"subscriptionAutoUpdateEnable,omitempty"`  // Auto-update enable (true/1)
+	FragmentationEnable           string `json:"fragmentationEnable,omitempty"`           // Enable fragmentation (true/1)
+	FragmentationPackets          string `json:"fragmentationPackets,omitempty"`           // Fragmentation packets
+	FragmentationLength            string `json:"fragmentationLength,omitempty"`           // Fragmentation length
+	FragmentationInterval          string `json:"fragmentationInterval,omitempty"`         // Fragmentation interval
+	FragmentationMaxsplit          string `json:"fragmentationMaxsplit,omitempty"`         // Fragmentation max split
+	NoisesEnable                  string `json:"noisesEnable,omitempty"`                   // Enable noises (true/1)
+	NoisesType                    string `json:"noisesType,omitempty"`                     // Noises type (rand/str/base64)
+	NoisesPacket                  string `json:"noisesPacket,omitempty"`                   // Noises packet
+	NoisesDelay                   string `json:"noisesDelay,omitempty"`                    // Noises delay
+	NoisesApplyto                 string `json:"noisesApplyto,omitempty"`                  // Noises apply to (ip/ipv4/ipv6)
+	PingType                      string `json:"pingType,omitempty"`                       // Ping type (proxy/proxy-head/tcp/icmp)
+	CheckUrlViaProxy              string `json:"checkUrlViaProxy,omitempty"`               // Check URL via proxy
+	ChangeUserAgent               string `json:"changeUserAgent,omitempty"`                // Custom User-Agent
+	AppAutoStart                  string `json:"appAutoStart,omitempty"`                   // Auto-start app (true/1)
+	SubscriptionAutoUpdateOpenEnable string `json:"subscriptionAutoUpdateOpenEnable,omitempty"` // Auto-update on open (true/1)
+	PerAppProxyMode               string `json:"perAppProxyMode,omitempty"`                // Per-app proxy mode (off/on/bypass)
+	PerAppProxyList               string `json:"perAppProxyList,omitempty"`                // Per-app proxy list (comma-separated)
+	SniffingEnable                string `json:"sniffingEnable,omitempty"`                // Enable sniffing (true/1)
+	SubscriptionsCollapse         string `json:"subscriptionsCollapse,omitempty"`        // Collapse subscriptions (false/0)
+	PingResult                    string `json:"pingResult,omitempty"`                     // Ping result display (time/icon)
+	MuxEnable                     string `json:"muxEnable,omitempty"`                      // Enable Mux (true/1)
+	MuxTcpConnections              string `json:"muxTcpConnections,omitempty"`              // Mux TCP connections
+	MuxXudpConnections            string `json:"muxXudpConnections,omitempty"`              // Mux XUDP connections
+	MuxQuic                       string `json:"muxQuic,omitempty"`                        // Mux QUIC setting
+	ProxyEnable                   string `json:"proxyEnable,omitempty"`                    // Enable proxy mode (true/1)
+	TunEnable                     string `json:"tunEnable,omitempty"`                      // Enable TUN mode (true/1)
+	TunMode                       string `json:"tunMode,omitempty"`                        // TUN mode (system/gvisor)
+	TunType                       string `json:"tunType,omitempty"`                       // TUN type (singbox/tun2proxy)
+	ExcludeRoutes                 string `json:"excludeRoutes,omitempty"`                 // Exclude routes (space/comma-separated)
+	ColorProfile                  string `json:"colorProfile,omitempty"`                   // Color theme profile (JSON or base64)
+
+	// V2RayTun specific headers
+	UpdateAlways string `json:"updateAlways,omitempty"` // Force update on every app open (true)
 }

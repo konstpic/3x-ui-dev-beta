@@ -79,6 +79,8 @@ var defaultValueMap = map[string]string{
 	"subOnlyHappV2RayTun":          "false",
 	"subShowOnlyHappV2RayTun":      "false",
 	"subHideConfigLinks":           "false",
+	"subHeaders":                   "{}", // JSON string for subscription headers
+	"subProviderID":                "",   // Provider ID for Happ extended headers
 	"datepicker":                  "gregorian",
 	"warp":                        "",
 	"externalTrafficInformEnable": "false",
@@ -679,8 +681,58 @@ func (s *SettingService) GetSubShowOnlyHappV2RayTun() (bool, error) {
 	return s.getBool("subShowOnlyHappV2RayTun")
 }
 
+func (s *SettingService) GetSubProviderID() (string, error) {
+	return s.getString("subProviderID")
+}
+
 func (s *SettingService) SetSubHideConfigLinks(value bool) error {
 	return s.setBool("subHideConfigLinks", value)
+}
+
+// GetSubHeaders retrieves subscription headers configuration as JSON string
+func (s *SettingService) GetSubHeaders() (string, error) {
+	return s.getString("subHeaders")
+}
+
+// SetSubHeaders saves subscription headers configuration as JSON string
+func (s *SettingService) SetSubHeaders(headersJSON string) error {
+	return s.setString("subHeaders", headersJSON)
+}
+
+// GetSubHeadersParsed retrieves and parses subscription headers configuration
+func (s *SettingService) GetSubHeadersParsed() (*entity.SubscriptionHeaders, error) {
+	headersJSON, err := s.GetSubHeaders()
+	if err != nil {
+		return nil, err
+	}
+	
+	// If empty or "{}", return empty headers
+	if headersJSON == "" || headersJSON == "{}" {
+		return &entity.SubscriptionHeaders{}, nil
+	}
+	
+	var headers entity.SubscriptionHeaders
+	if err := json.Unmarshal([]byte(headersJSON), &headers); err != nil {
+		// If parsing fails, return empty headers instead of error
+		// This allows the system to continue working even with invalid JSON
+		return &entity.SubscriptionHeaders{}, nil
+	}
+	
+	return &headers, nil
+}
+
+// SetSubHeadersParsed saves subscription headers configuration from struct
+func (s *SettingService) SetSubHeadersParsed(headers *entity.SubscriptionHeaders) error {
+	if headers == nil {
+		return s.SetSubHeaders("{}")
+	}
+	
+	headersJSON, err := json.Marshal(headers)
+	if err != nil {
+		return fmt.Errorf("failed to marshal subscription headers: %w", err)
+	}
+	
+	return s.SetSubHeaders(string(headersJSON))
 }
 
 func (s *SettingService) GetDatepicker() (string, error) {
@@ -870,6 +922,10 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 			errs = append(errs, err)
 		}
 	}
+	
+	// Force clear cache after all settings are updated to ensure fresh data on next request
+	cache.InvalidateAllSettings()
+	
 	return common.Combine(errs...)
 }
 

@@ -51,6 +51,8 @@ class AllSetting {
         this.subOnlyHappV2RayTun = false;
         this.subHideConfigLinks = false;
         this.subShowOnlyHappV2RayTun = false;
+        this.subHeaders = "{}"; // JSON string for subscription headers
+        this.subProviderID = ""; // Provider ID for Happ extended headers
 
         this.timeLocation = "Local";
 

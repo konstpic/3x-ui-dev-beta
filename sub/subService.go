@@ -2323,10 +2323,25 @@ func (s *SubService) buildSingleURL(configuredURI, baseScheme, baseHostWithPort,
 
 // joinPathWithID safely joins a base path with a subscription ID
 func (s *SubService) joinPathWithID(basePath, subId string) string {
+	subURL := ""
 	if strings.HasSuffix(basePath, "/") {
-		return basePath + subId
+		subURL = basePath + subId
+	} else {
+		subURL = basePath + "/" + subId
 	}
-	return basePath + "/" + subId
+	
+	// Add Provider ID to URL if configured (for Happ extended headers)
+	providerID, err := s.settingService.GetSubProviderID()
+	if err == nil && providerID != "" {
+		// Add Provider ID as query parameter
+		if strings.Contains(subURL, "?") {
+			subURL += "&provider=" + url.QueryEscape(providerID)
+		} else {
+			subURL += "?provider=" + url.QueryEscape(providerID)
+		}
+	}
+	
+	return subURL
 }
 
 // BuildPageData parses header and prepares the template view model.

@@ -102,9 +102,12 @@
     window.location.href = url;
   }
 
-  function drawQR(value) {
+  function drawQR(value, elementId = 'qrcode') {
     try {
-      new QRious({ element: document.getElementById('qrcode'), value, size: 220 });
+      const element = document.getElementById(elementId);
+      if (element) {
+        new QRious({ element: element, value, size: 220 });
+      }
     } catch (e) {
       console.warn(e);
     }
@@ -161,7 +164,16 @@
       console.info('  - Happ encrypted URL:', this.app.happEncryptedUrl || '(not available)');
       console.info('  - V2RayTun encrypted URL:', this.app.v2raytunEncryptedUrl || '(not available)');
       console.info('  - hideConfigLinks:', this.hideConfigLinks, '(type:', typeof this.hideConfigLinks + ')');
+      console.info('  - showDualEncryptedQR:', this.showDualEncryptedQR);
       
+      // Draw QR codes based on mode
+      if (this.showDualEncryptedQR) {
+        // Draw dual QR codes for Happ and V2RayTun
+        drawQR(this.app.happEncryptedUrl, 'qrcode-happ');
+        drawQR(this.app.v2raytunEncryptedUrl, 'qrcode-v2raytun');
+        console.info('[Subscription] Drawing dual encrypted QR codes for Happ and V2RayTun');
+      } else {
+        // Draw default QR code(s)
       drawQR(this.app.subUrl);
       try {
         const elJson = document.getElementById('qrcode-subjson');
@@ -169,6 +181,7 @@
           new QRious({ element: elJson, value: this.app.subJsonUrl, size: 220 });
         }
       } catch (e) { /* ignore */ }
+      }
       this._onResize = () => { this.viewportWidth = window.innerWidth; };
       window.addEventListener('resize', this._onResize);
     },
@@ -187,6 +200,14 @@
         const expiryOk = !this.app.expireMs || this.app.expireMs >= now;
         const trafficOk = !this.app.totalByte || (this.app.uploadByte + this.app.downloadByte) <= this.app.totalByte;
         return expiryOk && trafficOk;
+      },
+      showDualEncryptedQR() {
+        // Show dual QR codes when encryption is enabled and showOnlyHappV2RayTun is true
+        return this.showOnlyHappV2RayTun && 
+               this.app.happEncryptedUrl && 
+               this.app.happEncryptedUrl.trim() !== '' &&
+               this.app.v2raytunEncryptedUrl && 
+               this.app.v2raytunEncryptedUrl.trim() !== '';
       },
       shadowrocketUrl() {
         const rawUrl = this.app.subUrl + '?flag=shadowrocket';

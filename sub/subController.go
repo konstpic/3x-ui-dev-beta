@@ -4,11 +4,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/mhsanaei/3x-ui/v2/config"
 	"github.com/mhsanaei/3x-ui/v2/logger"
 	service "github.com/mhsanaei/3x-ui/v2/web/service"
+	"github.com/mhsanaei/3x-ui/v2/web/entity"
 
 	"github.com/gin-gonic/gin"
 )
@@ -197,10 +199,156 @@ func (a *SUBController) subJsons(c *gin.Context) {
 
 // ApplyCommonHeaders sets common HTTP headers for subscription responses including user info, update interval, and profile title.
 // Also adds X-Subscription-ID header so clients can use it as HWID if needed.
+// Custom headers from settings are applied if available.
 func (a *SUBController) ApplyCommonHeaders(c *gin.Context, header, updateInterval, profileTitle, subId string) {
+	// Apply standard headers (can be overridden by custom headers)
 	c.Writer.Header().Set("Subscription-Userinfo", header)
 	c.Writer.Header().Set("Profile-Update-Interval", updateInterval)
 	c.Writer.Header().Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(profileTitle)))
 	// Add subscription ID header so clients can use it as HWID identifier
 	c.Writer.Header().Set("X-Subscription-ID", subId)
+	
+	// Apply custom headers from settings
+	settingService := service.SettingService{}
+	customHeaders, err := settingService.GetSubHeadersParsed()
+	if err == nil && customHeaders != nil {
+		a.applyCustomHeaders(c, customHeaders, header, updateInterval, profileTitle)
+	}
+}
+
+// applyCustomHeaders applies custom subscription headers from settings
+func (a *SUBController) applyCustomHeaders(c *gin.Context, headers *entity.SubscriptionHeaders, defaultUserinfo, defaultUpdateInterval, defaultProfileTitle string) {
+	// Standard headers (override defaults if provided)
+	if headers.ProfileTitle != "" {
+		// Check if already base64 encoded
+		if strings.HasPrefix(headers.ProfileTitle, "base64:") {
+			c.Writer.Header().Set("Profile-Title", headers.ProfileTitle)
+		} else {
+			c.Writer.Header().Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(headers.ProfileTitle)))
+		}
+	}
+	
+	if headers.SubscriptionUserinfo != "" {
+		c.Writer.Header().Set("Subscription-Userinfo", headers.SubscriptionUserinfo)
+	}
+	
+	if headers.ProfileUpdateInterval != "" {
+		c.Writer.Header().Set("Profile-Update-Interval", headers.ProfileUpdateInterval)
+	}
+	
+	if headers.SupportUrl != "" {
+		c.Writer.Header().Set("Support-Url", headers.SupportUrl)
+	}
+	
+	if headers.ProfileWebPageUrl != "" {
+		c.Writer.Header().Set("Profile-Web-Page-Url", headers.ProfileWebPageUrl)
+	}
+	
+	if headers.Announce != "" {
+		// Check if already base64 encoded
+		if strings.HasPrefix(headers.Announce, "base64:") {
+			c.Writer.Header().Set("Announce", headers.Announce)
+		} else {
+			c.Writer.Header().Set("Announce", headers.Announce)
+		}
+	}
+	
+	if headers.AnnounceUrl != "" {
+		c.Writer.Header().Set("Announce-Url", headers.AnnounceUrl)
+	}
+	
+	if headers.Routing != "" {
+		c.Writer.Header().Set("Routing", headers.Routing)
+	}
+	
+	if headers.RoutingEnable != "" {
+		c.Writer.Header().Set("Routing-Enable", headers.RoutingEnable)
+	}
+	
+	if headers.CustomTunnelConfig != "" {
+		c.Writer.Header().Set("Custom-Tunnel-Config", headers.CustomTunnelConfig)
+	}
+	
+	// Extended Happ headers
+	if headers.NewUrl != "" {
+		c.Writer.Header().Set("New-Url", headers.NewUrl)
+	}
+	
+	if headers.NewDomain != "" {
+		c.Writer.Header().Set("New-Domain", headers.NewDomain)
+	}
+	
+	if headers.ServerDescription != "" {
+		c.Writer.Header().Set("Server-Description", headers.ServerDescription)
+	}
+	
+	if headers.SubExpire != "" {
+		c.Writer.Header().Set("Sub-Expire", headers.SubExpire)
+	}
+	
+	if headers.SubExpireButtonLink != "" {
+		c.Writer.Header().Set("Sub-Expire-Button-Link", headers.SubExpireButtonLink)
+	}
+	
+	if headers.SubInfoColor != "" {
+		c.Writer.Header().Set("Sub-Info-Color", headers.SubInfoColor)
+	}
+	
+	if headers.SubInfoText != "" {
+		c.Writer.Header().Set("Sub-Info-Text", headers.SubInfoText)
+	}
+	
+	if headers.SubInfoButtonText != "" {
+		c.Writer.Header().Set("Sub-Info-Button-Text", headers.SubInfoButtonText)
+	}
+	
+	if headers.SubInfoButtonLink != "" {
+		c.Writer.Header().Set("Sub-Info-Button-Link", headers.SubInfoButtonLink)
+	}
+	
+	// Apply all other Happ headers (using reflection to avoid missing any)
+	headersValue := reflect.ValueOf(headers).Elem()
+	headersType := headersValue.Type()
+	
+	for i := 0; i < headersType.NumField(); i++ {
+		field := headersType.Field(i)
+		fieldValue := headersValue.Field(i)
+		
+		// Skip if empty or already processed
+		if fieldValue.Kind() != reflect.String || fieldValue.String() == "" {
+			continue
+		}
+		
+		// Skip standard headers we already processed
+		fieldName := field.Name
+		if fieldName == "ProfileTitle" || fieldName == "SubscriptionUserinfo" || 
+		   fieldName == "ProfileUpdateInterval" || fieldName == "SupportUrl" ||
+		   fieldName == "ProfileWebPageUrl" || fieldName == "Announce" ||
+		   fieldName == "AnnounceUrl" || fieldName == "Routing" ||
+		   fieldName == "RoutingEnable" || fieldName == "CustomTunnelConfig" ||
+		   fieldName == "NewUrl" || fieldName == "NewDomain" ||
+		   fieldName == "ServerDescription" || fieldName == "SubExpire" ||
+		   fieldName == "SubExpireButtonLink" || fieldName == "SubInfoColor" ||
+		   fieldName == "SubInfoText" || fieldName == "SubInfoButtonText" ||
+		   fieldName == "SubInfoButtonLink" {
+			continue
+		}
+		
+		// Convert field name to header name (e.g., SubscriptionAutoconnect -> Subscription-Autoconnect)
+		headerName := a.fieldNameToHeaderName(fieldName)
+		c.Writer.Header().Set(headerName, fieldValue.String())
+	}
+}
+
+// fieldNameToHeaderName converts Go field name to HTTP header name
+// Example: SubscriptionAutoconnect -> Subscription-Autoconnect
+func (a *SUBController) fieldNameToHeaderName(fieldName string) string {
+	var result strings.Builder
+	for i, r := range fieldName {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			result.WriteByte('-')
+		}
+		result.WriteRune(r)
+	}
+	return result.String()
 }

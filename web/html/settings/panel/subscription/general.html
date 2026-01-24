@@ -106,6 +106,13 @@
                 <a-switch v-model="allSetting.subShowOnlyHappV2RayTun"></a-switch>
             </template>
         </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subProviderID"}}</template>
+            <template #description>{{ i18n "pages.settings.subProviderIDDesc"}}</template>
+            <template #control>
+                <a-input type="text" v-model="allSetting.subProviderID" placeholder="UUID или идентификатор провайдера"></a-input>
+            </template>
+        </a-setting-list-item>
     </a-collapse-panel>
     <a-collapse-panel key="3" header='{{ i18n "pages.settings.certs" }}'>
         <a-setting-list-item paddings="small">

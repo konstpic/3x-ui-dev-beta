@@ -91,8 +91,15 @@
                   </a-tab-pane>
                   <a-tab-pane key="6" :style="{ paddingTop: '20px' }">
                     <template #tab>
+                      <a-icon type="file-text"></a-icon>
+                      <span>{{ i18n "pages.settings.subscriptionHeaders.title" }}</span>
+                    </template>
+                    {{ template "settings/panel/subscription/headers" . }}
+                  </a-tab-pane>
+                  <a-tab-pane key="7" :style="{ paddingTop: '20px' }">
+                    <template #tab>
                       <a-icon type="database"></a-icon>
-                      <span>{{ i18n "pages.settings.migration" }}</span>
+                      <span>{{ i18n "pages.settings.migration.title" }}</span>
                     </template>
                     {{ template "settings/panel/migration" . }}
                   </a-tab-pane>
@@ -131,6 +138,7 @@
       entryPort: null,
       entryProtocol: null,
       entryIsIP: false,
+      subHeaders: {}, // Parsed subscription headers object
       user: {},
       lang: LanguageManager.getLanguage(),
       inboundOptions: [],
@@ -314,8 +322,10 @@
 
         return parts.length === 2 ? groups < 8 : groups === 8;
       },
-      async getAllSetting() {
-        const msg = await HttpUtil.post("/panel/setting/all");
+      async getAllSetting(forceRefresh = false) {
+        // Add cache-busting parameter if force refresh is requested
+        const url = forceRefresh ? `/panel/setting/all?_t=${Date.now()}` : "/panel/setting/all";
+        const msg = await HttpUtil.post(url);
 
         if (msg.success) {
           if (!this.loadingStates.fetched) {
@@ -324,6 +334,19 @@
 
           this.oldAllSetting = new AllSetting(msg.obj);
           this.allSetting = new AllSetting(msg.obj);
+          
+          // Initialize subHeaders object from JSON string
+          try {
+            const headersJSON = this.allSetting.subHeaders || "{}";
+            this.subHeaders = JSON.parse(headersJSON);
+            // Ensure oldAllSetting also has the same subHeaders for proper comparison
+            this.oldAllSetting.subHeaders = headersJSON;
+          } catch (e) {
+            console.warn("Failed to parse subHeaders on load:", e);
+            this.subHeaders = {};
+            this.oldAllSetting.subHeaders = "{}";
+            this.allSetting.subHeaders = "{}";
+          }
           
           app.changeRemarkSample();
           this.saveBtnDisable = true;
@@ -342,11 +365,19 @@
       },
       async updateAllSetting() {
         this.loading(true);
+        // Sync subHeaders object back to JSON string before saving
+        try {
+          this.allSetting.subHeaders = JSON.stringify(this.subHeaders || {});
+        } catch (e) {
+          console.error("Failed to stringify subHeaders before save:", e);
+        }
         const msg = await HttpUtil.post("/panel/setting/update", this.allSetting);
         this.loading(false);
         if (msg.success) {
           Vue.prototype.$message.success('{{ i18n "pages.settings.toasts.modifySettings" }}');
-          await this.getAllSetting();
+          // Wait a bit for cache to be cleared on server side, then reload with cache-busting
+          await new Promise(resolve => setTimeout(resolve, 100));
+          await this.getAllSetting(true);
         } else {
           Vue.prototype.$message.error(msg.msg || '{{ i18n "pages.settings.toasts.getSettings" }}');
         }
@@ -789,6 +820,46 @@
           }
           return alerts
         }
+      },
+      // Subscription headers computed property - syncs between JSON string and object
+      subHeadersObject: {
+        get: function () {
+          try {
+            const headersJSON = this.allSetting.subHeaders || "{}";
+            return JSON.parse(headersJSON);
+          } catch (e) {
+            console.warn("Failed to parse subHeaders JSON:", e);
+            return {};
+          }
+        },
+        set: function (value) {
+          try {
+            this.allSetting.subHeaders = JSON.stringify(value || {});
+            // Update local subHeaders object for reactivity
+            this.subHeaders = value || {};
+          } catch (e) {
+            console.error("Failed to stringify subHeaders:", e);
+          }
+        }
+      }
+    },
+    watch: {
+      // Watch subHeaders object and sync to allSetting.subHeaders for save button activation
+      subHeaders: {
+        handler: function (newVal, oldVal) {
+          // Deep watch to detect nested changes
+          try {
+            const newJSON = JSON.stringify(newVal || {});
+            const oldJSON = this.allSetting.subHeaders || "{}";
+            if (newJSON !== oldJSON) {
+              this.allSetting.subHeaders = newJSON;
+            }
+          } catch (e) {
+            console.error("Failed to sync subHeaders:", e);
+          }
+        },
+        deep: true,
+        immediate: false
       }
     },
     async mounted() {
@@ -800,6 +871,15 @@
       await this.loadInboundTags();
       while (true) {
         await PromiseUtil.sleep(1000);
+        // Sync subHeaders before comparison
+        try {
+          const currentSubHeadersJSON = JSON.stringify(this.subHeaders || {});
+          if (this.allSetting.subHeaders !== currentSubHeadersJSON) {
+            this.allSetting.subHeaders = currentSubHeadersJSON;
+          }
+        } catch (e) {
+          console.error("Failed to sync subHeaders in check loop:", e);
+        }
         this.saveBtnDisable = this.oldAllSetting.equals(this.allSetting);
       }
     }
