@@ -24,6 +24,12 @@
               :style="{ marginTop: '10px' }"
               class="groups-table"
               :locale='{ filterConfirm: `{{ i18n "confirm" }}`, filterReset: `{{ i18n "reset" }}`, emptyText: `{{ i18n "noData" }}` }'>
+              <template slot="description" slot-scope="text, group">
+                <a-tooltip v-if="group.description && group.description.length > 50" :title="group.description">
+                  <span class="group-description">[[ truncateText(group.description, 50) ]]</span>
+                </a-tooltip>
+                <span v-else class="group-description">[[ group.description || '-' ]]</span>
+              </template>
               <template slot="action" slot-scope="text, group">
                 <a-dropdown :trigger="['click']">
                   <a-icon @click="e => e.preventDefault()" type="more"
@@ -57,6 +63,10 @@
                     <a-menu-item key="bulkSetHwidLimit">
                       <a-icon type="setting"></a-icon>
                       {{ i18n "pages.clients.setHwidLimit" }}
+                    </a-menu-item>
+                    <a-menu-item key="bulkAssignInbounds">
+                      <a-icon type="api"></a-icon>
+                      {{ i18n "pages.groups.assignInbounds" }}
                     </a-menu-item>
                     <a-menu-item key="bulkDelete" :style="{ color: '#FF4D4F' }">
                       <a-icon type="delete"></a-icon>
@@ -140,7 +150,7 @@
     title: '{{ i18n "pages.groups.groupDescription" }}',
     align: 'left',
     width: 300,
-    dataIndex: "description",
+    scopedSlots: { customRender: 'description' },
   }, {
     title: '{{ i18n "pages.groups.clientCount" }}',
     align: 'center',
@@ -177,6 +187,8 @@
         spinning: false
       },
       groups: [],
+      allInbounds: [],
+      selectedInboundIds: [],
       refreshing: false,
       hwidLimitValue: 3,
     },
@@ -225,10 +237,18 @@
           case 'bulkSetHwidLimit':
             this.bulkSetHwidLimit(group);
             break;
+          case 'bulkAssignInbounds':
+            this.bulkAssignInbounds(group);
+            break;
           case 'bulkDelete':
             this.bulkDelete(group);
             break;
         }
+      },
+      truncateText(text, maxLength) {
+        if (!text) return '-';
+        if (text.length <= maxLength) return text;
+        return text.substring(0, maxLength) + '...';
       },
       viewClients(group) {
         // Navigate to clients page with group filter
@@ -431,9 +451,84 @@
           }
         });
       },
+      async loadInbounds() {
+        try {
+          const msg = await HttpUtil.get('/panel/api/inbounds/list');
+          if (msg && msg.success && msg.obj) {
+            this.allInbounds = msg.obj;
+          }
+        } catch (e) {
+          console.error("Failed to load inbounds:", e);
+        }
+      },
+      bulkAssignInbounds(group) {
+        const _this = this;
+        this.selectedInboundIds = [];
+        this.$confirm({
+          title: '{{ i18n "pages.groups.assignInbounds" }}',
+          width: 520,
+          content: h => {
+            return h('div', {
+              style: { width: '100%' }
+            }, [
+              h('p', {
+                style: { marginBottom: '16px' }
+              }, `{{ i18n "pages.groups.assignInboundsConfirm" }} "${group.name}":`),
+              h('a-select', {
+                props: {
+                  mode: 'multiple',
+                  placeholder: '{{ i18n "pages.clients.selectInbounds" }}',
+                  'dropdown-class-name': themeSwitcher.currentTheme,
+                  'allow-clear': true,
+                  'show-search': true,
+                  'option-filter-prop': 'children',
+                  style: { width: '100%' }
+                },
+                style: { width: '100%', marginTop: '10px' },
+                on: {
+                  change: (values) => { _this.selectedInboundIds = values || []; }
+                }
+              }, (_this.allInbounds || []).map(inbound => 
+                h('a-select-option', { props: { value: inbound.id } }, 
+                  (inbound.remark || `Port ${inbound.port}`) + ` (ID: ${inbound.id})`
+                )
+              )),
+              h('p', {
+                style: { marginTop: '12px', fontSize: '12px', color: '#999' }
+              }, '{{ i18n "pages.groups.assignInboundsHint" }}')
+            ]);
+          },
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "sure" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            try {
+              if (_this.selectedInboundIds.length === 0) {
+                app.$message.warning('{{ i18n "pages.groups.selectAtLeastOneInbound" }}');
+                return Promise.reject();
+              }
+              const msg = await HttpUtil.post(`/panel/group/${group.id}/bulk/assignInbounds`, { 
+                inboundIds: _this.selectedInboundIds 
+              });
+              if (msg.success) {
+                app.$message.success(msg.msg || '{{ i18n "pages.groups.inboundsAssigned" }}');
+                await _this.loadGroups();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              if (e) {
+                console.error("Failed to assign inbounds:", e);
+                app.$message.error('{{ i18n "somethingWentWrong" }}');
+              }
+            }
+          }
+        });
+      },
     },
     async mounted() {
       this.loading();
+      await this.loadInbounds();
       this.loadGroups().then(() => {
         this.loading(false);
       });

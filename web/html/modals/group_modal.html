@@ -8,7 +8,12 @@
       <a-input v-model.trim="groupModal.formData.name" placeholder='{{ i18n "pages.groups.enterGroupName" }}'></a-input>
     </a-form-item>
     <a-form-item label='{{ i18n "pages.groups.groupDescription" }}'>
-      <a-textarea v-model.trim="groupModal.formData.description" :rows="3" placeholder='{{ i18n "pages.groups.enterGroupDescription" }}'></a-textarea>
+      <a-textarea v-model.trim="groupModal.formData.description" :rows="3" 
+        :max-length="100"
+        placeholder='{{ i18n "pages.groups.enterGroupDescription" }}'></a-textarea>
+      <div :style="{ textAlign: 'right', fontSize: '12px', color: (groupModal.formData.description || '').length > 80 ? '#ff4d4f' : '#999' }">
+        [[ (groupModal.formData.description || '').length ]]/100
+      </div>
     </a-form-item>
   </a-form>
 </a-modal>

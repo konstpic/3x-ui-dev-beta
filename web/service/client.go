@@ -2076,3 +2076,85 @@ func (s *ClientService) BulkSetHWIDLimit(userId int, clientIds []int, maxHwid in
 
 	return nil
 }
+
+// BulkAssignInbounds assigns multiple inbounds to multiple clients.
+// Returns whether Xray needs restart and any error.
+func (s *ClientService) BulkAssignInbounds(userId int, clientIds []int, inboundIds []int) (bool, error) {
+	if len(clientIds) == 0 || len(inboundIds) == 0 {
+		return false, nil
+	}
+
+	// Verify all clients belong to user
+	db := database.GetDB()
+	var clientCount int64
+	err := db.Model(&model.ClientEntity{}).
+		Where("id IN ? AND user_id = ?", clientIds, userId).
+		Count(&clientCount).Error
+	if err != nil {
+		return false, err
+	}
+	if int(clientCount) != len(clientIds) {
+		return false, common.NewError("Some clients not found or access denied")
+	}
+
+	// Verify all inbounds belong to user
+	inboundService := InboundService{}
+	for _, inboundId := range inboundIds {
+		inbound, err := inboundService.GetInbound(inboundId)
+		if err != nil {
+			return false, common.NewError("Inbound not found: %d", inboundId)
+		}
+		if inbound.UserId != userId {
+			return false, common.NewError("Inbound access denied: %d", inboundId)
+		}
+	}
+
+	needRestart := false
+
+	// Get clients to update
+	var clients []model.ClientEntity
+	err = db.Where("id IN ? AND user_id = ?", clientIds, userId).Find(&clients).Error
+	if err != nil {
+		return false, err
+	}
+
+	// For each client, add the new inbounds (keeping existing ones)
+	for _, client := range clients {
+		// Get current inbound assignments
+		currentInboundIds, err := s.GetInboundIdsForClient(client.Id)
+		if err != nil {
+			continue
+		}
+
+		// Create a set of all inbound IDs (current + new)
+		inboundIdSet := make(map[int]bool)
+		for _, id := range currentInboundIds {
+			inboundIdSet[id] = true
+		}
+		for _, id := range inboundIds {
+			inboundIdSet[id] = true
+		}
+
+		// Convert set back to slice
+		newInboundIds := make([]int, 0, len(inboundIdSet))
+		for id := range inboundIdSet {
+			newInboundIds = append(newInboundIds, id)
+		}
+
+		// Update client with new inbound assignments
+		client.InboundIds = newInboundIds
+		clientNeedRestart, err := s.UpdateClient(userId, &client)
+		if err != nil {
+			logger.Warningf("Failed to update client %d inbounds: %v", client.Id, err)
+			continue
+		}
+		if clientNeedRestart {
+			needRestart = true
+		}
+	}
+
+	// Invalidate cache for this user's clients
+	cache.InvalidateClients(userId)
+
+	return needRestart, nil
+}

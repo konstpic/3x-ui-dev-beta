@@ -46,6 +46,7 @@ func (a *ClientGroupController) initRouter(g *gin.RouterGroup) {
 	g.POST("/:id/bulk/delete", a.bulkDelete)
 	g.POST("/:id/bulk/enable", a.bulkEnable)
 	g.POST("/:id/bulk/setHwidLimit", a.bulkSetHwidLimit)
+	g.POST("/:id/bulk/assignInbounds", a.bulkAssignInbounds)
 }
 
 // getGroups retrieves all groups for the current user.
@@ -381,4 +382,51 @@ func (a *ClientGroupController) bulkSetHwidLimit(c *gin.Context) {
 		return
 	}
 	jsonMsg(c, "HWID limit set successfully", nil)
+}
+
+// bulkAssignInbounds assigns inbounds to all clients in a group.
+func (a *ClientGroupController) bulkAssignInbounds(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, "Invalid group ID", err)
+		return
+	}
+	user := session.GetLoginUser(c)
+	var req struct {
+		InboundIds []int `json:"inboundIds" form:"inboundIds"`
+	}
+	err = c.ShouldBind(&req)
+	if err != nil {
+		jsonMsg(c, "Invalid request data", err)
+		return
+	}
+	if len(req.InboundIds) == 0 {
+		jsonMsg(c, "No inbounds selected", nil)
+		return
+	}
+	// Get all clients in group
+	clients, err := a.groupService.GetClientsInGroup(id, user.Id)
+	if err != nil {
+		jsonMsg(c, "Failed to get clients in group", err)
+		return
+	}
+	if len(clients) == 0 {
+		jsonMsg(c, "No clients in group", nil)
+		return
+	}
+	clientIds := make([]int, len(clients))
+	for i, client := range clients {
+		clientIds[i] = client.Id
+	}
+	needRestart, err := a.clientService.BulkAssignInbounds(user.Id, clientIds, req.InboundIds)
+	if err != nil {
+		logger.Errorf("Failed to assign inbounds for group: %v", err)
+		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
+		return
+	}
+	jsonMsg(c, "Inbounds assigned successfully", nil)
+	if needRestart {
+		// Restart asynchronously to avoid blocking the response
+		a.xrayService.RestartXrayAsync(false)
+	}
 }

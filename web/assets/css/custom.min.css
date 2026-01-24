@@ -3726,3 +3726,281 @@ html[data-glass-morphism="true"] .ant-alert-info .ant-alert-message,
 html[data-glass-morphism="true"] .ant-alert-info .ant-alert-description {
   color: rgba(0, 0, 0, 0.85) !important;
 }
+
+/* ============================================
+   FIX: Select dropdown arrow icon hover state
+   Prevents white square on hover
+   ============================================ */
+/* Target all possible arrow containers */
+.ant-select-arrow,
+.ant-select-selection__arrow,
+.ant-select-arrow *,
+.ant-select-selection__arrow * {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+/* Arrow wrapper styling */
+.ant-select-arrow,
+.ant-select-selection__arrow {
+  color: rgba(0, 0, 0, 0.25);
+  transition: color 0.2s ease;
+  background: transparent !important;
+  background-color: transparent !important;
+}
+.ant-select:hover .ant-select-arrow,
+.ant-select:hover .ant-select-selection__arrow,
+.ant-select-focused .ant-select-arrow,
+.ant-select-focused .ant-select-selection__arrow,
+.ant-select-open .ant-select-arrow,
+.ant-select-open .ant-select-selection__arrow {
+  color: rgba(0, 0, 0, 0.45);
+  background: transparent !important;
+  background-color: transparent !important;
+}
+.dark .ant-select-arrow,
+.dark .ant-select-selection__arrow {
+  color: rgba(255, 255, 255, 0.35);
+}
+.dark .ant-select:hover .ant-select-arrow,
+.dark .ant-select:hover .ant-select-selection__arrow,
+.dark .ant-select-focused .ant-select-arrow,
+.dark .ant-select-focused .ant-select-selection__arrow,
+.dark .ant-select-open .ant-select-arrow,
+.dark .ant-select-open .ant-select-selection__arrow {
+  color: rgba(255, 255, 255, 0.65);
+  background: transparent !important;
+  background-color: transparent !important;
+}
+/* Fix all icon variants - no background ever */
+.ant-select-arrow .anticon,
+.ant-select-arrow .anticon-down,
+.ant-select-arrow .anticon-up,
+.ant-select-arrow .anticon.anticon-down,
+.ant-select-arrow .anticon.anticon-down.ant-select-arrow-icon,
+.ant-select-selection__arrow .anticon,
+.ant-select-selection__arrow .anticon-down,
+.ant-select-selection__arrow .anticon-up,
+.ant-select-selection__arrow .anticon.anticon-down,
+.ant-select-selection__arrow .anticon.anticon-down.ant-select-arrow-icon,
+.ant-select-arrow i,
+.ant-select-arrow svg,
+.ant-select-selection__arrow i,
+.ant-select-selection__arrow svg {
+  color: inherit !important;
+  background: transparent !important;
+  background-color: transparent !important;
+  fill: currentColor;
+  box-shadow: none !important;
+}
+/* Override any hover/active/focus states */
+.ant-select-arrow:hover,
+.ant-select-arrow:active,
+.ant-select-arrow:focus,
+.ant-select-selection__arrow:hover,
+.ant-select-selection__arrow:active,
+.ant-select-selection__arrow:focus,
+.ant-select-arrow .anticon:hover,
+.ant-select-arrow .anticon:active,
+.ant-select-arrow .anticon:focus,
+.ant-select-selection__arrow .anticon:hover,
+.ant-select-selection__arrow .anticon:active,
+.ant-select-selection__arrow .anticon:focus,
+.ant-select-arrow i:hover,
+.ant-select-arrow i:active,
+.ant-select-arrow i:focus,
+.ant-select-selection__arrow i:hover,
+.ant-select-selection__arrow i:active,
+.ant-select-selection__arrow i:focus {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+/* Special case for when select has value (selected state) */
+.ant-select-selection-selected-value + .ant-select-arrow,
+.ant-select-selection-selected-value + .ant-select-selection__arrow,
+.ant-select-selection-selected-value ~ .ant-select-arrow,
+.ant-select-selection-selected-value ~ .ant-select-selection__arrow {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+/* When select has value AND is hovered */
+.ant-select-selection:hover .ant-select-selection-selected-value ~ .ant-select-arrow,
+.ant-select-selection:hover .ant-select-selection-selected-value ~ .ant-select-selection__arrow,
+.ant-select:hover .ant-select-selection-selected-value ~ .ant-select-arrow,
+.ant-select:hover .ant-select-selection-selected-value ~ .ant-select-selection__arrow {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+/* Ensure parent selection element doesn't create background */
+.ant-select-selection:hover .ant-select-arrow,
+.ant-select-selection:hover .ant-select-selection__arrow,
+.ant-select-selection:focus .ant-select-arrow,
+.ant-select-selection:focus .ant-select-selection__arrow,
+.ant-select:hover .ant-select-arrow,
+.ant-select:hover .ant-select-selection__arrow,
+.ant-select:focus .ant-select-arrow,
+.ant-select:focus .ant-select-selection__arrow {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+/* CRITICAL: Override any hover background on arrow when parent is hovered */
+.ant-select-selection:hover .ant-select-arrow *,
+.ant-select-selection:hover .ant-select-selection__arrow *,
+.ant-select:hover .ant-select-arrow *,
+.ant-select:hover .ant-select-selection__arrow *,
+.ant-select-selection:focus .ant-select-arrow *,
+.ant-select-selection:focus .ant-select-selection__arrow *,
+.ant-select:focus .ant-select-arrow *,
+.ant-select:focus .ant-select-selection__arrow * {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+/* Fix for Ant Design v1.x structure */
+.ant-select-selection__rendered + .ant-select-selection__arrow,
+.ant-select-selection__rendered ~ .ant-select-arrow {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+/* Nuclear option - target any element inside select that might have background */
+.ant-select .ant-select-arrow *,
+.ant-select .ant-select-selection__arrow *,
+.ant-select-selection .ant-select-arrow *,
+.ant-select-selection .ant-select-selection__arrow * {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+/* Fix pseudo-elements that might create white square */
+.ant-select-arrow::before,
+.ant-select-arrow::after,
+.ant-select-selection__arrow::before,
+.ant-select-selection__arrow::after,
+.ant-select-arrow .anticon::before,
+.ant-select-arrow .anticon::after,
+.ant-select-selection__arrow .anticon::before,
+.ant-select-selection__arrow .anticon::after {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+/* ABSOLUTE OVERRIDE: When selection is hovered, arrow must stay transparent */
+.ant-select-selection:hover .ant-select-arrow,
+.ant-select-selection:hover .ant-select-selection__arrow,
+.ant-select:hover .ant-select-selection .ant-select-arrow,
+.ant-select:hover .ant-select-selection .ant-select-selection__arrow {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+.ant-select-selection:hover .ant-select-arrow .anticon,
+.ant-select-selection:hover .ant-select-arrow .anticon-down,
+.ant-select-selection:hover .ant-select-selection__arrow .anticon,
+.ant-select-selection:hover .ant-select-selection__arrow .anticon-down,
+.ant-select:hover .ant-select-arrow .anticon,
+.ant-select:hover .ant-select-arrow .anticon-down,
+.ant-select:hover .ant-select-selection__arrow .anticon,
+.ant-select:hover .ant-select-selection__arrow .anticon-down {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+/* FINAL OVERRIDE: Maximum specificity for arrow in hover state */
+.ant-select.ant-select-enabled:hover .ant-select-selection .ant-select-arrow,
+.ant-select.ant-select-enabled:hover .ant-select-selection .ant-select-selection__arrow,
+.ant-select.ant-select-enabled.ant-select-focused:hover .ant-select-selection .ant-select-arrow,
+.ant-select.ant-select-enabled.ant-select-focused:hover .ant-select-selection .ant-select-selection__arrow,
+.ant-select-selection:hover .ant-select-arrow,
+.ant-select-selection:hover .ant-select-selection__arrow,
+.ant-select-selection.ant-select-selection--single:hover .ant-select-arrow,
+.ant-select-selection.ant-select-selection--single:hover .ant-select-selection__arrow {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+.ant-select.ant-select-enabled:hover .ant-select-selection .ant-select-arrow *,
+.ant-select.ant-select-enabled:hover .ant-select-selection .ant-select-selection__arrow *,
+.ant-select-selection:hover .ant-select-arrow *,
+.ant-select-selection:hover .ant-select-selection__arrow * {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* ============================================
+   FIX: Clients page selection actions bar
+   Better styling for bulk action buttons
+   ============================================ */
+.clients-page .clients-selection-actions {
+  background: linear-gradient(135deg, rgba(0, 135, 113, 0.08), rgba(0, 135, 113, 0.04));
+  border: 1px solid rgba(0, 135, 113, 0.2);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 12px;
+}
+.dark .clients-page .clients-selection-actions {
+  background: linear-gradient(135deg, rgba(0, 135, 113, 0.15), rgba(0, 135, 113, 0.08));
+  border: 1px solid rgba(0, 135, 113, 0.3);
+}
+html[data-glass-morphism="true"] .clients-page .clients-selection-actions {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.06));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+/* ============================================
+   FIX: Mobile filters responsiveness
+   Compact, modern filter design
+   ============================================ */
+.clients-filters-wrapper {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.clients-filters-wrapper .ant-select,
+.clients-filters-wrapper .ant-input-search {
+  flex-shrink: 0;
+}
+@media (max-width: 768px) {
+  .clients-filters-wrapper {
+    gap: 6px;
+  }
+  .clients-filters-wrapper .ant-select {
+    min-width: 90px !important;
+    flex: 1 1 auto;
+    max-width: 140px;
+  }
+  .clients-filters-wrapper .ant-input-search {
+    flex: 1 1 auto;
+    max-width: 160px !important;
+  }
+}
+@media (max-width: 480px) {
+  .clients-filters-wrapper {
+    gap: 4px;
+  }
+  .clients-filters-wrapper .ant-select {
+    min-width: 80px !important;
+    max-width: 110px !important;
+  }
+  .clients-filters-wrapper .ant-input-search {
+    max-width: 130px !important;
+  }
+}
+
+/* ============================================
+   FIX: Group description text truncation
+   ============================================ */
+.groups-table .group-description {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+}

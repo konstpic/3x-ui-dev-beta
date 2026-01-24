@@ -41,47 +41,67 @@
                 </a-dropdown>
               </a-space>
             </template>
-            <a-space direction="vertical">
-              <div :style="isMobile ? {} : { display: 'flex', alignItems: 'center', justifyContent: 'flex-start', flexWrap: 'wrap', gap: '8px' }">
-                <a-switch v-model="enableFilter"
-                  :style="isMobile ? { marginBottom: '.5rem', display: 'flex' } : { marginRight: '.5rem' }"
-                  @change="toggleFilter">
-                  <a-icon slot="checkedChildren" type="search"></a-icon>
-                  <a-icon slot="unCheckedChildren" type="filter"></a-icon>
-                </a-switch>
-                <a-select v-model="filterByGroup" :style="{ minWidth: '150px' }" :size="isMobile ? 'small' : ''"
-                  :dropdown-class-name="themeSwitcher.currentTheme" :allow-clear="true" @change="onGroupFilterChange"
-                  placeholder='{{ i18n "pages.clients.filterByGroup" }}'>
+            <a-space direction="vertical" :style="{ width: '100%' }">
+              <div class="clients-filters-wrapper">
+                <a-input-search v-model.lazy="searchKey" 
+                  placeholder='{{ i18n "search" }}' 
+                  :style="{ width: isMobile ? '140px' : '180px' }" 
+                  :size="isMobile ? 'small' : 'default'"
+                  allow-clear></a-input-search>
+                <a-select v-model="filterByGroup" 
+                  :style="{ minWidth: isMobile ? '100px' : '130px' }" 
+                  :size="isMobile ? 'small' : 'default'"
+                  :dropdown-class-name="themeSwitcher.currentTheme"
+                  placeholder='{{ i18n "pages.clients.group" }}'>
                   <a-select-option :value="null">{{ i18n "allGroups" }}</a-select-option>
                   <a-select-option v-for="group in groups" :key="group.id" :value="group.id">
                     [[ group.name ]]
                   </a-select-option>
                 </a-select>
-                <a-input v-if="!enableFilter" v-model.lazy="searchKey" placeholder='{{ i18n "search" }}' autofocus
-                  :style="{ maxWidth: '300px' }" :size="isMobile ? 'small' : ''"></a-input>
-                <a-radio-group v-if="enableFilter" v-model="filterBy" @change="filterClients" button-style="solid"
-                  :size="isMobile ? 'small' : ''">
-                  <a-radio-button value="">{{ i18n "none" }}</a-radio-button>
-                  <a-radio-button value="deactive">{{ i18n "disabled" }}</a-radio-button>
-                  <a-radio-button value="depleted">{{ i18n "depleted" }}</a-radio-button>
-                  <a-radio-button value="expiring">{{ i18n "depletingSoon" }}</a-radio-button>
-                  <a-radio-button value="online">{{ i18n "online" }}</a-radio-button>
-                  <a-radio-button value="hwidExceeded">HWID !</a-radio-button>
-                </a-radio-group>
+                <a-select v-model="filterBy" 
+                  :style="{ minWidth: isMobile ? '90px' : '120px' }" 
+                  :size="isMobile ? 'small' : 'default'"
+                  :dropdown-class-name="themeSwitcher.currentTheme"
+                  placeholder='{{ i18n "status" }}'>
+                  <a-select-option value="">{{ i18n "all" }}</a-select-option>
+                  <a-select-option value="online">{{ i18n "online" }}</a-select-option>
+                  <a-select-option value="deactive">{{ i18n "disabled" }}</a-select-option>
+                  <a-select-option value="depleted">{{ i18n "depleted" }}</a-select-option>
+                  <a-select-option value="hwidExceeded">HWID !</a-select-option>
+                </a-select>
               </div>
-              <div v-if="selectedClientIds.length > 0" :style="{ marginBottom: '10px', padding: '10px', background: themeSwitcher.isDarkTheme ? '#1f1f1f' : '#f0f0f0', borderRadius: '4px' }">
-                <a-space>
-                  <span>{{ i18n "pages.clients.selectedCount" }}: [[ selectedClientIds.length ]]</span>
-                  <a-button-group>
-                    <a-button @click="bulkResetTraffic" icon="reload">{{ i18n "pages.inbounds.resetTraffic" }}</a-button>
-                    <a-button @click="bulkClearHwid" icon="mobile">{{ i18n "pages.clients.clearHwid" }}</a-button>
-                    <a-button @click="bulkDelete" icon="delete" type="danger">{{ i18n "delete" }}</a-button>
-                    <a-button @click="bulkEnable(true)" icon="check">{{ i18n "enable" }}</a-button>
-                    <a-button @click="bulkEnable(false)" icon="close">{{ i18n "disable" }}</a-button>
-                    <a-button @click="bulkSetHwidLimit" icon="setting">{{ i18n "pages.clients.setHwidLimit" }}</a-button>
-                    <a-button @click="bulkAssignGroup" icon="team">{{ i18n "pages.clients.assignGroup" }}</a-button>
-                  </a-button-group>
-                  <a-button @click="clearSelection" icon="close-circle">{{ i18n "pages.clients.clearSelection" }}</a-button>
+              <div v-if="selectedClientIds.length > 0" class="clients-selection-actions">
+                <a-space :direction="isMobile ? 'vertical' : 'horizontal'" :style="{ width: '100%' }">
+                  <a-tag color="blue" :style="{ marginRight: '8px' }">
+                    <a-icon type="check-circle"></a-icon>
+                    {{ i18n "pages.clients.selectedCount" }}: [[ selectedClientIds.length ]]
+                  </a-tag>
+                  <a-space :wrap="true" :size="isMobile ? 4 : 8">
+                    <a-button @click="bulkResetTraffic" icon="reload" size="small">
+                      <template v-if="!isMobile">{{ i18n "pages.inbounds.resetTraffic" }}</template>
+                    </a-button>
+                    <a-button @click="bulkClearHwid" icon="mobile" size="small">
+                      <template v-if="!isMobile">{{ i18n "pages.clients.clearHwid" }}</template>
+                    </a-button>
+                    <a-button @click="bulkEnable(true)" icon="check" size="small">
+                      <template v-if="!isMobile">{{ i18n "enable" }}</template>
+                    </a-button>
+                    <a-button @click="bulkEnable(false)" icon="close" size="small">
+                      <template v-if="!isMobile">{{ i18n "disable" }}</template>
+                    </a-button>
+                    <a-button @click="bulkSetHwidLimit" icon="setting" size="small">
+                      <template v-if="!isMobile">HWID</template>
+                    </a-button>
+                    <a-button @click="bulkAssignGroup" icon="team" size="small">
+                      <template v-if="!isMobile">{{ i18n "pages.clients.assignGroup" }}</template>
+                    </a-button>
+                    <a-button @click="bulkDelete" icon="delete" type="danger" size="small">
+                      <template v-if="!isMobile">{{ i18n "delete" }}</template>
+                    </a-button>
+                  </a-space>
+                  <a-button @click="clearSelection" icon="close-circle" size="small" type="link">
+                    {{ i18n "pages.clients.clearSelection" }}
+                  </a-button>
                 </a-space>
               </div>
               <a-table :columns="isMobile ? mobileColumns : columns" :row-key="client => client.id"
@@ -388,7 +408,6 @@
       onlineClients: [],
       lastOnlineMap: {},
       searchKey: '',
-      enableFilter: false,
       filterBy: '',
       filterByGroup: null,
       expireDiff: 0,
@@ -424,12 +443,8 @@
             // This ensures that clients with old traffic (up/down > 0 but no recent changes) are shown as offline
             // Load inbounds for each client
             await this.loadInboundsForClients();
-            // Apply current filter/search
-            if (this.enableFilter) {
-              this.filterClients();
-            } else {
-              this.searchClients(this.searchKey);
-            }
+            // Apply current filters
+            this.applyAllFilters();
             // Ensure searchedClients is initialized (only if no filters are applied)
             if (this.searchedClients.length === 0 && this.clients.length > 0 && 
                 !this.filterByGroup && !this.searchKey && !this.filterBy) {
@@ -965,11 +980,6 @@
                 const expired = client.expiryTime > 0 && client.expiryTime <= now;
                 shouldInclude = expired || exhausted;
                 break;
-              case 'expiring':
-                const expiringSoon = (client.expiryTime > 0 && (client.expiryTime - now < this.expireDiff)) ||
-                  (client.totalGB > 0 && (client.totalGB * 1024 * 1024 * 1024 - (client.up || 0) - (client.down || 0) < this.trafficDiff));
-                shouldInclude = expiringSoon && !this.isClientDepleted(client);
-                break;
               case 'online':
                 shouldInclude = this.isClientOnline(client.email);
                 break;
@@ -983,32 +993,46 @@
           });
         }
       },
-      toggleFilter() {
-        if (this.enableFilter) {
-          this.searchKey = '';
-          this.filterClients();
-        } else {
-          this.filterBy = '';
-          // Apply current search if searchKey is not empty
-          if (this.searchKey && this.searchKey.trim()) {
-            this.searchClients(this.searchKey);
-          } else {
-            // Apply group filter if set
-            if (this.filterByGroup !== null && this.filterByGroup !== undefined) {
-              this.searchedClients = this.clients.filter(client => client.groupId === this.filterByGroup);
-            } else {
-              this.searchedClients = this.clients.slice();
+      applyAllFilters() {
+        // Combined filter: applies search, group filter, and status filter together
+        let filteredClients = this.clients.slice();
+        
+        // 1. Apply group filter
+        if (this.filterByGroup !== null && this.filterByGroup !== undefined) {
+          filteredClients = filteredClients.filter(client => client.groupId === this.filterByGroup);
+        }
+        
+        // 2. Apply search filter
+        if (this.searchKey && this.searchKey.trim()) {
+          const searchKeyLower = this.searchKey.toLowerCase().trim();
+          filteredClients = filteredClients.filter(client => {
+            const email = (client.email || '').toLowerCase();
+            return email.startsWith(searchKeyLower);
+          });
+        }
+        
+        // 3. Apply status filter
+        if (this.filterBy && this.filterBy.trim()) {
+          const now = new Date().getTime();
+          filteredClients = filteredClients.filter(client => {
+            switch (this.filterBy) {
+              case 'deactive':
+                return !client.enable;
+              case 'depleted':
+                const exhausted = client.totalGB > 0 && (client.up || 0) + (client.down || 0) >= client.totalGB * 1024 * 1024 * 1024;
+                const expired = client.expiryTime > 0 && client.expiryTime <= now;
+                return expired || exhausted;
+              case 'online':
+                return this.isClientOnline(client.email);
+              case 'hwidExceeded':
+                return this.isHwidExceeded(client);
+              default:
+                return true;
             }
-          }
+          });
         }
-      },
-      onGroupFilterChange() {
-        // Apply filter based on current mode
-        if (this.enableFilter) {
-          this.filterClients();
-        } else {
-          this.searchClients(this.searchKey);
-        }
+        
+        this.searchedClients = filteredClients;
       },
       isClientDepleted(client) {
         const now = new Date().getTime();
@@ -1419,11 +1443,7 @@
       this.loadClients().then(() => {
         this.loading(false);
         // Apply filters after loading clients
-        if (this.enableFilter) {
-          this.filterClients();
-        } else {
-          this.searchClients(this.searchKey);
-        }
+        this.applyAllFilters();
       });
 
       // Setup WebSocket for real-time updates (EXACT same as nodes page)
@@ -1655,8 +1675,14 @@
     },
     watch: {
       searchKey: Utils.debounce(function (newVal) {
-        this.searchClients(newVal);
-      }, 500)
+        this.applyAllFilters();
+      }, 500),
+      filterBy: function (newVal) {
+        this.applyAllFilters();
+      },
+      filterByGroup: function (newVal) {
+        this.applyAllFilters();
+      }
     }
   });
 </script>
