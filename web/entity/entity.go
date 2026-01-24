@@ -74,7 +74,11 @@ type AllSetting struct {
 	SubJsonFragment             string `json:"subJsonFragment" form:"subJsonFragment"`                         // JSON subscription fragment configuration
 	SubJsonNoises               string `json:"subJsonNoises" form:"subJsonNoises"`                             // JSON subscription noise configuration
 	SubJsonMux                  string `json:"subJsonMux" form:"subJsonMux"`                                   // JSON subscription mux configuration
-	SubJsonRules                string `json:"subJsonRules" form:"subJsonRules"`
+	SubJsonRules                string `json:"subJsonRules" form:"subJsonRules"`                               // JSON subscription rules configuration
+	SubEncryptHappV2RayTun      bool   `json:"subEncryptHappV2RayTun" form:"subEncryptHappV2RayTun"`           // Encrypt subscription for Happ and V2RayTun
+	SubOnlyHappV2RayTun         bool   `json:"subOnlyHappV2RayTun" form:"subOnlyHappV2RayTun"`                // Only include Happ and V2RayTun compatible links
+	SubHideConfigLinks          bool   `json:"subHideConfigLinks" form:"subHideConfigLinks"`                  // Hide configuration links on subscription page
+	SubShowOnlyHappV2RayTun     bool   `json:"subShowOnlyHappV2RayTun" form:"subShowOnlyHappV2RayTun"`        // Show only Happ and V2RayTun applications on subscription page
 
 	// LDAP settings
 	LdapEnable     bool   `json:"ldapEnable" form:"ldapEnable"`

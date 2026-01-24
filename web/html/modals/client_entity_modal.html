@@ -5,7 +5,7 @@
          :ok-text="clientEntityModal.okText" cancel-text='{{ i18n "close" }}' :width="600">
     <a-form layout="vertical" v-if="client">
         <a-form-item label='{{ i18n "pages.clients.email" }}' :required="true">
-            <a-input v-model.trim="client.email" :disabled="clientEntityModal.isEdit"></a-input>
+            <a-input v-model.trim="client.email"></a-input>
         </a-form-item>
         <a-form-item label='UUID/ID'>
             <a-input v-model.trim="client.uuid">
@@ -36,9 +36,6 @@
         </a-form-item>
         <a-form-item label='{{ i18n "comment" }}'>
             <a-input v-model.trim="client.comment"></a-input>
-        </a-form-item>
-        <a-form-item label='{{ i18n "pages.inbounds.IPLimit" }}'>
-            <a-input-number v-model.number="client.limitIp" :min="0" :style="{ width: '100%' }"></a-input-number>
         </a-form-item>
         <a-form-item label='{{ i18n "pages.inbounds.totalFlow" }} (GB)'>
             <a-input-number v-model.number="client.totalGB" :min="0" :step="0.01" :precision="2" :style="{ width: '100%' }"></a-input-number>
@@ -183,7 +180,6 @@
                     flow: client.flow || '',
                     subId: client.subId || '',
                     comment: client.comment || '',
-                    limitIp: client.limitIp || 0,
                     totalGB: client.totalGB || 0,
                     expiryTime: client.expiryTime || 0,
                     _expiryTime: client.expiryTime > 0 ? (moment ? moment(client.expiryTime) : new Date(client.expiryTime)) : null,
@@ -210,7 +206,6 @@
                     flow: '',
                     subId: RandomUtil.randomLowerAndNum(16),
                     comment: '',
-                    limitIp: 0,
                     totalGB: 0,
                     expiryTime: 0,
                     _expiryTime: null,

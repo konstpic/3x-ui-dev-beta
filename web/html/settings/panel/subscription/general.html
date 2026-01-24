@@ -78,6 +78,34 @@
                 <a-switch v-model="allSetting.subShowInfo"></a-switch>
             </template>
         </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subEncryptHappV2RayTun"}}</template>
+            <template #description>{{ i18n "pages.settings.subEncryptHappV2RayTunDesc"}}</template>
+            <template #control>
+                <a-switch v-model="allSetting.subEncryptHappV2RayTun"></a-switch>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subOnlyHappV2RayTun"}}</template>
+            <template #description>{{ i18n "pages.settings.subOnlyHappV2RayTunDesc"}}</template>
+            <template #control>
+                <a-switch v-model="allSetting.subOnlyHappV2RayTun"></a-switch>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subHideConfigLinks"}}</template>
+            <template #description>{{ i18n "pages.settings.subHideConfigLinksDesc"}}</template>
+            <template #control>
+                <a-switch v-model="allSetting.subHideConfigLinks"></a-switch>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subShowOnlyHappV2RayTun"}}</template>
+            <template #description>{{ i18n "pages.settings.subShowOnlyHappV2RayTunDesc"}}</template>
+            <template #control>
+                <a-switch v-model="allSetting.subShowOnlyHappV2RayTun"></a-switch>
+            </template>
+        </a-setting-list-item>
     </a-collapse-panel>
     <a-collapse-panel key="3" header='{{ i18n "pages.settings.certs" }}'>
         <a-setting-list-item paddings="small">

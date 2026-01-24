@@ -2,10 +2,12 @@ package sub
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/mhsanaei/3x-ui/v2/config"
+	"github.com/mhsanaei/3x-ui/v2/logger"
 	service "github.com/mhsanaei/3x-ui/v2/web/service"
 
 	"github.com/gin-gonic/gin"
@@ -84,6 +86,44 @@ func (a *SUBController) subs(c *gin.Context) {
 			result += sub + "\n"
 		}
 
+		// Get User-Agent and log it
+		userAgent := c.GetHeader("User-Agent")
+		logger.Infof("subController: Request to /sub/%s from User-Agent: %s", subId, userAgent)
+		
+		// Check if request is from Happ or V2RayTun app and encryption is enabled
+		userAgentLower := strings.ToLower(userAgent)
+		isHappApp := strings.Contains(userAgentLower, "happ")
+		isV2RayTunApp := strings.Contains(userAgentLower, "v2raytun")
+		
+		// If request is from Happ or V2RayTun app, return encrypted URL directly
+		if (isHappApp || isV2RayTunApp) {
+			// Build URLs to get encrypted versions
+			subURL, subJsonURL := a.subService.BuildURLs(scheme, hostWithPort, a.subPath, a.subJsonPath, subId)
+			basePath, exists := c.Get("base_path")
+			if !exists {
+				basePath = "/"
+			}
+			basePathStr := basePath.(string)
+			if basePathStr == "/" {
+				basePathStr = "/" + subId + "/"
+			} else {
+				basePathStr = strings.TrimRight(basePathStr, "/") + "/" + subId + "/"
+			}
+			page := a.subService.BuildPageData(subId, hostHeader, traffic, lastOnline, subs, subURL, subJsonURL, basePathStr)
+			
+			if isHappApp && page.HappEncryptedUrl != "" {
+				logger.Infof("subController: Detected Happ app, returning encrypted URL: %s", page.HappEncryptedUrl)
+				c.String(200, page.HappEncryptedUrl)
+				return
+			} else if isV2RayTunApp && page.V2RayTunEncryptedUrl != "" {
+				logger.Infof("subController: Detected V2RayTun app, returning encrypted URL: %s", page.V2RayTunEncryptedUrl)
+				c.String(200, page.V2RayTunEncryptedUrl)
+				return
+			} else {
+				logger.Warningf("subController: Detected app (%s) but encryption is disabled, returning plain result", userAgent)
+			}
+		}
+
 		// If the request expects HTML (e.g., browser) or explicitly asked (?html=1 or ?view=html), render the info page here
 		accept := c.GetHeader("Accept")
 		if strings.Contains(strings.ToLower(accept), "text/html") || c.Query("html") == "1" || strings.EqualFold(c.Query("view"), "html") {
@@ -106,26 +146,61 @@ func (a *SUBController) subs(c *gin.Context) {
 				basePathStr = strings.TrimRight(basePathStr, "/") + "/" + subId + "/"
 			}
 			page := a.subService.BuildPageData(subId, hostHeader, traffic, lastOnline, subs, subURL, subJsonURL, basePathStr)
+			logger.Infof("subController: HappEncryptedUrl length=%d, V2RayTunEncryptedUrl length=%d", 
+				len(page.HappEncryptedUrl), len(page.V2RayTunEncryptedUrl))
+			if len(page.HappEncryptedUrl) > 0 {
+				previewLen := 50
+				if len(page.HappEncryptedUrl) < previewLen {
+					previewLen = len(page.HappEncryptedUrl)
+				}
+				logger.Infof("subController: HappEncryptedUrl preview=%s...", page.HappEncryptedUrl[:previewLen])
+			}
+			if len(page.V2RayTunEncryptedUrl) > 0 {
+				previewLen := 50
+				if len(page.V2RayTunEncryptedUrl) < previewLen {
+					previewLen = len(page.V2RayTunEncryptedUrl)
+				}
+				logger.Infof("subController: V2RayTunEncryptedUrl preview=%s...", page.V2RayTunEncryptedUrl[:previewLen])
+			}
+			
+			// Create JSON string for encrypted URLs
+			encryptedUrlsJSON := "{}"
+			encryptedUrlsData := map[string]interface{}{
+				"happEncryptedUrl":    page.HappEncryptedUrl,
+				"v2raytunEncryptedUrl": page.V2RayTunEncryptedUrl,
+			}
+			if jsonBytes, err := json.Marshal(encryptedUrlsData); err == nil {
+				encryptedUrlsJSON = string(jsonBytes)
+				logger.Infof("subController: Created encrypted URLs JSON, length=%d", len(encryptedUrlsJSON))
+			} else {
+				logger.Warningf("subController: Failed to marshal encrypted URLs JSON: %v", err)
+			}
+			
 			c.HTML(200, "subpage.html", gin.H{
-				"title":        "subscription.title",
-				"cur_ver":      config.GetVersion(),
-				"host":         page.Host,
-				"base_path":    page.BasePath,
-				"sId":          page.SId,
-				"download":     page.Download,
-				"upload":       page.Upload,
-				"total":        page.Total,
-				"used":         page.Used,
-				"remained":     page.Remained,
-				"expire":       page.Expire,
-				"lastOnline":   page.LastOnline,
-				"datepicker":   page.Datepicker,
-				"downloadByte": page.DownloadByte,
-				"uploadByte":   page.UploadByte,
-				"totalByte":    page.TotalByte,
-				"subUrl":       page.SubUrl,
-				"subJsonUrl":   page.SubJsonUrl,
-				"result":       page.Result,
+				"title":           "subscription.title",
+				"cur_ver":         config.GetVersion(),
+				"host":            page.Host,
+				"base_path":       page.BasePath,
+				"sId":             page.SId,
+				"download":        page.Download,
+				"upload":          page.Upload,
+				"total":           page.Total,
+				"used":            page.Used,
+				"remained":        page.Remained,
+				"expire":          page.Expire,
+				"lastOnline":      page.LastOnline,
+				"datepicker":      page.Datepicker,
+				"downloadByte":    page.DownloadByte,
+				"uploadByte":      page.UploadByte,
+				"totalByte":       page.TotalByte,
+			"subUrl":               page.SubUrl,
+			"subJsonUrl":           page.SubJsonUrl,
+			"result":               page.Result,
+			"hideConfigLinks":      page.HideConfigLinks,
+			"showOnlyHappV2RayTun": page.ShowOnlyHappV2RayTun,
+			"happEncryptedUrl":     page.HappEncryptedUrl,
+			"v2raytunEncryptedUrl": page.V2RayTunEncryptedUrl,
+			"encryptedUrlsJSON":    encryptedUrlsJSON,
 			})
 			return
 		}

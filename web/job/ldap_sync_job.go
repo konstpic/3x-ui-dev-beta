@@ -113,7 +113,7 @@ func (j *LdapSyncJob) Run() {
 	autoCreate := mustGetBool(j.settingService.GetLdapAutoCreate)
 	defGB := mustGetInt(j.settingService.GetLdapDefaultTotalGB)
 	defExpiryDays := mustGetInt(j.settingService.GetLdapDefaultExpiryDays)
-	defLimitIP := mustGetInt(j.settingService.GetLdapDefaultLimitIP)
+	// defLimitIP removed - using HWID only
 
 	clientsToCreate := map[string][]model.Client{} // tag -> []new clients
 	clientsToEnable := map[string][]string{}       // tag -> []email
@@ -123,7 +123,7 @@ func (j *LdapSyncJob) Run() {
 		exists := allClients[email] != nil
 		for _, tag := range inboundTags {
 			if !exists && allowed && autoCreate {
-				newClient := j.buildClient(inboundMap[tag], email, defGB, defExpiryDays, defLimitIP)
+				newClient := j.buildClient(inboundMap[tag], email, defGB, defExpiryDays)
 				clientsToCreate[tag] = append(clientsToCreate[tag], newClient)
 			} else if exists {
 				if allowed && !allClients[email].Enable {
@@ -187,11 +187,11 @@ func splitCsv(s string) []string {
 }
 
 // buildClient creates a new client for auto-create
-func (j *LdapSyncJob) buildClient(ib *model.Inbound, email string, defGB, defExpiryDays, defLimitIP int) model.Client {
+func (j *LdapSyncJob) buildClient(ib *model.Inbound, email string, defGB, defExpiryDays int) model.Client {
 	c := model.Client{
 		Email:   email,
 		Enable:  true,
-		LimitIP: defLimitIP,
+		// LimitIP removed - using HWID only
 		TotalGB: int64(defGB),
 	}
 	if defExpiryDays > 0 {
@@ -347,9 +347,7 @@ func (j *LdapSyncJob) clientToJSON(c model.Client) string {
 		b.WriteString("false")
 	}
 	b.WriteString(",")
-	b.WriteString("\"limitIp\":")
-	b.WriteString(strconv.Itoa(c.LimitIP))
-	b.WriteString(",")
+	// limitIp removed - using HWID only
 	b.WriteString("\"totalGB\":")
 	b.WriteString(strconv.FormatInt(c.TotalGB, 10))
 	if c.ExpiryTime > 0 {

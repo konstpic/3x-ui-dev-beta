@@ -34,39 +34,34 @@
                       <a-icon type="team"></a-icon>
                       {{ i18n "pages.groups.viewClients" }}
                     </a-menu-item>
-                    <a-menu-divider />
                     <a-menu-item key="edit">
                       <a-icon type="edit"></a-icon>
                       {{ i18n "edit" }}
                     </a-menu-item>
-                    <a-menu-divider />
-                    <a-sub-menu key="bulkOperations" :title="'{{ i18n "pages.groups.bulkOperations" }}'">
-                      <a-menu-item key="bulkResetTraffic">
-                        <a-icon type="reload"></a-icon>
-                        {{ i18n "pages.inbounds.resetTraffic" }}
-                      </a-menu-item>
-                      <a-menu-item key="bulkClearHwid">
-                        <a-icon type="mobile"></a-icon>
-                        {{ i18n "pages.clients.clearHwid" }}
-                      </a-menu-item>
-                      <a-menu-item key="bulkEnable">
-                        <a-icon type="check"></a-icon>
-                        {{ i18n "enable" }}
-                      </a-menu-item>
-                      <a-menu-item key="bulkDisable">
-                        <a-icon type="close"></a-icon>
-                        {{ i18n "disable" }}
-                      </a-menu-item>
-                      <a-menu-item key="bulkSetHwidLimit">
-                        <a-icon type="setting"></a-icon>
-                        {{ i18n "pages.clients.setHwidLimit" }}
-                      </a-menu-item>
-                      <a-menu-item key="bulkDelete" :style="{ color: '#FF4D4F' }">
-                        <a-icon type="delete"></a-icon>
-                        {{ i18n "delete" }}
-                      </a-menu-item>
-                    </a-sub-menu>
-                    <a-menu-divider />
+                    <a-menu-item key="bulkResetTraffic">
+                      <a-icon type="reload"></a-icon>
+                      {{ i18n "pages.inbounds.resetTraffic" }}
+                    </a-menu-item>
+                    <a-menu-item key="bulkClearHwid">
+                      <a-icon type="mobile"></a-icon>
+                      {{ i18n "pages.clients.clearHwid" }}
+                    </a-menu-item>
+                    <a-menu-item key="bulkEnable">
+                      <a-icon type="check"></a-icon>
+                      {{ i18n "enable" }}
+                    </a-menu-item>
+                    <a-menu-item key="bulkDisable">
+                      <a-icon type="close"></a-icon>
+                      {{ i18n "disable" }}
+                    </a-menu-item>
+                    <a-menu-item key="bulkSetHwidLimit">
+                      <a-icon type="setting"></a-icon>
+                      {{ i18n "pages.clients.setHwidLimit" }}
+                    </a-menu-item>
+                    <a-menu-item key="bulkDelete" :style="{ color: '#FF4D4F' }">
+                      <a-icon type="delete"></a-icon>
+                      {{ i18n "pages.groups.deleteClients" }}
+                    </a-menu-item>
                     <a-menu-item key="delete" :style="{ color: '#FF4D4F' }">
                       <a-icon type="delete"></a-icon>
                       {{ i18n "delete" }}

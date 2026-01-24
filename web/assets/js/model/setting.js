@@ -47,6 +47,10 @@ class AllSetting {
         this.subJsonNoises = "";
         this.subJsonMux = "";
         this.subJsonRules = "";
+        this.subEncryptHappV2RayTun = false;
+        this.subOnlyHappV2RayTun = false;
+        this.subHideConfigLinks = false;
+        this.subShowOnlyHappV2RayTun = false;
 
         this.timeLocation = "Local";
 
@@ -84,6 +88,7 @@ class AllSetting {
         if (data == null) {
             return
         }
+        
         ObjectUtil.cloneProps(this, data);
         
         // Ensure multiNodeMode is boolean (handle string "true"/"false" from backend)
@@ -95,6 +100,20 @@ class AllSetting {
             }
         } else {
             this.multiNodeMode = false;
+        }
+        
+        // Ensure boolean fields are set from data (same pattern as multiNodeMode)
+        if (data.subEncryptHappV2RayTun !== undefined && data.subEncryptHappV2RayTun !== null) {
+            this.subEncryptHappV2RayTun = Boolean(data.subEncryptHappV2RayTun);
+        }
+        if (data.subOnlyHappV2RayTun !== undefined && data.subOnlyHappV2RayTun !== null) {
+            this.subOnlyHappV2RayTun = Boolean(data.subOnlyHappV2RayTun);
+        }
+        if (data.subHideConfigLinks !== undefined && data.subHideConfigLinks !== null) {
+            this.subHideConfigLinks = Boolean(data.subHideConfigLinks);
+        }
+        if (data.subShowOnlyHappV2RayTun !== undefined && data.subShowOnlyHappV2RayTun !== null) {
+            this.subShowOnlyHappV2RayTun = Boolean(data.subShowOnlyHappV2RayTun);
         }
         
         // Ensure hwidMode is valid string (default to "client_header" if invalid)

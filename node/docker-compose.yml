@@ -10,7 +10,7 @@ services:
       #- PANEL_URL=http://192.168.0.7:2054
     ports:
       - "8080:8080"  # API ports (connect panel)
-     # - "44000:44000" # Xray ports = Inbound port
+      - "45000:45000" # Xray ports = Inbound port
      # - "8443:8443"  # HTTPS API port (uncomment if using HTTPS)
     volumes:
       - ./bin/config.json:/app/bin/config.json

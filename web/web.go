@@ -347,7 +347,8 @@ func (s *Server) startTask() {
 	}()
 
 	// check client ips from log file every 1 second for real-time updates
-	s.cron.AddJob("@every 1s", job.NewCheckClientIpJob())
+	// IP limit job disabled - using HWID only
+	// s.cron.AddJob("@every 1s", job.NewCheckClientIpJob())
 	
 	// Check client HWIDs from log file every 1 second for real-time updates
 	s.cron.AddJob("@every 1s", job.NewCheckClientHWIDJob())

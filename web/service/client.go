@@ -409,7 +409,6 @@ func (s *ClientService) UpdateClient(userId int, client *model.ClientEntity) (bo
 		updates["flow"] = client.Flow
 	}
 	// Always update these fields - they can be 0 (unlimited/disabled) or empty
-	updates["limit_ip"] = client.LimitIP
 	updates["total_gb"] = client.TotalGB
 	updates["expiry_time"] = client.ExpiryTime
 	updates["enable"] = client.Enable
@@ -913,7 +912,6 @@ func (s *ClientService) ConvertClientEntityToClient(entity *model.ClientEntity) 
 		Password:   entity.Password,
 		Flow:       entity.Flow,
 		Email:      entity.Email,
-		LimitIP:    entity.LimitIP,
 		TotalGB:    int64(entity.TotalGB), // Convert float64 to int64 for legacy compatibility (rounds down)
 		ExpiryTime: entity.ExpiryTime,
 		Enable:     entity.Enable,
@@ -949,7 +947,6 @@ func (s *ClientService) ConvertClientToEntity(client *model.Client, userId int) 
 		Security:   client.Security,
 		Password:   client.Password,
 		Flow:       client.Flow,
-		LimitIP:    client.LimitIP,
 		TotalGB:    float64(client.TotalGB), // Convert int64 to float64
 		ExpiryTime: client.ExpiryTime,
 		Enable:     client.Enable,

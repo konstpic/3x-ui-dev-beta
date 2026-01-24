@@ -126,10 +126,6 @@
                     </template>
                   </template>
                   <template #actions>
-                    <a-space v-if="app.ipLimitEnable" direction="horizontal" @click="openXrayLogs()" class="jc-center">
-                      <a-icon type="bars"></a-icon>
-                      <span v-if="!isMobile">{{ i18n "pages.index.logs" }}</span>
-                    </a-space>
                     <a-space direction="horizontal" @click="stopXrayService" class="jc-center">
                       <a-icon type="poweroff"></a-icon>
                       <span v-if="!isMobile">{{ i18n "pages.index.stopXray" }}</span>
@@ -1021,7 +1017,6 @@
       loadingTip: '{{ i18n "loading"}}',
       showAlert: false,
       showIp: false,
-      ipLimitEnable: false,
       multiNodeMode: false,
     },
     methods: {
@@ -1375,7 +1370,6 @@
 
       const msg = await HttpUtil.post('/panel/setting/defaultSettings');
       if (msg.success) {
-        this.ipLimitEnable = msg.obj.ipLimitEnable;
       }
 
       // Load multi-node mode setting

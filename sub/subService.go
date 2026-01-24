@@ -15,6 +15,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v2/database/model"
 	"github.com/mhsanaei/3x-ui/v2/logger"
 	"github.com/mhsanaei/3x-ui/v2/util/common"
+	"github.com/mhsanaei/3x-ui/v2/util/crypto"
 	"github.com/mhsanaei/3x-ui/v2/util/random"
 	"github.com/mhsanaei/3x-ui/v2/web/service"
 	"github.com/mhsanaei/3x-ui/v2/xray"
@@ -219,6 +220,27 @@ func (s *SubService) GetSubs(subId string, host string, c *gin.Context) ([]strin
 			}
 		}
 	}
+
+	// Apply filtering based on settings
+	onlyHappV2RayTun, _ := s.settingService.GetSubOnlyHappV2RayTun()
+	
+	// Filter links if needed
+	if onlyHappV2RayTun {
+		var filteredResult []string
+		for _, link := range result {
+			// Only include vless, vmess, trojan, shadowsocks protocols
+			if strings.HasPrefix(link, "vless://") || 
+			   strings.HasPrefix(link, "vmess://") || 
+			   strings.HasPrefix(link, "trojan://") || 
+			   strings.HasPrefix(link, "ss://") {
+				filteredResult = append(filteredResult, link)
+			}
+		}
+		result = filteredResult
+	}
+	
+	// Note: Encryption of subscription URL (not individual links) is handled in BuildPageData
+	// to provide encrypted URLs for Happ and V2RayTun app buttons
 
 	// Prepare statistics
 	for index, clientTraffic := range clientTraffics {
@@ -2171,23 +2193,27 @@ func searchHost(headers any) string {
 // PageData is a view model for subpage.html
 // PageData contains data for rendering the subscription information page.
 type PageData struct {
-	Host         string
-	BasePath     string
-	SId          string
-	Download     string
-	Upload       string
-	Total        string
-	Used         string
-	Remained     string
-	Expire       int64
-	LastOnline   int64
-	Datepicker   string
-	DownloadByte int64
-	UploadByte   int64
-	TotalByte    int64
-	SubUrl       string
-	SubJsonUrl   string
-	Result       []string
+	Host            string
+	BasePath        string
+	SId             string
+	Download        string
+	Upload          string
+	Total           string
+	Used            string
+	Remained        string
+	Expire          int64
+	LastOnline      int64
+	Datepicker      string
+	DownloadByte    int64
+	UploadByte      int64
+	TotalByte       int64
+	SubUrl               string
+	SubJsonUrl           string
+	Result               []string
+	HideConfigLinks      bool
+	ShowOnlyHappV2RayTun bool   // Show only Happ and V2RayTun buttons
+	HappEncryptedUrl     string // Encrypted URL for Happ app (happ://crypt4/...)
+	V2RayTunEncryptedUrl string // Encrypted URL for V2RayTun app (v2raytun://crypt/...)
 }
 
 // ResolveRequest extracts scheme and host info from request/headers consistently.
@@ -2322,24 +2348,57 @@ func (s *SubService) BuildPageData(subId string, hostHeader string, traffic xray
 		datepicker = "gregorian"
 	}
 
+	hideConfigLinks, _ := s.settingService.GetSubHideConfigLinks()
+	showOnlyHappV2RayTun, _ := s.settingService.GetSubShowOnlyHappV2RayTun()
+	
+	// Encrypt subscription URL for Happ and V2RayTun if enabled
+	var happEncryptedUrl, v2raytunEncryptedUrl string
+	encryptHappV2RayTun, _ := s.settingService.GetSubEncryptHappV2RayTun()
+	logger.Infof("BuildPageData: encryptHappV2RayTun=%v, subURL=%s", encryptHappV2RayTun, subURL)
+	if encryptHappV2RayTun {
+		// Encrypt for Happ
+		happEncrypted, err := crypto.EncryptForHapp(subURL)
+		if err == nil {
+			happEncryptedUrl = "happ://crypt4/" + happEncrypted
+			logger.Infof("BuildPageData: Successfully encrypted Happ URL, length=%d", len(happEncryptedUrl))
+		} else {
+			logger.Warningf("Failed to encrypt subscription URL for Happ: %v", err)
+		}
+		
+		// Encrypt for V2RayTun
+		v2raytunEncrypted, err := crypto.EncryptForV2RayTun(subURL)
+		if err == nil {
+			v2raytunEncryptedUrl = "v2raytun://crypt/" + v2raytunEncrypted
+			logger.Infof("BuildPageData: Successfully encrypted V2RayTun URL, length=%d", len(v2raytunEncryptedUrl))
+		} else {
+			logger.Warningf("Failed to encrypt subscription URL for V2RayTun: %v", err)
+		}
+	} else {
+		logger.Infof("BuildPageData: Encryption disabled, using plain URLs")
+	}
+	
 	return PageData{
-		Host:         hostHeader,
-		BasePath:     basePath,
-		SId:          subId,
-		Download:     download,
-		Upload:       upload,
-		Total:        total,
-		Used:         used,
-		Remained:     remained,
-		Expire:       traffic.ExpiryTime / 1000,
-		LastOnline:   lastOnline,
-		Datepicker:   datepicker,
-		DownloadByte: traffic.Down,
-		UploadByte:   traffic.Up,
-		TotalByte:    traffic.Total,
-		SubUrl:       subURL,
-		SubJsonUrl:   subJsonURL,
-		Result:       subs,
+		Host:                 hostHeader,
+		BasePath:             basePath,
+		SId:                  subId,
+		Download:             download,
+		Upload:               upload,
+		Total:                total,
+		Used:                 used,
+		Remained:             remained,
+		Expire:               traffic.ExpiryTime / 1000,
+		LastOnline:           lastOnline,
+		Datepicker:           datepicker,
+		DownloadByte:         traffic.Down,
+		UploadByte:           traffic.Up,
+		TotalByte:            traffic.Total,
+		SubUrl:               subURL,
+		SubJsonUrl:           subJsonURL,
+		Result:               subs,
+		HideConfigLinks:      hideConfigLinks,
+		ShowOnlyHappV2RayTun: showOnlyHappV2RayTun,
+		HappEncryptedUrl:     happEncryptedUrl,
+		V2RayTunEncryptedUrl: v2raytunEncryptedUrl,
 	}
 }
 

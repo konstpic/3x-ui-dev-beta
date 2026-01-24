@@ -112,7 +112,6 @@ type Client struct {
 	Password   string `json:"password"`                     // Client password
 	Flow       string `json:"flow"`                         // Flow control (XTLS)
 	Email      string `json:"email"`                        // Client email identifier
-	LimitIP    int    `json:"limitIp"`                      // IP limit for this client
 	TotalGB    int64  `json:"totalGB" form:"totalGB"`       // Total traffic limit in GB
 	ExpiryTime int64  `json:"expiryTime" form:"expiryTime"` // Expiration timestamp
 	Enable     bool   `json:"enable" form:"enable"`         // Whether the client is enabled
@@ -134,7 +133,6 @@ type ClientEntity struct {
 	Security   string `json:"security" form:"security"`          // Security method (e.g., "auto", "aes-128-gcm")
 	Password   string `json:"password" form:"password"`           // Client password (for Trojan/Shadowsocks)
 	Flow       string `json:"flow" form:"flow"`                  // Flow control (XTLS)
-	LimitIP    int    `json:"limitIp" form:"limitIp"`            // IP limit for this client
 	TotalGB    float64 `json:"totalGB" form:"totalGB"`            // Total traffic limit in GB (supports decimal values like 0.01 for MB)
 	ExpiryTime int64  `json:"expiryTime" form:"expiryTime"`     // Expiration timestamp
 	Enable     bool   `json:"enable" form:"enable"`             // Whether the client is enabled

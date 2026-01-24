@@ -323,20 +323,7 @@
           }
 
           this.oldAllSetting = new AllSetting(msg.obj);
-          const newSetting = new AllSetting(msg.obj);
-          
-          // Ensure multiNodeMode is properly converted to boolean
-          if (newSetting.multiNodeMode !== undefined && newSetting.multiNodeMode !== null) {
-            newSetting.multiNodeMode = Boolean(newSetting.multiNodeMode);
-          } else {
-            newSetting.multiNodeMode = false;
-          }
-          
-          // Replace the object to trigger Vue reactivity
-          this.allSetting = newSetting;
-          
-          // Force Vue to recognize the change by using $set for nested property
-          this.$set(this, 'allSetting', newSetting);
+          this.allSetting = new AllSetting(msg.obj);
           
           app.changeRemarkSample();
           this.saveBtnDisable = true;

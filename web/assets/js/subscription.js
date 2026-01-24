@@ -5,6 +5,37 @@
   const textarea = document.getElementById('subscription-links');
   const rawLinks = (textarea?.value || '').split('\n').filter(Boolean);
 
+  // Try to read encrypted URLs from JSON script tag first
+  let encryptedUrls = { happEncryptedUrl: null, v2raytunEncryptedUrl: null };
+  try {
+    const jsonScript = document.getElementById('subscription-encrypted-urls');
+    if (jsonScript && jsonScript.textContent) {
+      let jsonText = jsonScript.textContent.trim();
+      console.info('[Subscription] JSON script tag content (raw):', jsonText);
+      
+      // Remove surrounding quotes if JSON is escaped as a string
+      if (jsonText.startsWith('"') && jsonText.endsWith('"')) {
+        // JSON is escaped as a string, need to unescape it
+        try {
+          jsonText = JSON.parse(jsonText); // Parse the escaped string to get the actual JSON string
+          console.info('[Subscription] Unescaped JSON string:', jsonText);
+        } catch (e) {
+          console.warn('[Subscription] Failed to unescape JSON string:', e);
+        }
+      }
+      
+      // Now parse the actual JSON
+      encryptedUrls = JSON.parse(jsonText);
+      console.info('[Subscription] Parsed encrypted URLs:', encryptedUrls);
+      console.info('[Subscription] happEncryptedUrl:', encryptedUrls.happEncryptedUrl);
+      console.info('[Subscription] v2raytunEncryptedUrl:', encryptedUrls.v2raytunEncryptedUrl);
+    } else {
+      console.warn('[Subscription] JSON script tag not found or empty');
+    }
+  } catch (e) {
+    console.warn('[Subscription] Failed to parse encrypted URLs from JSON:', e);
+  }
+
   const data = {
     sId: el.getAttribute('data-sid') || '',
     subUrl: el.getAttribute('data-sub-url') || '',
@@ -20,6 +51,26 @@
     uploadByte: parseInt(el.getAttribute('data-uploadbyte') || '0', 10) || 0,
     totalByte: parseInt(el.getAttribute('data-totalbyte') || '0', 10) || 0,
     datepicker: el.getAttribute('data-datepicker') || 'gregorian',
+    hideConfigLinks: el.getAttribute('data-hideconfiglinks') === 'true',
+    showOnlyHappV2RayTun: el.getAttribute('data-showonlyhappv2raytun') === 'true',
+    happEncryptedUrl: (() => {
+      // Prefer JSON value, but check if it's not null/empty
+      if (encryptedUrls.happEncryptedUrl && encryptedUrls.happEncryptedUrl.trim() !== '') {
+        return encryptedUrls.happEncryptedUrl;
+      }
+      // Fallback to data attribute
+      const val = el.getAttribute('data-happ-encrypted-url') || '';
+      return (val && val !== '#ZgotmplZ' && val.trim() !== '') ? val : '';
+    })(),
+    v2raytunEncryptedUrl: (() => {
+      // Prefer JSON value, but check if it's not null/empty
+      if (encryptedUrls.v2raytunEncryptedUrl && encryptedUrls.v2raytunEncryptedUrl.trim() !== '') {
+        return encryptedUrls.v2raytunEncryptedUrl;
+      }
+      // Fallback to data attribute
+      const val = el.getAttribute('data-v2raytun-encrypted-url') || '';
+      return (val && val !== '#ZgotmplZ' && val.trim() !== '') ? val : '';
+    })(),
   };
 
   // Normalize lastOnline to milliseconds if it looks like seconds
@@ -39,6 +90,7 @@
   }
 
   function copy(text) {
+    console.info('[Subscription] Copying to clipboard:', text);
     ClipboardManager.copyText(text).then(ok => {
       const messageType = ok ? 'success' : 'error';
       Vue.prototype.$message[messageType](ok ? 'Copied' : 'Copy failed');
@@ -46,6 +98,7 @@
   }
 
   function open(url) {
+    console.info('[Subscription] Opening URL:', url);
     window.location.href = url;
   }
 
@@ -93,12 +146,22 @@
       links: rawLinks,
       lang: '',
       viewportWidth: (typeof window !== 'undefined' ? window.innerWidth : 1024),
+      hideConfigLinks: data.hideConfigLinks,
+      showOnlyHappV2RayTun: data.showOnlyHappV2RayTun || false,
     },
     async mounted() {
       this.lang = LanguageManager.getLanguage();
       const tpl = document.getElementById('subscription-data');
       const sj = tpl ? tpl.getAttribute('data-subjson-url') : '';
       if (sj) this.app.subJsonUrl = sj;
+      
+      // Log subscription URLs
+      console.info('[Subscription] Loaded subscription data:');
+      console.info('  - Plain subscription URL:', this.app.subUrl);
+      console.info('  - Happ encrypted URL:', this.app.happEncryptedUrl || '(not available)');
+      console.info('  - V2RayTun encrypted URL:', this.app.v2raytunEncryptedUrl || '(not available)');
+      console.info('  - hideConfigLinks:', this.hideConfigLinks, '(type:', typeof this.hideConfigLinks + ')');
+      
       drawQR(this.app.subUrl);
       try {
         const elJson = document.getElementById('qrcode-subjson');
@@ -138,13 +201,26 @@
         return `streisand://import/${encodeURIComponent(this.app.subUrl)}`;
       },
       v2raytunUrl() {
+        // Use encrypted URL if available, otherwise use plain subscription URL
+        if (this.app.v2raytunEncryptedUrl) {
+          console.info('[Subscription] V2RayTun: Using encrypted URL:', this.app.v2raytunEncryptedUrl);
+          return this.app.v2raytunEncryptedUrl;
+        }
+        console.info('[Subscription] V2RayTun: Using plain subscription URL:', this.app.subUrl);
         return this.app.subUrl;
       },
       npvtunUrl() {
         return this.app.subUrl;
       },
       happUrl() {
-        return `happ://add/${encodeURIComponent(this.app.subUrl)}`;
+        // Use encrypted URL if available, otherwise use plain subscription URL
+        if (this.app.happEncryptedUrl) {
+          console.info('[Subscription] Happ: Using encrypted URL:', this.app.happEncryptedUrl);
+          return this.app.happEncryptedUrl;
+        }
+        const plainUrl = `happ://add/${encodeURIComponent(this.app.subUrl)}`;
+        console.info('[Subscription] Happ: Using plain URL:', plainUrl);
+        return plainUrl;
       }
     },
     methods: {

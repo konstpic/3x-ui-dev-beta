@@ -593,7 +593,7 @@ func (s *MigrationService) migrateClientsFromInbounds(sqliteDB *sql.DB, tx *gorm
 				// Client exists, update it
 				existingDB.Enable = s.getBoolFromMap(clientMap, "enable", true)
 				existingDB.Status = "active"
-				existingDB.LimitIP = int(s.getInt64FromMap(clientMap, "limitIp"))
+				// LimitIP removed - using HWID only
 				// Convert bytes to GB (old format stores bytes, new format stores GB)
 				totalBytes := s.getInt64FromMap(clientMap, "totalGB")
 				existingDB.TotalGB = float64(totalBytes) / (1024 * 1024 * 1024)
@@ -641,7 +641,7 @@ func (s *MigrationService) migrateClientsFromInbounds(sqliteDB *sql.DB, tx *gorm
 					Email:      email,
 					Enable:     s.getBoolFromMap(clientMap, "enable", true),
 					Status:     "active",
-					LimitIP:    int(s.getInt64FromMap(clientMap, "limitIp")),
+					// LimitIP removed - using HWID only
 					TotalGB:    float64(totalBytesNew) / (1024 * 1024 * 1024),
 					ExpiryTime: s.getInt64FromMap(clientMap, "expiryTime"),
 					TgID:       s.getInt64FromMap(clientMap, "tgId"),

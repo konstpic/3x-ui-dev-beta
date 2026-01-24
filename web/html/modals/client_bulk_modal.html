@@ -63,18 +63,6 @@
             </template>
             <a-input-number :style="{ width: '50%' }" v-model.number="clientsBulkModal.tgId" min="0"></a-input-number>
         </a-form-item>
-        <a-form-item v-if="app.ipLimitEnable">
-            <template slot="label">
-                <a-tooltip>
-                    <template slot="title">
-                        <span>{{ i18n "pages.inbounds.IPLimitDesc" }}</span>
-                    </template>
-                    <span>{{ i18n "pages.inbounds.IPLimit" }} </span>
-                    <a-icon type="question-circle"></a-icon>
-                </a-tooltip>
-            </template>
-            <a-input-number v-model.number="clientsBulkModal.limitIp" min="0"></a-input-number>
-        </a-form-item>
         <a-form-item>
             <template slot="label">
                 <a-tooltip>
@@ -136,7 +124,6 @@
         inbound: new Inbound(),
         quantity: 1,
         totalGB: 0,
-        limitIp: 0,
         expiryTime: '',
         emailMethod: 0,
         firstNum: 1,
@@ -169,7 +156,6 @@
                 if (clientsBulkModal.subId.length > 0) newClient.subId = clientsBulkModal.subId;
                 newClient.tgId = clientsBulkModal.tgId;
                 newClient.security = clientsBulkModal.security;
-                newClient.limitIp = clientsBulkModal.limitIp;
                 newClient._totalGB = clientsBulkModal.totalGB;
                 newClient._expiryTime = clientsBulkModal.expiryTime;
                 if (clientsBulkModal.inbound.canEnableTlsFlow()) {
@@ -194,7 +180,6 @@
             this.totalGB = 0;
             this.expiryTime = 0;
             this.emailMethod = 0;
-            this.limitIp = 0;
             this.firstNum = 1;
             this.lastNum = 1;
             this.emailPrefix = "";

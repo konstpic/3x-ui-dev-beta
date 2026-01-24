@@ -71,42 +71,6 @@
     <a-form-item v-if="client.email" label='{{ i18n "comment" }}'>
         <a-input v-model.trim="client.comment"></a-input>
     </a-form-item>
-    <a-form-item v-if="app.ipLimitEnable">
-        <template slot="label">
-            <a-tooltip>
-                <template slot="title">
-                    <span>{{ i18n "pages.inbounds.IPLimitDesc"}}</span>
-                </template>
-                    <span>{{ i18n "pages.inbounds.IPLimit"}} </span>
-                <a-icon type="question-circle"></a-icon>
-            </a-tooltip>
-        </template>
-        <a-input-number v-model.number="client.limitIp" min="0"></a-input-number>
-    </a-form-item>
-    <a-form-item v-if="app.ipLimitEnable && client.limitIp > 0 && client.email && isEdit">
-        <template slot="label">
-            <a-tooltip>
-                <template slot="title">
-                    <span>{{ i18n "pages.inbounds.IPLimitlogDesc" }}</span>
-                </template>
-                    <span>{{ i18n "pages.inbounds.IPLimitlog" }} </span>
-                <a-icon type="question-circle"></a-icon>
-            </a-tooltip>
-        </template>
-        <a-tooltip>
-            <template slot="title">
-                <span>{{ i18n "pages.inbounds.IPLimitlogclear" }}</span>
-            </template>
-            <span :style="{ color: '#FF4D4F' }">
-                <a-icon type="delete" @click="clearDBClientIps(client.email)"></a-icon>
-            </span>
-        </a-tooltip>
-        <a-form layout="block">
-            <a-textarea id="clientIPs" readonly @click="getDBClientIps(client.email)" placeholder="Click To Get IPs"
-                :auto-size="{ minRows: 5, maxRows: 10 }">
-            </a-textarea>
-        </a-form>
-    </a-form-item>
     <a-form-item v-if="inbound.canEnableTlsFlow()" label='Flow'>
         <a-select v-model="client.flow" :dropdown-class-name="themeSwitcher.currentTheme">
             <a-select-option value="" selected>{{ i18n "none" }}</a-select-option>

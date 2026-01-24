@@ -75,6 +75,9 @@ var defaultValueMap = map[string]string{
 	"subJsonNoises":               "",
 	"subJsonMux":                  "",
 	"subJsonRules":                "",
+	"subEncryptHappV2RayTun":     "false",
+	"subOnlyHappV2RayTun":         "false",
+	"subHideConfigLinks":          "false",
 	"datepicker":                  "gregorian",
 	"warp":                        "",
 	"externalTrafficInformEnable": "false",
@@ -295,10 +298,6 @@ func (s *SettingService) saveSetting(key string, value string) error {
 		cache.Delete(cache.KeySettingsAll)
 		// Also invalidate default settings cache (they depend on individual settings)
 		cache.DeletePattern("defaultSettings:*")
-		// Invalidate computed settings that depend on this setting
-		if key == "multiNodeMode" {
-			cache.Delete("computed:ipLimitEnable")
-		}
 	}
 	
 	return err
@@ -655,6 +654,34 @@ func (s *SettingService) GetSubJsonRules() (string, error) {
 	return s.getString("subJsonRules")
 }
 
+func (s *SettingService) GetSubEncryptHappV2RayTun() (bool, error) {
+	return s.getBool("subEncryptHappV2RayTun")
+}
+
+func (s *SettingService) SetSubEncryptHappV2RayTun(value bool) error {
+	return s.setBool("subEncryptHappV2RayTun", value)
+}
+
+func (s *SettingService) GetSubOnlyHappV2RayTun() (bool, error) {
+	return s.getBool("subOnlyHappV2RayTun")
+}
+
+func (s *SettingService) SetSubOnlyHappV2RayTun(value bool) error {
+	return s.setBool("subOnlyHappV2RayTun", value)
+}
+
+func (s *SettingService) GetSubHideConfigLinks() (bool, error) {
+	return s.getBool("subHideConfigLinks")
+}
+
+func (s *SettingService) GetSubShowOnlyHappV2RayTun() (bool, error) {
+	return s.getBool("subShowOnlyHappV2RayTun")
+}
+
+func (s *SettingService) SetSubHideConfigLinks(value bool) error {
+	return s.setBool("subHideConfigLinks", value)
+}
+
 func (s *SettingService) GetDatepicker() (string, error) {
 	return s.getString("datepicker")
 }
@@ -683,28 +710,6 @@ func (s *SettingService) SetExternalTrafficInformURI(InformURI string) error {
 	return s.setString("externalTrafficInformURI", InformURI)
 }
 
-func (s *SettingService) GetIpLimitEnable() (bool, error) {
-	// Cache key for this computed setting
-	cacheKey := "computed:ipLimitEnable"
-	var result bool
-	
-	err := cache.GetOrSet(cacheKey, &result, cache.TTLSetting, func() (interface{}, error) {
-		// Check if multi-node mode is enabled
-		multiMode, err := s.GetMultiNodeMode()
-		if err == nil && multiMode {
-			// In multi-node mode, IP limiting is handled by nodes
-			return false, nil
-		}
-		
-		accessLogPath, err := xray.GetAccessLogPath()
-		if err != nil {
-			return false, err
-		}
-		return (accessLogPath != "none" && accessLogPath != ""), nil
-	})
-	
-	return result, err
-}
 
 // LDAP exported getters
 func (s *SettingService) GetLdapEnable() (bool, error) {
@@ -843,7 +848,22 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 	for _, field := range fields {
 		key := field.Tag.Get("json")
 		fieldV := v.FieldByName(field.Name)
-		value := fmt.Sprint(fieldV.Interface())
+		
+		// Handle boolean fields explicitly to ensure correct string representation
+		var value string
+		switch fieldV.Kind() {
+		case reflect.Bool:
+			value = strconv.FormatBool(fieldV.Bool())
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			value = strconv.FormatInt(fieldV.Int(), 10)
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			value = strconv.FormatUint(fieldV.Uint(), 10)
+		case reflect.String:
+			value = fieldV.String()
+		default:
+			value = fmt.Sprint(fieldV.Interface())
+		}
+		
 		err := s.saveSetting(key, value)
 		if err != nil {
 			errs = append(errs, err)
@@ -883,7 +903,6 @@ func (s *SettingService) GetDefaultSettings(host string) (any, error) {
 			"subJsonURI":    func() (any, error) { return s.GetSubJsonURI() },
 			"remarkModel":   func() (any, error) { return s.GetRemarkModel() },
 			"datepicker":    func() (any, error) { return s.GetDatepicker() },
-			"ipLimitEnable": func() (any, error) { return s.GetIpLimitEnable() },
 		}
 
 		res := make(map[string]any)

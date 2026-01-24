@@ -286,14 +286,6 @@ func (a *ClientController) updateClient(c *gin.Context) {
 			if flow, ok := updateData["flow"].(string); ok && flow != "" {
 				client.Flow = flow
 			}
-			// Handle limitIp - can be 0 (unlimited), so check if key exists
-			if limitIPVal, exists := updateData["limitIp"]; exists {
-				if limitIP, ok := limitIPVal.(float64); ok {
-					client.LimitIP = int(limitIP)
-				} else if limitIP, ok := limitIPVal.(int); ok {
-					client.LimitIP = limitIP
-				}
-			}
 			// Handle totalGB - can be 0 (unlimited), so check if key exists
 			if totalGBVal, exists := updateData["totalGB"]; exists {
 				if totalGB, ok := totalGBVal.(float64); ok {
@@ -402,13 +394,6 @@ func (a *ClientController) updateClient(c *gin.Context) {
 			}
 		if updateClient.Flow != "" {
 			client.Flow = updateClient.Flow
-		}
-		// Handle limitIp - can be 0 (unlimited)
-		limitIpStr := c.PostForm("limitIp")
-		if limitIpStr != "" {
-			if limitIp, err := strconv.Atoi(limitIpStr); err == nil {
-				client.LimitIP = limitIp
-			}
 		}
 		// Handle totalGB - can be 0 (unlimited)
 		totalGBStr := c.PostForm("totalGB")
