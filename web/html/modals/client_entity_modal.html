@@ -48,14 +48,14 @@
             <a-input-number v-model.number="client.tgId" :min="0" :style="{ width: '100%' }"></a-input-number>
         </a-form-item>
         <a-form-item label='{{ i18n "pages.clients.inbounds" }}'>
-            <a-select v-model="client.inboundIds" mode="multiple" :dropdown-class-name="themeSwitcher.currentTheme" :style="{ width: '100%' }">
+            <a-select v-model="client.inboundIds" mode="multiple" :dropdown-class-name="themeSwitcher.currentTheme">
                 <a-select-option v-for="inbound in app.allInbounds" :key="inbound.id" :value="inbound.id">
                     [[ inbound.remark || `Port ${inbound.port}` ]] (ID: [[ inbound.id ]])
                 </a-select-option>
             </a-select>
         </a-form-item>
         <a-form-item label='{{ i18n "pages.clients.group" }}'>
-            <a-select v-model="client.groupId" :dropdown-class-name="themeSwitcher.currentTheme" :style="{ width: '100%' }" :allow-clear="true">
+            <a-select v-model="client.groupId" :dropdown-class-name="themeSwitcher.currentTheme">
                 <a-select-option :value="null">{{ i18n "none" }}</a-select-option>
                 <a-select-option v-for="group in app.groups" :key="group.id" :value="group.id">
                     [[ group.name ]]
@@ -309,6 +309,34 @@
                     app.$message.error('{{ i18n "somethingWentWrong" }}');
                 }
             }
+        },
+        filterInboundOption(input, option) {
+            const inboundId = option.componentOptions.propsData.value;
+            const inbound = typeof app !== 'undefined' && app.allInbounds 
+                ? app.allInbounds.find(ib => ib.id === inboundId) 
+                : null;
+            if (!inbound) return false;
+            const searchText = input.toLowerCase();
+            const remark = (inbound.remark || '').toLowerCase();
+            const port = String(inbound.port || '');
+            const id = String(inbound.id || '');
+            return remark.indexOf(searchText) >= 0 || 
+                   port.indexOf(searchText) >= 0 || 
+                   id.indexOf(searchText) >= 0;
+        },
+        filterGroupOption(input, option) {
+            const groupId = option.componentOptions.propsData.value;
+            if (groupId === null) {
+                // "None" option - show if input is empty or matches "none"
+                return !input || input.toLowerCase().indexOf('none') >= 0;
+            }
+            const group = typeof app !== 'undefined' && app.groups 
+                ? app.groups.find(g => g.id === groupId) 
+                : null;
+            if (!group) return false;
+            const searchText = input.toLowerCase();
+            const name = (group.name || '').toLowerCase();
+            return name.indexOf(searchText) >= 0;
         }
     };
 
@@ -317,6 +345,8 @@
         el: '#client-entity-modal',
         data: {
             clientEntityModal: clientEntityModal,
+        },
+        methods: {
         },
         computed: {
             client() {
@@ -394,4 +424,79 @@
         }
     });
 </script>
+<style>
+    /* Fix for select arrow in client entity modal - prevent white square on hover */
+    #client-entity-modal .ant-select-arrow,
+    #client-entity-modal .ant-select-selection__arrow,
+    #client-entity-modal .ant-select-arrow *,
+    #client-entity-modal .ant-select-selection__arrow *,
+    #client-entity-modal .ant-select-arrow .anticon,
+    #client-entity-modal .ant-select-selection__arrow .anticon,
+    #client-entity-modal .ant-select-arrow .anticon-down,
+    #client-entity-modal .ant-select-selection__arrow .anticon-down {
+        color: rgba(0, 0, 0, 0.25) !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    #client-entity-modal .ant-select:hover .ant-select-arrow,
+    #client-entity-modal .ant-select:hover .ant-select-selection__arrow,
+    #client-entity-modal .ant-select:hover .ant-select-arrow *,
+    #client-entity-modal .ant-select:hover .ant-select-selection__arrow *,
+    #client-entity-modal .ant-select:hover .ant-select-arrow .anticon,
+    #client-entity-modal .ant-select:hover .ant-select-selection__arrow .anticon,
+    #client-entity-modal .ant-select:hover .ant-select-arrow .anticon-down,
+    #client-entity-modal .ant-select:hover .ant-select-selection__arrow .anticon-down,
+    #client-entity-modal .ant-select-focused .ant-select-arrow,
+    #client-entity-modal .ant-select-focused .ant-select-selection__arrow,
+    #client-entity-modal .ant-select-focused .ant-select-arrow *,
+    #client-entity-modal .ant-select-focused .ant-select-selection__arrow *,
+    #client-entity-modal .ant-select-open .ant-select-arrow,
+    #client-entity-modal .ant-select-open .ant-select-selection__arrow,
+    #client-entity-modal .ant-select-open .ant-select-arrow *,
+    #client-entity-modal .ant-select-open .ant-select-selection__arrow * {
+        color: rgba(0, 0, 0, 0.45) !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    #client-entity-modal.dark .ant-select-arrow,
+    #client-entity-modal.dark .ant-select-selection__arrow,
+    #client-entity-modal.dark .ant-select-arrow *,
+    #client-entity-modal.dark .ant-select-selection__arrow *,
+    #client-entity-modal.dark .ant-select-arrow .anticon,
+    #client-entity-modal.dark .ant-select-selection__arrow .anticon,
+    #client-entity-modal.dark .ant-select-arrow .anticon-down,
+    #client-entity-modal.dark .ant-select-selection__arrow .anticon-down {
+        color: rgba(255, 255, 255, 0.35) !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    #client-entity-modal.dark .ant-select:hover .ant-select-arrow,
+    #client-entity-modal.dark .ant-select:hover .ant-select-selection__arrow,
+    #client-entity-modal.dark .ant-select:hover .ant-select-arrow *,
+    #client-entity-modal.dark .ant-select:hover .ant-select-selection__arrow *,
+    #client-entity-modal.dark .ant-select:hover .ant-select-arrow .anticon,
+    #client-entity-modal.dark .ant-select:hover .ant-select-selection__arrow .anticon,
+    #client-entity-modal.dark .ant-select:hover .ant-select-arrow .anticon-down,
+    #client-entity-modal.dark .ant-select:hover .ant-select-selection__arrow .anticon-down,
+    #client-entity-modal.dark .ant-select-focused .ant-select-arrow,
+    #client-entity-modal.dark .ant-select-focused .ant-select-selection__arrow,
+    #client-entity-modal.dark .ant-select-focused .ant-select-arrow *,
+    #client-entity-modal.dark .ant-select-focused .ant-select-selection__arrow *,
+    #client-entity-modal.dark .ant-select-open .ant-select-arrow,
+    #client-entity-modal.dark .ant-select-open .ant-select-selection__arrow,
+    #client-entity-modal.dark .ant-select-open .ant-select-arrow *,
+    #client-entity-modal.dark .ant-select-open .ant-select-selection__arrow * {
+        color: rgba(255, 255, 255, 0.65) !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+</style>
 {{end}}

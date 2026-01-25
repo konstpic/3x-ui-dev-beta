@@ -2339,22 +2339,16 @@ func (t *Tgbot) NotifyClientCreated(client *model.ClientEntity) {
 		return
 	}
 
-	msg := fmt.Sprintf("✅ <b>Клиент создан</b>\n\n"+
-		"<b>Email:</b> %s\n"+
-		"<b>Статус:</b> %s\n"+
-		"<b>Включен:</b> %v\n"+
-		"<b>Лимит трафика:</b> %s\n"+
-		"<b>Время истечения:</b> %s\n"+
-		"<b>Время:</b> %s",
-		client.Email,
-		client.Status,
-		client.Enable,
-		formatTrafficLimit(int64(client.TotalGB)),
-		formatExpiryTime(client.ExpiryTime),
-		time.Now().Format("2006-01-02 15:04:05"))
+	msg := t.I18nBot("tgbot.messages.clientCreated")
+	msg += t.I18nBot("tgbot.messages.email", "Email=="+client.Email)
+	msg += t.I18nBot("tgbot.messages.status", "Status=="+client.Status)
+	msg += t.I18nBot("tgbot.messages.enabled", "Enabled=="+fmt.Sprintf("%v", client.Enable))
+	msg += t.I18nBot("tgbot.messages.trafficLimit", "Limit=="+t.formatTrafficLimitLocalized(client.TotalGB))
+	msg += t.I18nBot("tgbot.messages.expiryTime", "Time=="+t.formatExpiryTimeLocalized(client.ExpiryTime))
+	msg += t.I18nBot("tgbot.messages.time", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
 
 	if client.Comment != "" {
-		msg += fmt.Sprintf("\n<b>Комментарий:</b> %s", client.Comment)
+		msg += t.I18nBot("tgbot.messages.comment", "Comment=="+client.Comment)
 	}
 
 	t.SendMsgToTgbotAdmins(msg)
@@ -2366,44 +2360,115 @@ func (t *Tgbot) NotifyClientUpdated(client *model.ClientEntity, oldClient *model
 		return
 	}
 
-	msg := fmt.Sprintf("🔄 <b>Клиент изменен</b>\n\n"+
-		"<b>Email:</b> %s\n"+
-		"<b>Статус:</b> %s\n"+
-		"<b>Включен:</b> %v\n"+
-		"<b>Лимит трафика:</b> %s\n"+
-		"<b>Время истечения:</b> %s\n"+
-		"<b>Время:</b> %s",
-		client.Email,
-		client.Status,
-		client.Enable,
-		formatTrafficLimit(int64(client.TotalGB)),
-		formatExpiryTime(client.ExpiryTime),
-		time.Now().Format("2006-01-02 15:04:05"))
+	msg := t.I18nBot("tgbot.messages.clientUpdated")
+	msg += t.I18nBot("tgbot.messages.email", "Email=="+client.Email)
+	msg += t.I18nBot("tgbot.messages.status", "Status=="+client.Status)
+	msg += t.I18nBot("tgbot.messages.enabled", "Enabled=="+fmt.Sprintf("%v", client.Enable))
+	msg += t.I18nBot("tgbot.messages.trafficLimit", "Limit=="+t.formatTrafficLimitLocalized(client.TotalGB))
+	msg += t.I18nBot("tgbot.messages.expiryTime", "Time=="+t.formatExpiryTimeLocalized(client.ExpiryTime))
+	msg += t.I18nBot("tgbot.messages.time", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
+
+	// Add traffic information
+	totalTraffic := client.Up + client.Down
+	msg += t.I18nBot("tgbot.messages.trafficInfo",
+		"Upload=="+common.FormatTraffic(client.Up),
+		"Download=="+common.FormatTraffic(client.Down),
+		"Total=="+common.FormatTraffic(totalTraffic))
+
+	// Add HWID information
+	if client.HWIDEnabled {
+		hwidCount := 0
+		if client.HWIDs != nil {
+			hwidCount = len(client.HWIDs)
+		}
+		maxHwidText := "∞"
+		if client.MaxHWID > 0 {
+			maxHwidText = fmt.Sprintf("%d", client.MaxHWID)
+		}
+		msg += t.I18nBot("tgbot.messages.hwidEnabled", "Count=="+fmt.Sprintf("%d", hwidCount), "Max=="+maxHwidText)
+	} else {
+		msg += t.I18nBot("tgbot.messages.hwidDisabled")
+	}
 
 	if oldClient != nil {
 		changes := []string{}
 		if oldClient.Email != client.Email {
-			changes = append(changes, fmt.Sprintf("Email: %s → %s", oldClient.Email, client.Email))
+			changes = append(changes, t.I18nBot("tgbot.messages.emailChanged", "Old=="+oldClient.Email, "New=="+client.Email))
 		}
 		if oldClient.Enable != client.Enable {
-			changes = append(changes, fmt.Sprintf("Включен: %v → %v", oldClient.Enable, client.Enable))
+			changes = append(changes, t.I18nBot("tgbot.messages.enabledChanged", "Old=="+fmt.Sprintf("%v", oldClient.Enable), "New=="+fmt.Sprintf("%v", client.Enable)))
 		}
 		if oldClient.TotalGB != client.TotalGB {
-			changes = append(changes, fmt.Sprintf("Лимит трафика: %s → %s", formatTrafficLimit(int64(oldClient.TotalGB)), formatTrafficLimit(int64(client.TotalGB))))
+			changes = append(changes, t.I18nBot("tgbot.messages.trafficLimitChanged", "Old=="+t.formatTrafficLimitLocalized(oldClient.TotalGB), "New=="+t.formatTrafficLimitLocalized(client.TotalGB)))
+		}
+		if oldClient.UUID != client.UUID {
+			changes = append(changes, t.I18nBot("tgbot.messages.uuidChanged", "Old=="+oldClient.UUID, "New=="+client.UUID))
+		}
+		if oldClient.Password != client.Password {
+			// Don't show full password, just indicate it changed
+			changes = append(changes, t.I18nBot("tgbot.messages.passwordChanged"))
 		}
 		if oldClient.ExpiryTime != client.ExpiryTime {
-			changes = append(changes, fmt.Sprintf("Время истечения: %s → %s", formatExpiryTime(oldClient.ExpiryTime), formatExpiryTime(client.ExpiryTime)))
+			changes = append(changes, t.I18nBot("tgbot.messages.expiryTimeChanged", "Old=="+t.formatExpiryTimeLocalized(oldClient.ExpiryTime), "New=="+t.formatExpiryTimeLocalized(client.ExpiryTime)))
 		}
 		if oldClient.Status != client.Status {
-			changes = append(changes, fmt.Sprintf("Статус: %s → %s", oldClient.Status, client.Status))
+			changes = append(changes, t.I18nBot("tgbot.messages.statusChanged", "Old=="+oldClient.Status, "New=="+client.Status))
 		}
+		
+		// Check traffic changes
+		oldTotalTraffic := oldClient.Up + oldClient.Down
+		if oldClient.Up != client.Up || oldClient.Down != client.Down {
+			changes = append(changes, t.I18nBot("tgbot.messages.trafficChanged",
+				"OldUpload=="+common.FormatTraffic(oldClient.Up),
+				"NewUpload=="+common.FormatTraffic(client.Up),
+				"OldDownload=="+common.FormatTraffic(oldClient.Down),
+				"NewDownload=="+common.FormatTraffic(client.Down),
+				"OldTotal=="+common.FormatTraffic(oldTotalTraffic),
+				"NewTotal=="+common.FormatTraffic(totalTraffic)))
+		}
+		
+		// Check HWID changes
+		if oldClient.HWIDEnabled != client.HWIDEnabled {
+			oldHwidText := t.I18nBot("tgbot.messages.hwidDisabled")
+			if oldClient.HWIDEnabled {
+				oldMaxHwidText := "∞"
+				if oldClient.MaxHWID > 0 {
+					oldMaxHwidText = fmt.Sprintf("%d", oldClient.MaxHWID)
+				}
+				oldHwidText = t.I18nBot("tgbot.messages.hwidEnabled", "Count==0", "Max=="+oldMaxHwidText)
+			}
+			newHwidText := t.I18nBot("tgbot.messages.hwidDisabled")
+			if client.HWIDEnabled {
+				newMaxHwidText := "∞"
+				if client.MaxHWID > 0 {
+					newMaxHwidText = fmt.Sprintf("%d", client.MaxHWID)
+				}
+				hwidCount := 0
+				if client.HWIDs != nil {
+					hwidCount = len(client.HWIDs)
+				}
+				newHwidText = t.I18nBot("tgbot.messages.hwidEnabled", "Count=="+fmt.Sprintf("%d", hwidCount), "Max=="+newMaxHwidText)
+			}
+			changes = append(changes, t.I18nBot("tgbot.messages.hwidChanged", "Old=="+oldHwidText, "New=="+newHwidText))
+		} else if client.HWIDEnabled && oldClient.MaxHWID != client.MaxHWID {
+			oldMaxHwidText := "∞"
+			if oldClient.MaxHWID > 0 {
+				oldMaxHwidText = fmt.Sprintf("%d", oldClient.MaxHWID)
+			}
+			newMaxHwidText := "∞"
+			if client.MaxHWID > 0 {
+				newMaxHwidText = fmt.Sprintf("%d", client.MaxHWID)
+			}
+			changes = append(changes, t.I18nBot("tgbot.messages.hwidLimitChanged", "Old=="+oldMaxHwidText, "New=="+newMaxHwidText))
+		}
+		
 		if len(changes) > 0 {
-			msg += "\n\n<b>Изменения:</b>\n" + strings.Join(changes, "\n")
+			msg += "\n\n" + t.I18nBot("tgbot.messages.changes") + "\n" + strings.Join(changes, "\n")
 		}
 	}
 
 	if client.Comment != "" {
-		msg += fmt.Sprintf("\n<b>Комментарий:</b> %s", client.Comment)
+		msg += t.I18nBot("tgbot.messages.comment", "Comment=="+client.Comment)
 	}
 
 	t.SendMsgToTgbotAdmins(msg)
@@ -2415,14 +2480,12 @@ func (t *Tgbot) NotifyClientDeleted(client *model.ClientEntity) {
 		return
 	}
 
-	msg := fmt.Sprintf("❌ <b>Клиент удален</b>\n\n"+
-		"<b>Email:</b> %s\n"+
-		"<b>Время:</b> %s",
-		client.Email,
-		time.Now().Format("2006-01-02 15:04:05"))
+	msg := t.I18nBot("tgbot.messages.clientDeleted")
+	msg += t.I18nBot("tgbot.messages.email", "Email=="+client.Email)
+	msg += t.I18nBot("tgbot.messages.time", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
 
 	if client.Comment != "" {
-		msg += fmt.Sprintf("\n<b>Комментарий:</b> %s", client.Comment)
+		msg += t.I18nBot("tgbot.messages.comment", "Comment=="+client.Comment)
 	}
 
 	t.SendMsgToTgbotAdmins(msg)
@@ -2434,16 +2497,13 @@ func (t *Tgbot) NotifyClientDisabled(client *model.ClientEntity) {
 		return
 	}
 
-	msg := fmt.Sprintf("⛔ <b>Клиент отключен</b>\n\n"+
-		"<b>Email:</b> %s\n"+
-		"<b>Статус:</b> %s\n"+
-		"<b>Время:</b> %s",
-		client.Email,
-		client.Status,
-		time.Now().Format("2006-01-02 15:04:05"))
+	msg := t.I18nBot("tgbot.messages.clientDisabled")
+	msg += t.I18nBot("tgbot.messages.email", "Email=="+client.Email)
+	msg += t.I18nBot("tgbot.messages.status", "Status=="+client.Status)
+	msg += t.I18nBot("tgbot.messages.time", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
 
 	if client.Comment != "" {
-		msg += fmt.Sprintf("\n<b>Комментарий:</b> %s", client.Comment)
+		msg += t.I18nBot("tgbot.messages.comment", "Comment=="+client.Comment)
 	}
 
 	t.SendMsgToTgbotAdmins(msg)
@@ -2455,14 +2515,12 @@ func (t *Tgbot) NotifyClientFirstConnection(client *model.ClientEntity) {
 		return
 	}
 
-	msg := fmt.Sprintf("🟢 <b>Первое подключение клиента</b>\n\n"+
-		"<b>Email:</b> %s\n"+
-		"<b>Время:</b> %s",
-		client.Email,
-		time.Now().Format("2006-01-02 15:04:05"))
+	msg := t.I18nBot("tgbot.messages.clientFirstConnection")
+	msg += t.I18nBot("tgbot.messages.email", "Email=="+client.Email)
+	msg += t.I18nBot("tgbot.messages.time", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
 
 	if client.Comment != "" {
-		msg += fmt.Sprintf("\n<b>Комментарий:</b> %s", client.Comment)
+		msg += t.I18nBot("tgbot.messages.comment", "Comment=="+client.Comment)
 	}
 
 	t.SendMsgToTgbotAdmins(msg)
@@ -2560,12 +2618,73 @@ func (t *Tgbot) NotifyInboundDeleted(inbound *model.Inbound) {
 	t.SendMsgToTgbotAdmins(msg)
 }
 
+// NotifyGroupChanged sends a notification when a group's clients are enabled/disabled.
+func (t *Tgbot) NotifyGroupChanged(groupName string, enable bool, clients []*model.ClientEntity) {
+	if !t.IsRunning() {
+		return
+	}
+
+	if len(clients) == 0 {
+		return
+	}
+
+	action := "отключена"
+	emoji := "⛔"
+	if enable {
+		action = "включена"
+		emoji = "✅"
+	}
+
+	msg := fmt.Sprintf("%s <b>Группа изменена</b>\n\n"+
+		"<b>Название:</b> %s\n"+
+		"<b>Действие:</b> %s\n"+
+		"<b>Количество клиентов:</b> %d\n"+
+		"<b>Время:</b> %s",
+		emoji, groupName, action, len(clients),
+		time.Now().Format("2006-01-02 15:04:05"))
+
+	// Add list of affected clients (limit to 10 to avoid too long messages)
+	clientList := ""
+	maxClients := 10
+	if len(clients) > maxClients {
+		for i := 0; i < maxClients; i++ {
+			if clients[i].Comment != "" {
+				clientList += fmt.Sprintf("• %s (%s)\n", clients[i].Email, clients[i].Comment)
+			} else {
+				clientList += fmt.Sprintf("• %s\n", clients[i].Email)
+			}
+		}
+		clientList += fmt.Sprintf("... и еще %d клиентов\n", len(clients)-maxClients)
+	} else {
+		for _, client := range clients {
+			if client.Comment != "" {
+				clientList += fmt.Sprintf("• %s (%s)\n", client.Email, client.Comment)
+			} else {
+				clientList += fmt.Sprintf("• %s\n", client.Email)
+			}
+		}
+	}
+
+	if clientList != "" {
+		msg += "\n\n<b>Клиенты:</b>\n" + clientList
+	}
+
+	t.SendMsgToTgbotAdmins(msg)
+}
+
 // Helper functions for formatting
-func formatTrafficLimit(totalGB int64) string {
+func formatTrafficLimit(totalGB float64) string {
 	if totalGB == 0 {
 		return "Безлимит"
 	}
-	return fmt.Sprintf("%d GB", totalGB)
+	// Format with 2 decimal places for small values, integer for large values
+	if totalGB < 1 {
+		return fmt.Sprintf("%.2f GB", totalGB)
+	}
+	if totalGB == float64(int64(totalGB)) {
+		return fmt.Sprintf("%d GB", int64(totalGB))
+	}
+	return fmt.Sprintf("%.2f GB", totalGB)
 }
 
 func formatExpiryTime(expiryTime int64) string {
@@ -2574,6 +2693,30 @@ func formatExpiryTime(expiryTime int64) string {
 	}
 	t := time.Unix(expiryTime/1000, 0)
 	return t.Format("2006-01-02 15:04:05")
+}
+
+// formatTrafficLimitLocalized formats traffic limit with localization
+func (t *Tgbot) formatTrafficLimitLocalized(totalGB float64) string {
+	if totalGB == 0 {
+		return t.I18nBot("tgbot.messages.unlimitedTraffic")
+	}
+	// Format with 2 decimal places for small values, integer for large values
+	if totalGB < 1 {
+		return fmt.Sprintf("%.2f GB", totalGB)
+	}
+	if totalGB == float64(int64(totalGB)) {
+		return fmt.Sprintf("%d GB", int64(totalGB))
+	}
+	return fmt.Sprintf("%.2f GB", totalGB)
+}
+
+// formatExpiryTimeLocalized formats expiry time with localization
+func (t *Tgbot) formatExpiryTimeLocalized(expiryTime int64) string {
+	if expiryTime == 0 {
+		return t.I18nBot("tgbot.messages.noExpiry")
+	}
+	expTime := time.Unix(expiryTime/1000, 0)
+	return expTime.Format("2006-01-02 15:04:05")
 }
 
 // SendReport sends a periodic report to admin chats.

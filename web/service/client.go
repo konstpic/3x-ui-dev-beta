@@ -703,6 +703,20 @@ func (s *ClientService) UpdateClient(userId int, client *model.ClientEntity) (bo
 		}
 	}()
 
+	// Load HWIDs for notification
+	hwidService := ClientHWIDService{}
+	hwids, err := hwidService.GetHWIDsForClient(finalClient.Id)
+	if err == nil {
+		finalClient.HWIDs = hwids
+	}
+	// Also load HWIDs for old client if available
+	if existing.Id > 0 {
+		oldHwids, err := hwidService.GetHWIDsForClient(existing.Id)
+		if err == nil {
+			existing.HWIDs = oldHwids
+		}
+	}
+	
 	// Send notification about client update
 	tgbotService := Tgbot{}
 	if tgbotService.IsRunning() {
@@ -2022,6 +2036,8 @@ func (s *ClientService) BulkEnable(userId int, clientIds []int, enable bool) (bo
 
 	// Update Settings for affected inbounds (needed to keep DB in sync)
 	// But if API operations were successful, we don't need to send full config to nodes
+	// Note: updateInboundWithRetry will not send notifications if only Settings changed
+	// (thanks to the real changes check in UpdateInbound)
 	for inboundId := range affectedInboundIds {
 		inbound, err := inboundService.GetInbound(inboundId)
 		if err != nil {
@@ -2039,6 +2055,7 @@ func (s *ClientService) BulkEnable(userId int, clientIds []int, enable bool) (bo
 		}
 
 		// Update inbound Settings in DB (to keep database in sync)
+		// This will not trigger notification because only Settings changed
 		inbound.Settings = newSettings
 		_, inboundNeedRestart, err := inboundService.updateInboundWithRetry(inbound)
 		if err != nil {
@@ -2060,32 +2077,14 @@ func (s *ClientService) BulkEnable(userId int, clientIds []int, enable bool) (bo
 			}
 		}()
 		
-		// Send notifications about disabled clients
-		if !enable {
-			tgbotService := Tgbot{}
-			if tgbotService.IsRunning() {
-				for _, client := range clientsToUpdate {
-					if !client.Enable {
-						tgbotService.NotifyClientDisabled(&client)
-					}
-				}
-			}
-		}
+		// Note: Notifications are now handled by the caller (e.g., bulkEnable controller)
+		// to allow sending group-level notifications instead of per-client notifications
 		
 		return false, nil // No need for synchronous restart
 	}
 
-	// Send notifications about disabled clients
-	if !enable {
-		tgbotService := Tgbot{}
-		if tgbotService.IsRunning() {
-			for _, client := range clientsToUpdate {
-				if !client.Enable {
-					tgbotService.NotifyClientDisabled(&client)
-				}
-			}
-		}
-	}
+	// Note: Notifications are now handled by the caller (e.g., bulkEnable controller)
+	// to allow sending group-level notifications instead of per-client notifications
 
 	return needRestart, nil
 }

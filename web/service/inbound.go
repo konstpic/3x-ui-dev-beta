@@ -824,6 +824,8 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 		return inbound, false, err
 	}
 
+	// Save original values for change detection (before modifying oldInbound)
+	originalOldInbound := *oldInbound
 	tag := oldInbound.Tag
 
 	db := database.GetDB()
@@ -1033,11 +1035,26 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 		// #endregion
 	}
 
-	// Send notification about inbound update (only if update was successful)
+	// Send notification about inbound update (only if update was successful and something actually changed)
 	if err == nil {
-		tgbotService := Tgbot{}
-		if tgbotService.IsRunning() {
-			tgbotService.NotifyInboundUpdated(inbound, oldInbound)
+		// Check if anything actually changed (not just Settings which can change due to client updates)
+		// Use originalOldInbound for comparison (before oldInbound was modified)
+		hasRealChanges := originalOldInbound.Remark != inbound.Remark ||
+			originalOldInbound.Port != inbound.Port ||
+			originalOldInbound.Protocol != inbound.Protocol ||
+			originalOldInbound.Enable != inbound.Enable ||
+			originalOldInbound.Listen != inbound.Listen ||
+			originalOldInbound.StreamSettings != inbound.StreamSettings ||
+			originalOldInbound.Sniffing != inbound.Sniffing ||
+			originalOldInbound.ExpiryTime != inbound.ExpiryTime ||
+			originalOldInbound.TrafficReset != inbound.TrafficReset
+		
+		if hasRealChanges {
+			tgbotService := Tgbot{}
+			if tgbotService.IsRunning() {
+				// Pass originalOldInbound to notification for accurate change tracking
+				tgbotService.NotifyInboundUpdated(inbound, &originalOldInbound)
+			}
 		}
 	}
 

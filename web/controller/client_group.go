@@ -85,6 +85,10 @@ func (a *ClientGroupController) addGroup(c *gin.Context) {
 		jsonMsg(c, "Invalid group data", err)
 		return
 	}
+	// Limit group name to 30 characters
+	if len(group.Name) > 30 {
+		group.Name = group.Name[:30]
+	}
 	err = a.groupService.AddGroup(user.Id, group)
 	if err != nil {
 		logger.Errorf("Failed to add group: %v", err)
@@ -107,6 +111,10 @@ func (a *ClientGroupController) updateGroup(c *gin.Context) {
 	if err != nil {
 		jsonMsg(c, "Invalid group data", err)
 		return
+	}
+	// Limit group name to 30 characters
+	if len(group.Name) > 30 {
+		group.Name = group.Name[:30]
 	}
 	err = a.groupService.UpdateGroup(user.Id, id, group)
 	if err != nil {
@@ -317,6 +325,13 @@ func (a *ClientGroupController) bulkEnable(c *gin.Context) {
 		jsonMsg(c, "Invalid request data", err)
 		return
 	}
+	// Get group info first
+	group, err := a.groupService.GetGroup(id, user.Id)
+	if err != nil {
+		jsonMsg(c, "Failed to get group", err)
+		return
+	}
+	
 	// Get all clients in group
 	clients, err := a.groupService.GetClientsInGroup(id, user.Id)
 	if err != nil {
@@ -337,6 +352,15 @@ func (a *ClientGroupController) bulkEnable(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
 	}
+	
+	// Send group-level notification instead of per-client notifications
+	tgbotService := service.Tgbot{}
+	if tgbotService.IsRunning() {
+		// Reload clients to get updated enable status
+		updatedClients, _ := a.groupService.GetClientsInGroup(id, user.Id)
+		tgbotService.NotifyGroupChanged(group.Name, req.Enable, updatedClients)
+	}
+	
 	jsonMsg(c, "Clients updated successfully", nil)
 	if needRestart {
 		// Restart asynchronously to avoid blocking the response

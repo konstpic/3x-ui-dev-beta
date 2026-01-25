@@ -232,7 +232,8 @@
               <template slot="group" slot-scope="text, client">
                 <a-tag v-if="client.groupId && getGroupById(client.groupId)" 
                   color="blue"
-                  :style="{ cursor: 'pointer' }"
+                  :style="{ cursor: 'pointer', maxWidth: '150px', display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }"
+                  :title="getGroupById(client.groupId).name"
                   @click="viewGroupClients(getGroupById(client.groupId))">
                   [[ getGroupById(client.groupId).name ]]
                 </a-tag>

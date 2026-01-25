@@ -256,37 +256,21 @@ func (s *NodeService) notifyNodeStatusChange(node *model.Node, oldStatus, newSta
 
 	// Build notification message
 	var msg string
-	var emoji string
 	if newStatus == "online" {
-		emoji = "✅"
-		msg = fmt.Sprintf("%s <b>Node Online</b>\n\n"+
-			"<b>Name:</b> %s\n"+
-			"<b>Address:</b> %s\n"+
-			"<b>Previous Status:</b> %s\n"+
-			"<b>Current Status:</b> %s\n"+
-			"<b>Response Time:</b> %d ms\n"+
-			"<b>Time:</b> %s",
-			emoji,
-			node.Name,
-			node.Address,
-			oldStatus,
-			newStatus,
-			node.ResponseTime,
-			time.Now().Format("2006-01-02 15:04:05"))
+		msg = tgbotService.I18nBot("tgbot.messages.nodeOnline")
+		msg += tgbotService.I18nBot("tgbot.messages.nodeName", "Name=="+node.Name)
+		msg += tgbotService.I18nBot("tgbot.messages.nodeAddress", "Address=="+node.Address)
+		msg += tgbotService.I18nBot("tgbot.messages.previousStatus", "Status=="+oldStatus)
+		msg += tgbotService.I18nBot("tgbot.messages.currentStatus", "Status=="+newStatus)
+		msg += tgbotService.I18nBot("tgbot.messages.responseTime", "Time=="+fmt.Sprintf("%d", node.ResponseTime))
+		msg += tgbotService.I18nBot("tgbot.messages.time", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
 	} else if newStatus == "offline" || newStatus == "error" {
-		emoji = "❌"
-		msg = fmt.Sprintf("%s <b>Node Offline/Error</b>\n\n"+
-			"<b>Name:</b> %s\n"+
-			"<b>Address:</b> %s\n"+
-			"<b>Previous Status:</b> %s\n"+
-			"<b>Current Status:</b> %s\n"+
-			"<b>Time:</b> %s",
-			emoji,
-			node.Name,
-			node.Address,
-			oldStatus,
-			newStatus,
-			time.Now().Format("2006-01-02 15:04:05"))
+		msg = tgbotService.I18nBot("tgbot.messages.nodeOffline")
+		msg += tgbotService.I18nBot("tgbot.messages.nodeName", "Name=="+node.Name)
+		msg += tgbotService.I18nBot("tgbot.messages.nodeAddress", "Address=="+node.Address)
+		msg += tgbotService.I18nBot("tgbot.messages.previousStatus", "Status=="+oldStatus)
+		msg += tgbotService.I18nBot("tgbot.messages.currentStatus", "Status=="+newStatus)
+		msg += tgbotService.I18nBot("tgbot.messages.time", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
 	} else {
 		return // Don't notify for other status changes
 	}
