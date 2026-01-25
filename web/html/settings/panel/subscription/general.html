@@ -106,13 +106,14 @@
                 <a-switch v-model="allSetting.subShowOnlyHappV2RayTun"></a-switch>
             </template>
         </a-setting-list-item>
-        <a-setting-list-item paddings="small">
+        <!-- TODO: Переосмыслить механизм автоповорота ключей -->
+        <!-- <a-setting-list-item paddings="small">
             <template #title>Auto Rotate Keys</template>
             <template #description>Automatically rotate client keys (UUID/password) for all inbounds before subscription update interval. If subscription update is 1 hour, keys will be rotated at 59 minutes to allow propagation.</template>
             <template #control>
                 <a-switch v-model="allSetting.subAutoRotateKeys"></a-switch>
             </template>
-        </a-setting-list-item>
+        </a-setting-list-item> -->
         <a-setting-list-item paddings="small">
             <template #title>{{ i18n "pages.settings.subProviderID"}}</template>
             <template #description>{{ i18n "pages.settings.subProviderIDDesc"}}</template>
