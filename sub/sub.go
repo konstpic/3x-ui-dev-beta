@@ -148,10 +148,9 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 		SubJsonRules = ""
 	}
 
-	SubTitle, err := s.settingService.GetSubTitle()
-	if err != nil {
-		SubTitle = ""
-	}
+	// Profile title is now only available in subscription headers (profileTitle)
+	// No longer using subTitle from base settings
+	SubTitle := ""
 
 	// set per-request localizer from headers/cookies
 	engine.Use(locale.LocalizerMiddleware())

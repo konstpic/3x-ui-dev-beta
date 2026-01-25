@@ -284,7 +284,10 @@ func (a *SUBController) ApplyCommonHeaders(c *gin.Context, header, updateInterva
 	// Apply standard headers (can be overridden by custom headers)
 	c.Writer.Header().Set("Subscription-Userinfo", header)
 	c.Writer.Header().Set("Profile-Update-Interval", updateInterval)
-	c.Writer.Header().Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(profileTitle)))
+	// Only set Profile-Title if profileTitle is not empty (now only from custom headers)
+	if profileTitle != "" {
+		c.Writer.Header().Set("Profile-Title", "base64:"+base64.StdEncoding.EncodeToString([]byte(profileTitle)))
+	}
 	// Add subscription ID header so clients can use it as HWID identifier
 	c.Writer.Header().Set("X-Subscription-ID", subId)
 	
