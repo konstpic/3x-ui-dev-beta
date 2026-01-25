@@ -2376,14 +2376,17 @@ func (s *SubService) joinPathWithID(basePath, subId string) string {
 		subURL = basePath + "/" + subId
 	}
 	
-	// Add Provider ID to URL if configured (for Happ extended headers)
+	// Add Provider ID to URL if configured and method is "url" (for Happ extended headers)
 	providerID, err := s.settingService.GetSubProviderID()
 	if err == nil && providerID != "" {
-		// Add Provider ID as query parameter
-		if strings.Contains(subURL, "?") {
-			subURL += "&provider=" + url.QueryEscape(providerID)
-		} else {
-			subURL += "?provider=" + url.QueryEscape(providerID)
+		providerMethod, err := s.settingService.GetSubProviderIDMethod()
+		if err == nil && providerMethod == "url" {
+			// Add Provider ID as query parameter
+			if strings.Contains(subURL, "?") {
+				subURL += "&provider=" + url.QueryEscape(providerID)
+			} else {
+				subURL += "?provider=" + url.QueryEscape(providerID)
+			}
 		}
 	}
 	

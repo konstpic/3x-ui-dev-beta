@@ -312,8 +312,17 @@ func (a *SUBController) ApplyCommonHeaders(c *gin.Context, header, updateInterva
 	// Add subscription ID header so clients can use it as HWID identifier
 	c.Writer.Header().Set("X-Subscription-ID", subId)
 	
-	// Apply custom headers from settings
+	// Add Provider ID to HTTP header if method is "header"
 	settingService := service.SettingService{}
+	providerID, err := settingService.GetSubProviderID()
+	if err == nil && providerID != "" {
+		providerMethod, err := settingService.GetSubProviderIDMethod()
+		if err == nil && providerMethod == "header" {
+			c.Writer.Header().Set("Provider-ID", providerID)
+		}
+	}
+	
+	// Apply custom headers from settings
 	customHeaders, err := settingService.GetSubHeadersParsed()
 	if err == nil && customHeaders != nil {
 		a.applyCustomHeaders(c, customHeaders, header, updateInterval, profileTitle, clientAnnounce)

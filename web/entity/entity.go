@@ -82,6 +82,7 @@ type AllSetting struct {
 	SubAutoRotateKeys           bool   `json:"subAutoRotateKeys" form:"subAutoRotateKeys"`                     // Automatically rotate client keys before subscription update interval
 	SubHeaders                  string `json:"subHeaders" form:"subHeaders"`                                    // JSON string containing subscription headers configuration
 	SubProviderID               string `json:"subProviderID" form:"subProviderID"`                             // Provider ID for Happ extended headers (required for new-url, new-domain, etc.)
+	SubProviderIDMethod         string `json:"subProviderIDMethod" form:"subProviderIDMethod"`                 // Method to send Provider ID: "url" (query parameter), "header" (HTTP header), "none" (disabled)
 	SubPageTheme                string `json:"subPageTheme" form:"subPageTheme"`                                 // Subscription page theme: "rainbow", "coffee", "banana", "sunset"
 	SubPageLogoUrl              string `json:"subPageLogoUrl" form:"subPageLogoUrl"`                           // Logo URL for subscription page (32x32 or 64x64)
 	SubPageBrandText            string `json:"subPageBrandText" form:"subPageBrandText"`                         // Brand text for subscription page

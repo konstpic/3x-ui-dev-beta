@@ -80,9 +80,10 @@ var defaultValueMap = map[string]string{
 	"subShowOnlyHappV2RayTun":      "false",
 	"subHideConfigLinks":           "false",
 	"subAutoRotateKeys":            "false", // Automatically rotate client keys before subscription update interval
-	"subHeaders":                   "{}", // JSON string for subscription headers
-	"subProviderID":                "",   // Provider ID for Happ extended headers
-	"subPageTheme":                 "",   // Subscription page theme: "rainbow", "coffee", "banana", "sunset"
+	"subHeaders":                   "{}",   // JSON string for subscription headers
+	"subProviderID":                "",     // Provider ID for Happ extended headers
+	"subProviderIDMethod":          "url",  // Method to send Provider ID: "url" (query parameter), "header" (HTTP header), "none" (disabled)
+	"subPageTheme":                 "",     // Subscription page theme: "rainbow", "coffee", "banana", "sunset"
 	"subPageLogoUrl":               "",   // Logo URL for subscription page
 	"subPageBrandText":             "",   // Brand text for subscription page
 	"subPageBackgroundUrl":         "",   // Background image URL for subscription card
@@ -696,6 +697,29 @@ func (s *SettingService) SetSubAutoRotateKeys(value bool) error {
 
 func (s *SettingService) GetSubProviderID() (string, error) {
 	return s.getString("subProviderID")
+}
+
+func (s *SettingService) GetSubProviderIDMethod() (string, error) {
+	method, err := s.getString("subProviderIDMethod")
+	if err != nil {
+		return "url", nil // Default to "url" for backward compatibility
+	}
+	if method == "" {
+		return "url", nil // Default to "url" if empty
+	}
+	return method, nil
+}
+
+func (s *SettingService) SetSubProviderIDMethod(value string) error {
+	validMethods := map[string]bool{
+		"url":    true,
+		"header": true,
+		"none":   true,
+	}
+	if !validMethods[value] {
+		return common.NewErrorf("invalid subProviderIDMethod: %s (must be one of: url, header, none)", value)
+	}
+	return s.setString("subProviderIDMethod", value)
 }
 
 func (s *SettingService) GetSubPageTheme() (string, error) {

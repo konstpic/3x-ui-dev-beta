@@ -54,6 +54,7 @@ class AllSetting {
         this.subAutoRotateKeys = false; // Automatically rotate client keys before subscription update interval
         this.subHeaders = "{}"; // JSON string for subscription headers
         this.subProviderID = ""; // Provider ID for Happ extended headers
+        this.subProviderIDMethod = "url"; // Method to send Provider ID: "url", "header", "none"
         this.subPageTheme = ""; // Subscription page theme: "rainbow", "coffee", "banana", "sunset"
         this.subPageLogoUrl = ""; // Logo URL for subscription page
         this.subPageBrandText = ""; // Brand text for subscription page
@@ -107,6 +108,10 @@ class AllSetting {
         }
         if (this.subPageBrandText === undefined || this.subPageBrandText === null) {
             this.subPageBrandText = "";
+        }
+        // Ensure subProviderIDMethod is set (default to "url" for backward compatibility)
+        if (this.subProviderIDMethod === undefined || this.subProviderIDMethod === null || this.subProviderIDMethod === "") {
+            this.subProviderIDMethod = "url";
         }
         if (this.subPageBackgroundUrl === undefined || this.subPageBackgroundUrl === null) {
             this.subPageBackgroundUrl = "";
