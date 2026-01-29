@@ -23,34 +23,6 @@
             </template>
         </a-setting-list-item>
         <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.panelListeningIP"}}</template>
-            <template #description>{{ i18n "pages.settings.panelListeningIPDesc"}}</template>
-            <template #control>
-                <a-input type="text" v-model="allSetting.webListen"></a-input>
-            </template>
-        </a-setting-list-item>
-        <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.panelListeningDomain"}}</template>
-            <template #description>{{ i18n "pages.settings.panelListeningDomainDesc"}}</template>
-            <template #control>
-                <a-input type="text" v-model="allSetting.webDomain"></a-input>
-            </template>
-        </a-setting-list-item>
-        <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.panelPort"}}</template>
-            <template #description>{{ i18n "pages.settings.panelPortDesc"}}</template>
-            <template #control>
-                <a-input-number :min="1" :min="65535" v-model="allSetting.webPort" :style="{ width: '100%' }"></a-input>
-            </template>
-        </a-setting-list-item>
-        <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.panelUrlPath"}}</template>
-            <template #description>{{ i18n "pages.settings.panelUrlPathDesc"}}</template>
-            <template #control>
-                <a-input type="text" v-model="allSetting.webBasePath"></a-input>
-            </template>
-        </a-setting-list-item>
-        <a-setting-list-item paddings="small">
             <template #title>{{ i18n "pages.settings.sessionMaxAge" }}</template>
             <template #description>{{ i18n "pages.settings.sessionMaxAgeDesc" }}</template>
             <template #control>
@@ -90,22 +62,6 @@
             <template #description>{{ i18n "pages.settings.trafficDiffDesc" }}</template>
             <template #control>
                 <a-input-number :min="0" v-model="allSetting.trafficDiff" :style="{ width: '100%' }"></a-input>
-            </template>
-        </a-setting-list-item>
-    </a-collapse-panel>
-    <a-collapse-panel key="3" header='{{ i18n "pages.settings.certs" }}'>
-        <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.publicKeyPath"}}</template>
-            <template #description>{{ i18n "pages.settings.publicKeyPathDesc"}}</template>
-            <template #control>
-                <a-input type="text" v-model="allSetting.webCertFile"></a-input>
-            </template>
-        </a-setting-list-item>
-        <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.privateKeyPath"}}</template>
-            <template #description>{{ i18n "pages.settings.privateKeyPathDesc"}}</template>
-            <template #control>
-                <a-input type="text" v-model="allSetting.webKeyFile"></a-input>
             </template>
         </a-setting-list-item>
     </a-collapse-panel>

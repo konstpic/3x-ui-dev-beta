@@ -385,6 +385,10 @@ func (s *SettingService) GetXrayConfigTemplate() (string, error) {
 }
 
 func (s *SettingService) GetListen() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_WEB_LISTEN"); envValue != "" {
+		return envValue, nil
+	}
 	return s.getString("webListen")
 }
 
@@ -558,6 +562,17 @@ func (s *SettingService) SetBasePath(basePath string) error {
 }
 
 func (s *SettingService) GetBasePath() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_WEB_BASE_PATH"); envValue != "" {
+		basePath := envValue
+		if !strings.HasPrefix(basePath, "/") {
+			basePath = "/" + basePath
+		}
+		if !strings.HasSuffix(basePath, "/") {
+			basePath += "/"
+		}
+		return basePath, nil
+	}
 	basePath, err := s.getString("webBasePath")
 	if err != nil {
 		return "", err
@@ -602,10 +617,22 @@ func (s *SettingService) GetSubListen() (string, error) {
 }
 
 func (s *SettingService) GetSubPort() (int, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_SUB_PORT"); envValue != "" {
+		port, err := strconv.Atoi(envValue)
+		if err != nil {
+			return 0, common.NewErrorf("invalid XUI_SUB_PORT value: %v", envValue)
+		}
+		return port, nil
+	}
 	return s.getInt("subPort")
 }
 
 func (s *SettingService) GetSubPath() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_SUB_PATH"); envValue != "" {
+		return envValue, nil
+	}
 	return s.getString("subPath")
 }
 
@@ -614,6 +641,10 @@ func (s *SettingService) GetSubJsonPath() (string, error) {
 }
 
 func (s *SettingService) GetSubDomain() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_SUB_DOMAIN"); envValue != "" {
+		return envValue, nil
+	}
 	return s.getString("subDomain")
 }
 
@@ -622,6 +653,10 @@ func (s *SettingService) SetSubCertFile(subCertFile string) error {
 }
 
 func (s *SettingService) GetSubCertFile() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_SUB_CERT_FILE"); envValue != "" {
+		return envValue, nil
+	}
 	return s.getString("subCertFile")
 }
 
@@ -630,6 +665,10 @@ func (s *SettingService) SetSubKeyFile(subKeyFile string) error {
 }
 
 func (s *SettingService) GetSubKeyFile() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_SUB_KEY_FILE"); envValue != "" {
+		return envValue, nil
+	}
 	return s.getString("subKeyFile")
 }
 
@@ -974,12 +1013,34 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 		return err
 	}
 
+	// Settings that should only be configured via environment variables
+	// These are ignored when saving from web UI
+	envOnlySettings := map[string]bool{
+		"webPort":     true,
+		"webListen":   true,
+		"webDomain":   true,
+		"webBasePath": true,
+		"webCertFile": true,
+		"webKeyFile":  true,
+		"subPort":     true,
+		"subPath":     true,
+		"subDomain":   true,
+		"subCertFile": true,
+		"subKeyFile":  true,
+	}
+
 	v := reflect.ValueOf(allSetting).Elem()
 	t := reflect.TypeOf(allSetting).Elem()
 	fields := reflect_util.GetFields(t)
 	errs := make([]error, 0)
 	for _, field := range fields {
 		key := field.Tag.Get("json")
+		
+		// Skip settings that should only be configured via environment variables
+		if envOnlySettings[key] {
+			continue
+		}
+		
 		fieldV := v.FieldByName(field.Name)
 		
 		// Handle boolean fields explicitly to ensure correct string representation

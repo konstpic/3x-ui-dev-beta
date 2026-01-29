@@ -129,6 +129,7 @@ type AllSetting struct {
 
 // CheckValid validates all settings in the AllSetting struct, checking IP addresses, ports, SSL certificates, and other configuration values.
 func (s *AllSetting) CheckValid() error {
+	// WebListen is now env-only setting, only validate if set
 	if s.WebListen != "" {
 		ip := net.ParseIP(s.WebListen)
 		if ip == nil {
@@ -143,37 +144,51 @@ func (s *AllSetting) CheckValid() error {
 		}
 	}
 
-	if s.WebPort <= 0 || s.WebPort > math.MaxUint16 {
-		return common.NewError("web port is not a valid port:", s.WebPort)
+	// WebPort, WebCertFile, WebKeyFile are now env-only settings, skip validation if not set
+	if s.WebPort > 0 {
+		if s.WebPort > math.MaxUint16 {
+			return common.NewError("web port is not a valid port:", s.WebPort)
+		}
 	}
 
-	if s.SubPort <= 0 || s.SubPort > math.MaxUint16 {
-		return common.NewError("Sub port is not a valid port:", s.SubPort)
+	// SubPort, SubCertFile, SubKeyFile are now env-only settings, skip validation if not set
+	if s.SubPort > 0 {
+		if s.SubPort > math.MaxUint16 {
+			return common.NewError("Sub port is not a valid port:", s.SubPort)
+		}
 	}
 
-	if (s.SubPort == s.WebPort) && (s.WebListen == s.SubListen) {
-		return common.NewError("Sub and Web could not use same ip:port, ", s.SubListen, ":", s.SubPort, " & ", s.WebListen, ":", s.WebPort)
+	// Only validate port conflict if both ports are set
+	if s.SubPort > 0 && s.WebPort > 0 {
+		if (s.SubPort == s.WebPort) && (s.WebListen == s.SubListen) {
+			return common.NewError("Sub and Web could not use same ip:port, ", s.SubListen, ":", s.SubPort, " & ", s.WebListen, ":", s.WebPort)
+		}
 	}
 
-	if s.WebCertFile != "" || s.WebKeyFile != "" {
+	// WebCertFile and WebKeyFile are now env-only settings, only validate if both are set
+	if s.WebCertFile != "" && s.WebKeyFile != "" {
 		_, err := tls.LoadX509KeyPair(s.WebCertFile, s.WebKeyFile)
 		if err != nil {
 			return common.NewErrorf("cert file <%v> or key file <%v> invalid: %v", s.WebCertFile, s.WebKeyFile, err)
 		}
 	}
 
-	if s.SubCertFile != "" || s.SubKeyFile != "" {
+	// SubCertFile and SubKeyFile are now env-only settings, only validate if both are set
+	if s.SubCertFile != "" && s.SubKeyFile != "" {
 		_, err := tls.LoadX509KeyPair(s.SubCertFile, s.SubKeyFile)
 		if err != nil {
 			return common.NewErrorf("cert file <%v> or key file <%v> invalid: %v", s.SubCertFile, s.SubKeyFile, err)
 		}
 	}
 
-	if !strings.HasPrefix(s.WebBasePath, "/") {
-		s.WebBasePath = "/" + s.WebBasePath
-	}
-	if !strings.HasSuffix(s.WebBasePath, "/") {
-		s.WebBasePath += "/"
+	// WebBasePath is now env-only setting, only validate if set
+	if s.WebBasePath != "" {
+		if !strings.HasPrefix(s.WebBasePath, "/") {
+			s.WebBasePath = "/" + s.WebBasePath
+		}
+		if !strings.HasSuffix(s.WebBasePath, "/") {
+			s.WebBasePath += "/"
+		}
 	}
 	if !strings.HasPrefix(s.SubPath, "/") {
 		s.SubPath = "/" + s.SubPath

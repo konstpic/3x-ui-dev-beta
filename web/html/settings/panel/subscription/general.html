@@ -23,31 +23,6 @@
             </template>
         </a-setting-list-item>
         <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.subDomain"}}</template>
-            <template #description>{{ i18n "pages.settings.subDomainDesc"}}</template>
-            <template #control>
-                <a-input type="text" v-model="allSetting.subDomain"></a-input>
-            </template>
-        </a-setting-list-item>
-        <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.subPort"}}</template>
-            <template #description>{{ i18n "pages.settings.subPortDesc"}}</template>
-            <template #control>
-                <a-input-number v-model="allSetting.subPort" :min="1" :min="65535"
-                    :style="{ width: '100%' }"></a-input-number>
-            </template>
-        </a-setting-list-item>
-        <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.subPath"}}</template>
-            <template #description>{{ i18n "pages.settings.subPathDesc"}}</template>
-            <template #control>
-                <a-input type="text" v-model="allSetting.subPath"
-                    @input="allSetting.subPath = ((typeof $event === 'string' ? $event : ($event && $event.target ? $event.target.value : '')) || '').replace(/[:*]/g, '')"
-                    @blur="allSetting.subPath = (p => { p = p || '/'; if (!p.startsWith('/')) p='/' + p; if (!p.endsWith('/')) p += '/'; return p.replace(/\/+/g,'/'); })(allSetting.subPath)"
-                    placeholder="/sub/"></a-input>
-            </template>
-        </a-setting-list-item>
-        <a-setting-list-item paddings="small">
             <template #title>{{ i18n "pages.settings.subURI"}}</template>
             <template #description>{{ i18n "pages.settings.subURIDesc"}}</template>
             <template #control>
@@ -124,22 +99,6 @@
                     <a-select-option value="body">{{ i18n "pages.settings.subProviderIDMethodBody" }}</a-select-option>
                     <a-select-option value="none">{{ i18n "pages.settings.subProviderIDMethodNone" }}</a-select-option>
                 </a-select>
-            </template>
-        </a-setting-list-item>
-    </a-collapse-panel>
-    <a-collapse-panel key="3" header='{{ i18n "pages.settings.certs" }}'>
-        <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.subCertPath"}}</template>
-            <template #description>{{ i18n "pages.settings.subCertPathDesc"}}</template>
-            <template #control>
-                <a-input type="text" v-model="allSetting.subCertFile"></a-input>
-            </template>
-        </a-setting-list-item>
-        <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.subKeyPath"}}</template>
-            <template #description>{{ i18n "pages.settings.subKeyPathDesc"}}</template>
-            <template #control>
-                <a-input type="text" v-model="allSetting.subKeyFile"></a-input>
             </template>
         </a-setting-list-item>
     </a-collapse-panel>
