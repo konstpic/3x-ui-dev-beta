@@ -16,6 +16,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v2/database"
 	"github.com/mhsanaei/3x-ui/v2/database/model"
 	"github.com/mhsanaei/3x-ui/v2/logger"
+	"github.com/mhsanaei/3x-ui/v2/util/common"
 	"github.com/mhsanaei/3x-ui/v2/util/random"
 	"github.com/mhsanaei/3x-ui/v2/xray"
 
@@ -56,6 +57,14 @@ func (s *NodeService) GetNode(id int) (*model.Node, error) {
 
 // AddNode creates a new node.
 func (s *NodeService) AddNode(node *model.Node) error {
+	// Validate node name length (spaces count as characters)
+	if len(node.Name) > 50 {
+		return common.NewError("Node name exceeds maximum length of 50 characters (spaces count as characters)")
+	}
+	
+	// Trim whitespace from name
+	node.Name = strings.TrimSpace(node.Name)
+	
 	db := database.GetDB()
 	return db.Create(node).Error
 }
@@ -134,7 +143,12 @@ func (s *NodeService) UpdateNode(node *model.Node) error {
 	updates := make(map[string]interface{})
 	
 	if node.Name != "" {
-		updates["name"] = node.Name
+		// Validate node name length (spaces count as characters)
+		if len(node.Name) > 50 {
+			return common.NewError("Node name exceeds maximum length of 50 characters (spaces count as characters)")
+		}
+		// Trim whitespace from name
+		updates["name"] = strings.TrimSpace(node.Name)
 	}
 	
 	if node.Address != "" {

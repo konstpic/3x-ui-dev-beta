@@ -35,7 +35,10 @@
             </a-input>
         </a-form-item>
         <a-form-item label='{{ i18n "comment" }}'>
-            <a-input v-model.trim="client.comment"></a-input>
+            <a-input v-model="client.comment" :max-length="100"></a-input>
+            <div :style="{ textAlign: 'right', fontSize: '12px', color: (client.comment || '').length > 90 ? '#ff4d4f' : '#999' }">
+              [[ (client.comment || '').length ]]/100
+            </div>
         </a-form-item>
         <a-form-item label='{{ i18n "pages.inbounds.totalFlow" }} (GB)'>
             <a-input-number v-model.number="client.totalGB" :min="0" :step="0.01" :precision="2" :style="{ width: '100%' }"></a-input-number>

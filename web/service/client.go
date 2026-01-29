@@ -222,6 +222,14 @@ func (s *ClientService) AddClient(userId int, client *model.ClientEntity) (bool,
 		client.SubID = random.Seq(16)
 	}
 
+	// Validate comment length (spaces count as characters)
+	if len(client.Comment) > 100 {
+		return false, common.NewError("Client comment exceeds maximum length of 100 characters (spaces count as characters)")
+	}
+	
+	// Trim whitespace from comment
+	client.Comment = strings.TrimSpace(client.Comment)
+	
 	// Normalize email to lowercase
 	client.Email = strings.ToLower(client.Email)
 	client.UserId = userId
@@ -366,6 +374,16 @@ func (s *ClientService) UpdateClient(userId int, client *model.ClientEntity) (bo
 		}
 	}
 
+	// Validate comment length if provided (spaces count as characters)
+	if client.Comment != "" && len(client.Comment) > 100 {
+		return false, common.NewError("Client comment exceeds maximum length of 100 characters (spaces count as characters)")
+	}
+	
+	// Trim whitespace from comment if provided
+	if client.Comment != "" {
+		client.Comment = strings.TrimSpace(client.Comment)
+	}
+	
 	// Normalize email to lowercase if provided
 	if client.Email != "" {
 		client.Email = strings.ToLower(client.Email)
@@ -435,10 +453,14 @@ func (s *ClientService) UpdateClient(userId int, client *model.ClientEntity) (bo
 	}
 	// Update HWID settings - GORM converts field names to snake_case automatically
 	// HWIDEnabled -> hwid_enabled, MaxHWID -> max_hwid
-	// Always update HWID settings (they should always be present when updating from the UI)
-	updates["hwid_enabled"] = client.HWIDEnabled
-	// Always update max_hwid, including 0 (which means unlimited)
-	updates["max_hwid"] = client.MaxHWID
+	// Only update HWID settings if they differ from existing values to preserve them when not explicitly changed
+	if client.HWIDEnabled != existing.HWIDEnabled {
+		updates["hwid_enabled"] = client.HWIDEnabled
+	}
+	// Only update max_hwid if it differs from existing value to preserve it when not explicitly changed
+	if client.MaxHWID != existing.MaxHWID {
+		updates["max_hwid"] = client.MaxHWID
+	}
 	updates["updated_at"] = client.UpdatedAt
 
 	// First try to update with all fields including HWID

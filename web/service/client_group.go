@@ -2,6 +2,7 @@
 package service
 
 import (
+	"strings"
 	"time"
 
 	"github.com/mhsanaei/3x-ui/v2/database"
@@ -51,6 +52,20 @@ func (s *ClientGroupService) GetGroup(id int, userId int) (*model.ClientGroup, e
 
 // AddGroup creates a new group.
 func (s *ClientGroupService) AddGroup(userId int, group *model.ClientGroup) error {
+	// Validate group name length (spaces count as characters)
+	if len(group.Name) > 30 {
+		return common.NewError("Group name exceeds maximum length of 30 characters (spaces count as characters)")
+	}
+	
+	// Validate description length (spaces count as characters)
+	if len(group.Description) > 100 {
+		return common.NewError("Group description exceeds maximum length of 100 characters (spaces count as characters)")
+	}
+	
+	// Trim whitespace from name and description
+	group.Name = strings.TrimSpace(group.Name)
+	group.Description = strings.TrimSpace(group.Description)
+	
 	group.UserId = userId
 
 	// Set timestamps
@@ -79,6 +94,20 @@ func (s *ClientGroupService) UpdateGroup(userId int, id int, group *model.Client
 	if err != nil {
 		return err
 	}
+
+	// Validate group name length (spaces count as characters)
+	if len(group.Name) > 30 {
+		return common.NewError("Group name exceeds maximum length of 30 characters (spaces count as characters)")
+	}
+	
+	// Validate description length (spaces count as characters)
+	if len(group.Description) > 100 {
+		return common.NewError("Group description exceeds maximum length of 100 characters (spaces count as characters)")
+	}
+	
+	// Trim whitespace from name and description
+	group.Name = strings.TrimSpace(group.Name)
+	group.Description = strings.TrimSpace(group.Description)
 
 	// Update timestamp
 	group.UpdatedAt = time.Now().Unix()

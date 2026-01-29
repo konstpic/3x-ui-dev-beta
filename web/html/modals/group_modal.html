@@ -5,14 +5,14 @@
   :ok-text="groupModal.okText" cancel-text='{{ i18n "close" }}' :width="600">
   <a-form layout="vertical" v-if="groupModal.formData">
     <a-form-item label='{{ i18n "pages.groups.name" }}' :required="true">
-      <a-input v-model.trim="groupModal.formData.name" :max-length="30"
+      <a-input v-model="groupModal.formData.name" :max-length="30"
         placeholder='{{ i18n "pages.groups.enterGroupName" }}'></a-input>
       <div :style="{ textAlign: 'right', fontSize: '12px', color: (groupModal.formData.name || '').length > 25 ? '#ff4d4f' : '#999' }">
         [[ (groupModal.formData.name || '').length ]]/30
       </div>
     </a-form-item>
     <a-form-item label='{{ i18n "pages.groups.groupDescription" }}'>
-      <a-textarea v-model.trim="groupModal.formData.description" :rows="3" 
+      <a-textarea v-model="groupModal.formData.description" :rows="3" 
         :max-length="100"
         placeholder='{{ i18n "pages.groups.enterGroupDescription" }}'></a-textarea>
       <div :style="{ textAlign: 'right', fontSize: '12px', color: (groupModal.formData.description || '').length > 80 ? '#ff4d4f' : '#999' }">
@@ -35,7 +35,9 @@
     },
     ok() {
       // Validate form data
-      if (!groupModal.formData.name || !groupModal.formData.name.trim()) {
+      // Trim only for validation, but preserve original for length counting
+      const trimmedName = (groupModal.formData.name || '').trim();
+      if (!trimmedName) {
         if (typeof app !== 'undefined' && app.$message) {
           app.$message.error('{{ i18n "pages.groups.enterGroupName" }}');
         } else if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
@@ -44,7 +46,12 @@
         return;
       }
       
-      const dataToSend = { ...groupModal.formData };
+      // Trim whitespace from name and description before sending
+      const dataToSend = { 
+        ...groupModal.formData,
+        name: trimmedName,
+        description: (groupModal.formData.description || '').trim()
+      };
       
       groupModal.confirmLoading = true;
       if (groupModal.confirm) {

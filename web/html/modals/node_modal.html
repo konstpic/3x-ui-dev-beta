@@ -11,7 +11,10 @@
   <div v-if="!nodeModal.registering && !nodeModal.showProgress">
     <a-form layout="vertical">
       <a-form-item label='{{ i18n "pages.nodes.nodeName" }}'>
-        <a-input v-model.trim="nodeModal.formData.name" placeholder="e.g., Node-1"></a-input>
+        <a-input v-model="nodeModal.formData.name" :max-length="50" placeholder="e.g., Node-1"></a-input>
+        <div :style="{ textAlign: 'right', fontSize: '12px', color: (nodeModal.formData.name || '').length > 45 ? '#ff4d4f' : '#999' }">
+          [[ (nodeModal.formData.name || '').length ]]/50
+        </div>
       </a-form-item>
       <a-form-item label='{{ i18n "pages.nodes.nodeAddress" }}'>
         <a-input v-model.trim="nodeModal.formData.address" placeholder='{{ i18n "pages.nodes.fullUrlHint" }}'></a-input>
@@ -90,7 +93,9 @@
     },
     ok() {
       // Валидация полей - используем nodeModal напрямую для правильного контекста
-      if (!nodeModal.formData.name || !nodeModal.formData.name.trim()) {
+      // Trim only for validation, but preserve original for length counting
+      const trimmedName = (nodeModal.formData.name || '').trim();
+      if (!trimmedName) {
         if (typeof app !== 'undefined' && app.$message) {
           app.$message.error('{{ i18n "pages.nodes.enterNodeName" }}');
         } else if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
@@ -111,7 +116,11 @@
       // API key is now auto-generated during registration, no validation needed
       
       // Если все поля заполнены, формируем полный адрес с портом
-      const dataToSend = { ...nodeModal.formData };
+      // Trim whitespace from name before sending
+      const dataToSend = { 
+        ...nodeModal.formData,
+        name: trimmedName
+      };
       
       // Всегда добавляем порт к адресу
       let fullAddress = dataToSend.address.trim();
@@ -197,7 +206,12 @@
       }
       
       // Формируем данные для отправки (как в ok(), но без валидации)
-      const dataToSend = { ...nodeModal.formData };
+      // Trim whitespace from name before sending
+      const trimmedNameForRetry = (nodeModal.formData.name || '').trim();
+      const dataToSend = { 
+        ...nodeModal.formData,
+        name: trimmedNameForRetry
+      };
       
       // Всегда добавляем порт к адресу
       let fullAddress = dataToSend.address.trim();

@@ -446,15 +446,14 @@ func (a *ClientController) updateClient(c *gin.Context) {
 				client.HWIDEnabled = hwidEnabledStr == "true" || hwidEnabledStr == "1"
 			}
 			// Always update maxHwid if it's in the request (including 0 for unlimited)
+			// If not provided, keep existing value to prevent reset
 			maxHwidStr := c.PostForm("maxHwid")
 			if maxHwidStr != "" {
 				if maxHwid, err := strconv.Atoi(maxHwidStr); err == nil {
 					client.MaxHWID = maxHwid
 				}
-			} else if updateClient.MaxHWID >= 0 {
-				// If maxHwid is explicitly set in the form (including 0), use it
-				client.MaxHWID = updateClient.MaxHWID
 			}
+			// If maxHwid was not provided in form, keep existing value (don't reset to 0)
 			// Handle groupId - can be empty (no group)
 			if groupIdStr := c.PostForm("groupId"); groupIdStr != "" {
 				if groupId, err := strconv.Atoi(groupIdStr); err == nil && groupId > 0 {
