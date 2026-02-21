@@ -127,6 +127,11 @@ jobs:
           VERSION="${{ needs.prepare.outputs.version }}"
           IS_BETA="${{ needs.prepare.outputs.is_beta }}"
           
+          echo "HARBOR_HOST: $HARBOR_HOST"
+          echo "HARBOR_PROJECT: $HARBOR_PROJECT"
+          echo "VERSION: $VERSION"
+          echo "IS_BETA: $IS_BETA"
+          
           if [ "$IS_BETA" = "true" ]; then
             SHARX_TAG_VERSION="$HARBOR_HOST/$HARBOR_PROJECT/sharx:$VERSION"
             SHARX_TAG_LATEST="$HARBOR_HOST/$HARBOR_PROJECT/sharx:latest-beta"
@@ -139,6 +144,11 @@ jobs:
           echo "sharx_tag_latest=$SHARX_TAG_LATEST" >> $GITHUB_OUTPUT
           
           echo "SharX tags: $SHARX_TAG_VERSION, $SHARX_TAG_LATEST"
+          
+          # Verify outputs
+          echo "Verifying outputs:"
+          echo "  sharx_tag_version: $SHARX_TAG_VERSION"
+          echo "  sharx_tag_latest: $SHARX_TAG_LATEST"
 
       - name: Build and push sharx image
         uses: docker/build-push-action@v6
