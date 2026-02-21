@@ -36,6 +36,7 @@ require (
 	google.golang.org/grpc v1.78.0
 	gorm.io/driver/postgres v1.5.9
 	gorm.io/gorm v1.31.1
+	modernc.org/sqlite v1.44.0
 )
 
 require (
@@ -119,7 +120,6 @@ require (
 	modernc.org/libc v1.67.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.44.0 // indirect
 )
 
 // Local development - use local files instead of GitHub
