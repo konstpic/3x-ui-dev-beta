@@ -7,6 +7,9 @@
 # Ignore log files
 *.log
 
+# Ignore local scripts (keep locally but don't commit)
+push-harbor.sh
+
 # Ignore temporary files
 tmp/
 *.tar.gz
