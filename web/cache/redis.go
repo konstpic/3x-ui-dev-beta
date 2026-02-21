@@ -1,4 +1,4 @@
-// Package cache provides Redis caching functionality for the 3x-ui web panel.
+// Package cache provides Redis caching functionality for the SharX web panel.
 // It supports both embedded Redis (miniredis) and external Redis server.
 package cache
 
@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/mhsanaei/3x-ui/v2/logger"
+	"github.com/konstpic/sharx/v2/logger"
 	"github.com/redis/go-redis/v9"
 )
 

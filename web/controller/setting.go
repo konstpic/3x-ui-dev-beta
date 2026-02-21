@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v2/util/crypto"
-	"github.com/mhsanaei/3x-ui/v2/web/entity"
-	"github.com/mhsanaei/3x-ui/v2/web/service"
-	"github.com/mhsanaei/3x-ui/v2/web/session"
+	"github.com/konstpic/sharx/v2/util/crypto"
+	"github.com/konstpic/sharx/v2/web/entity"
+	"github.com/konstpic/sharx/v2/web/service"
+	"github.com/konstpic/sharx/v2/web/session"
 
 	"github.com/gin-gonic/gin"
 )
@@ -133,6 +133,6 @@ func (a *SettingController) getGrafanaDashboard(c *gin.Context) {
 		return
 	}
 	c.Header("Content-Type", "application/json")
-	c.Header("Content-Disposition", "attachment; filename=3x-ui-grafana-dashboard.json")
+	c.Header("Content-Disposition", "attachment; filename=sharx-grafana-dashboard.json")
 	c.String(http.StatusOK, dashboardJSON)
 }

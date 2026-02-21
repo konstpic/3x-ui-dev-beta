@@ -14,12 +14,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v2/database"
-	"github.com/mhsanaei/3x-ui/v2/database/model"
-	"github.com/mhsanaei/3x-ui/v2/logger"
-	"github.com/mhsanaei/3x-ui/v2/util/common"
-	"github.com/mhsanaei/3x-ui/v2/util/random"
-	"github.com/mhsanaei/3x-ui/v2/xray"
+	"github.com/konstpic/sharx/v2/database"
+	"github.com/konstpic/sharx/v2/database/model"
+	"github.com/konstpic/sharx/v2/logger"
+	"github.com/konstpic/sharx/v2/util/common"
+	"github.com/konstpic/sharx/v2/util/random"
+	"github.com/konstpic/sharx/v2/xray"
 
 	"gorm.io/gorm"
 )

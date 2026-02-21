@@ -1,6 +1,6 @@
-# 3x-ui Panel API Documentation
+# SharX Panel API Documentation
 
-Complete API reference for the 3x-ui panel. This documentation covers all endpoints with descriptions, parameters, and example payloads.
+Complete API reference for the SharX panel. This documentation covers all endpoints with descriptions, parameters, and example payloads.
 
 ---
 
@@ -62,7 +62,7 @@ Example: `http://192.168.1.100:2053/`
 The API uses session-based authentication. After successful login, a session cookie is set that must be included in all subsequent requests.
 
 ### Session Cookie
-- Cookie name: `3x-ui` (or custom based on configuration)
+- Cookie name: `sharx` (or custom based on configuration)
 - Obtained via: `POST /login`
 - Expires: Based on `sessionMaxAge` setting (default: 60 minutes)
 
@@ -1438,7 +1438,7 @@ curl -X POST "http://localhost:2053/panel/setting/all" \
     "twoFactorEnable": false,
     "subEnable": true,
     "subJsonEnable": true,
-    "subTitle": "3x-ui",
+    "subTitle": "SharX",
     "subListen": "",
     "subPort": 2096,
     "subPath": "/sub/",
@@ -4385,4 +4385,4 @@ curl -X GET "http://localhost:2053/panel/api/api-docs/markdown" \
 
 ---
 
-*Documentation generated for 3x-ui panel. For more information, see the project repository.*
+*Documentation generated for SharX panel. For more information, see the project repository.*

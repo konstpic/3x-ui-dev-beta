@@ -1,4 +1,4 @@
-// Package service provides Prometheus metrics export functionality for 3x-ui panel.
+// Package service provides Prometheus metrics export functionality for SharX panel.
 package service
 
 import (
@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/mhsanaei/3x-ui/v2/database"
-	"github.com/mhsanaei/3x-ui/v2/database/model"
+	"github.com/konstpic/sharx/v2/database"
+	"github.com/konstpic/sharx/v2/database/model"
 )
 
 var (

@@ -3,8 +3,8 @@ package job
 import (
 	"strconv"
 
-	"github.com/mhsanaei/3x-ui/v2/logger"
-	"github.com/mhsanaei/3x-ui/v2/web/service"
+	"github.com/konstpic/sharx/v2/logger"
+	"github.com/konstpic/sharx/v2/web/service"
 )
 
 // RotateClientKeysJob rotates client keys (UUID/password) before subscription update interval.

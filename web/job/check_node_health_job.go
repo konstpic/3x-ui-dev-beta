@@ -1,13 +1,13 @@
-// Package job provides scheduled background jobs for the 3x-ui panel.
+// Package job provides scheduled background jobs for the SharX panel.
 package job
 
 import (
 	"sync"
 
-	"github.com/mhsanaei/3x-ui/v2/database/model"
-	"github.com/mhsanaei/3x-ui/v2/logger"
-	"github.com/mhsanaei/3x-ui/v2/web/service"
-	"github.com/mhsanaei/3x-ui/v2/web/websocket"
+	"github.com/konstpic/sharx/v2/database/model"
+	"github.com/konstpic/sharx/v2/logger"
+	"github.com/konstpic/sharx/v2/web/service"
+	"github.com/konstpic/sharx/v2/web/websocket"
 )
 
 // CheckNodeHealthJob periodically checks the health of all nodes in multi-node mode.

@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v2/database"
-	"github.com/mhsanaei/3x-ui/v2/database/model"
-	"github.com/mhsanaei/3x-ui/v2/util/common"
-	"github.com/mhsanaei/3x-ui/v2/web/cache"
+	"github.com/konstpic/sharx/v2/database"
+	"github.com/konstpic/sharx/v2/database/model"
+	"github.com/konstpic/sharx/v2/util/common"
+	"github.com/konstpic/sharx/v2/web/cache"
 )
 
 // ClientGroupService provides business logic for managing client groups.

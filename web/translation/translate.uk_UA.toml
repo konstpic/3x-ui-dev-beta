@@ -651,7 +651,7 @@
 "report" = "🕰 Заплановані звіти: {{ .RunTime }}\r\n"
 "datetime" = "⏰ Дата й час: {{ .DateTime }}\r\n"
 "hostname" = "💻 Хост: {{ .Hostname }}\r\n"
-"version" = "🚀 3X-UI Версія: {{ .Version }}\r\n"
+"version" = "🚀 SharX Версія: {{ .Version }}\r\n"
 "xrayVersion" = "📡 Xray Версія: {{ .XrayVersion }}\r\n"
 "ipv6" = "🌐 IPv6: {{ .IPv6 }}\r\n"
 "ipv4" = "🌐 IPv4: {{ .IPv4 }}\r\n"

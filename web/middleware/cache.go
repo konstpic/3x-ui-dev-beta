@@ -1,4 +1,4 @@
-// Package middleware provides HTTP response caching middleware for the 3x-ui web panel.
+// Package middleware provides HTTP response caching middleware for the SharX web panel.
 package middleware
 
 import (
@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/mhsanaei/3x-ui/v2/web/cache"
+	"github.com/konstpic/sharx/v2/web/cache"
 )
 
 // CacheMiddleware creates a middleware that caches HTTP responses.

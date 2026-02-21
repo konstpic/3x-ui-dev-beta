@@ -1,4 +1,4 @@
-// Package main is the entry point for the 3x-ui node service (worker).
+// Package main is the entry point for the SharX node service (worker).
 // This service runs XRAY Core and provides a REST API for the master panel to manage it.
 package main
 
@@ -10,11 +10,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/mhsanaei/3x-ui/v2/logger"
-	"github.com/mhsanaei/3x-ui/v2/node/api"
-	nodeConfig "github.com/mhsanaei/3x-ui/v2/node/config"
-	nodeLogs "github.com/mhsanaei/3x-ui/v2/node/logs"
-	"github.com/mhsanaei/3x-ui/v2/node/xray"
+	"github.com/konstpic/sharx/v2/logger"
+	"github.com/konstpic/sharx/v2/node/api"
+	nodeConfig "github.com/konstpic/sharx/v2/node/config"
+	nodeLogs "github.com/konstpic/sharx/v2/node/logs"
+	"github.com/konstpic/sharx/v2/node/xray"
 	"github.com/op/go-logging"
 )
 
@@ -106,7 +106,7 @@ func main() {
 		log.Printf("HTTPS enabled: cert=%s, key=%s", certFile, keyFile)
 	}
 
-	log.Printf("Starting 3x-ui Node Service on port %d", port)
+	log.Printf("Starting SharX Node Service on port %d", port)
 	if err := server.Start(); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
 	}

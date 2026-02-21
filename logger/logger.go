@@ -1,4 +1,4 @@
-// Package logger provides logging functionality for the 3x-ui panel with
+// Package logger provides logging functionality for the SharX panel with
 // dual-backend logging (console/syslog and file) and buffered log storage for web UI.
 package logger
 
@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v2/config"
+	"github.com/konstpic/sharx/v2/config"
 	"github.com/op/go-logging"
 )
 
 const (
 	maxLogBufferSize = 10240                 // Maximum log entries kept in memory
-	logFileName      = "3xui.log"            // Log file name
+	logFileName      = "sharx.log"            // Log file name
 	timeFormat       = "2006/01/02 15:04:05" // Log timestamp format
 )
 

@@ -1,10 +1,10 @@
-# 3x-ui Node Service
+# SharX Node Service
 
-Node service (worker) for 3x-ui multi-node architecture.
+Node service (worker) for SharX multi-node architecture.
 
 ## Description
 
-This service runs on separate servers and manages XRAY Core instances. The 3x-ui panel (master) sends configurations to nodes via REST API.
+This service runs on separate servers and manages XRAY Core instances. The SharX panel (master) sends configurations to nodes via REST API.
 
 ## Features
 
@@ -85,7 +85,7 @@ To enable HTTPS for the node API:
 **Note:** XRAY Core is automatically downloaded during Docker image build for your architecture. Docker BuildKit automatically detects the host architecture. To explicitly specify the architecture, use:
 
 ```bash
-DOCKER_BUILDKIT=1 docker build --build-arg TARGETARCH=arm64 -t 3x-ui-node -f node/Dockerfile ..
+DOCKER_BUILDKIT=1 docker build --build-arg TARGETARCH=arm64 -t sharx-node -f node/Dockerfile ..
 ```
 
 ### Manual

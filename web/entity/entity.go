@@ -1,4 +1,4 @@
-// Package entity defines data structures and entities used by the web layer of the 3x-ui panel.
+// Package entity defines data structures and entities used by the web layer of the SharX panel.
 package entity
 
 import (
@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v2/util/common"
+	"github.com/konstpic/sharx/v2/util/common"
 )
 
 // Msg represents a standard API response message with success status, message text, and optional data object.
@@ -18,7 +18,7 @@ type Msg struct {
 	Obj     any    `json:"obj"`     // Optional data object
 }
 
-// AllSetting contains all configuration settings for the 3x-ui panel including web server, Telegram bot, and subscription settings.
+// AllSetting contains all configuration settings for the SharX panel including web server, Telegram bot, and subscription settings.
 type AllSetting struct {
 	// Web server settings
 	WebListen     string `json:"webListen" form:"webListen"`         // Web server listen IP address

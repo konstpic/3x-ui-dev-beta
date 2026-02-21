@@ -6,11 +6,11 @@ package job
 import (
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v2/database"
-	"github.com/mhsanaei/3x-ui/v2/database/model"
-	"github.com/mhsanaei/3x-ui/v2/logger"
-	"github.com/mhsanaei/3x-ui/v2/web/service"
-	"github.com/mhsanaei/3x-ui/v2/xray"
+	"github.com/konstpic/sharx/v2/database"
+	"github.com/konstpic/sharx/v2/database/model"
+	"github.com/konstpic/sharx/v2/logger"
+	"github.com/konstpic/sharx/v2/web/service"
+	"github.com/konstpic/sharx/v2/xray"
 )
 
 // CheckClientHWIDJob monitors client HWIDs from access logs and manages HWID tracking.

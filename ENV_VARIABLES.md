@@ -1,4 +1,4 @@
-# Переменные окружения 3x-ui
+# Переменные окружения SharX
 
 ## Основное приложение (Panel)
 
@@ -90,7 +90,7 @@
 
 ```yaml
 services:
-  3xui:
+  sharx:
     environment:
       # Xray настройки
       XRAY_VMESS_AEAD_FORCED: "false"

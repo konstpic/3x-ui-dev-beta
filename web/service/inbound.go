@@ -1,4 +1,4 @@
-// Package service provides business logic services for the 3x-ui web panel,
+// Package service provides business logic services for the SharX web panel,
 // including inbound/outbound management, user administration, settings, and Xray integration.
 package service
 
@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v2/database"
-	"github.com/mhsanaei/3x-ui/v2/database/model"
-	"github.com/mhsanaei/3x-ui/v2/logger"
-	"github.com/mhsanaei/3x-ui/v2/util/common"
-	"github.com/mhsanaei/3x-ui/v2/web/cache"
-	"github.com/mhsanaei/3x-ui/v2/xray"
+	"github.com/konstpic/sharx/v2/database"
+	"github.com/konstpic/sharx/v2/database/model"
+	"github.com/konstpic/sharx/v2/logger"
+	"github.com/konstpic/sharx/v2/util/common"
+	"github.com/konstpic/sharx/v2/web/cache"
+	"github.com/konstpic/sharx/v2/xray"
 
 	"gorm.io/gorm"
 )

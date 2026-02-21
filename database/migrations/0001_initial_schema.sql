@@ -1,4 +1,4 @@
--- Initial schema migration for 3x-ui panel
+-- Initial schema migration for SharX panel
 -- This migration creates all base tables required by the application
 -- Migration is idempotent and can be run multiple times safely
 

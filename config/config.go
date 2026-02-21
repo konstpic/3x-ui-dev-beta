@@ -1,4 +1,4 @@
-// Package config provides configuration management utilities for the 3x-ui panel,
+// Package config provides configuration management utilities for the SharX panel,
 // including version information, logging levels, database connection, and environment variable handling.
 package config
 
@@ -31,12 +31,12 @@ const (
 	Error   LogLevel = "error"
 )
 
-// GetVersion returns the version string of the 3x-ui application.
+// GetVersion returns the version string of the SharX application.
 func GetVersion() string {
 	return strings.TrimSpace(version)
 }
 
-// GetName returns the name of the 3x-ui application.
+// GetName returns the name of the SharX application.
 func GetName() string {
 	return strings.TrimSpace(name)
 }

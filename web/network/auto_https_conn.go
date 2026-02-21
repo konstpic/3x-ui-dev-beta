@@ -1,4 +1,4 @@
-// Package network provides network utilities for the 3x-ui web panel,
+// Package network provides network utilities for the SharX web panel,
 // including automatic HTTP to HTTPS redirection functionality.
 package network
 

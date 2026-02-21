@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v2/web/service"
+	"github.com/konstpic/sharx/v2/web/service"
 
 	"github.com/gin-gonic/gin"
 )

@@ -2449,7 +2449,7 @@
   "schemaVersion": 38,
   "style": "dark",
   "tags": [
-    "3x-ui",
+    "sharx",
     "xray",
     "monitoring"
   ],
@@ -2499,8 +2499,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "3x-ui Dashboard",
-  "uid": "3x-ui-dashboard",
+  "title": "SharX Dashboard",
+  "uid": "sharx-dashboard",
   "version": 1,
   "weekStart": ""
 }

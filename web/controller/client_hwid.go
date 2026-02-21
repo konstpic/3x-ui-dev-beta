@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/mhsanaei/3x-ui/v2/web/service"
+	"github.com/konstpic/sharx/v2/web/service"
 )
 
 // ClientHWIDController handles HTTP requests for client HWID management.

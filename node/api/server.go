@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v2/logger"
-	nodeConfig "github.com/mhsanaei/3x-ui/v2/node/config"
-	nodeLogs "github.com/mhsanaei/3x-ui/v2/node/logs"
-	"github.com/mhsanaei/3x-ui/v2/node/xray"
+	"github.com/konstpic/sharx/v2/logger"
+	nodeConfig "github.com/konstpic/sharx/v2/node/config"
+	nodeLogs "github.com/konstpic/sharx/v2/node/logs"
+	"github.com/konstpic/sharx/v2/node/xray"
 	"github.com/gin-gonic/gin"
 )
 
@@ -172,7 +172,7 @@ func min(a, b int) int {
 func (s *Server) health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status": "ok",
-		"service": "3x-ui-node",
+		"service": "sharx-node",
 	})
 }
 

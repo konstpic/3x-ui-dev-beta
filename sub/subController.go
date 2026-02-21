@@ -7,12 +7,12 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/mhsanaei/3x-ui/v2/config"
-	"github.com/mhsanaei/3x-ui/v2/database"
-	"github.com/mhsanaei/3x-ui/v2/database/model"
-	"github.com/mhsanaei/3x-ui/v2/logger"
-	service "github.com/mhsanaei/3x-ui/v2/web/service"
-	"github.com/mhsanaei/3x-ui/v2/web/entity"
+	"github.com/konstpic/sharx/v2/config"
+	"github.com/konstpic/sharx/v2/database"
+	"github.com/konstpic/sharx/v2/database/model"
+	"github.com/konstpic/sharx/v2/logger"
+	service "github.com/konstpic/sharx/v2/web/service"
+	"github.com/konstpic/sharx/v2/web/entity"
 
 	"github.com/gin-gonic/gin"
 )

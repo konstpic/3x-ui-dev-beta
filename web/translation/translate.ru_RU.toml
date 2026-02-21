@@ -460,7 +460,7 @@
 "grafanaDashboard" = "Grafana Dashboard"
 "grafanaDashboardDesc" = "Скачать готовый JSON файл дашборда Grafana"
 "grafanaMetricsEndpoint" = "Prometheus Metrics Endpoint"
-"grafanaMetricsEndpointDesc" = "Метрики доступны по адресу: /panel/metrics\n\nДля настройки скрапинга Grafana/Prometheus:\n1. Добавьте источник данных Prometheus в Grafana, указывающий на вашу панель 3x-ui\n2. Настройте задачу скрапинга с целевым адресом: http://your-panel-host:port/panel/metrics\n3. Импортируйте скачанный JSON файл дашборда\n\nПример конфигурации скрапинга Prometheus:\n- job_name: '3x-ui'\n  scrape_interval: 30s\n  static_configs:\n    - targets: ['your-panel-host:port']\n      metrics_path: '/panel/metrics'"
+"grafanaMetricsEndpointDesc" = "Метрики доступны по адресу: /panel/metrics\n\nДля настройки скрапинга Grafana/Prometheus:\n1. Добавьте источник данных Prometheus в Grafana, указывающий на вашу панель SharX\n2. Настройте задачу скрапинга с целевым адресом: http://your-panel-host:port/panel/metrics\n3. Импортируйте скачанный JSON файл дашборда\n\nПример конфигурации скрапинга Prometheus:\n- job_name: 'sharx'\n  scrape_interval: 30s\n  static_configs:\n    - targets: ['your-panel-host:port']\n      metrics_path: '/panel/metrics'"
 "grafanaIntegrationEnabled" = "Интеграция Grafana включена"
 "grafanaIntegrationEnabledDesc" = "При включении интеграции Grafana:\n• Все логи (x-ui, xray и логи нод) будут отправляться в Loki\n• Локальное файловое логирование будет отключено\n• Все уровни логирования (DEBUG, INFO, WARNING, ERROR) будут включены\n• Метрики будут экспортироваться в формате Prometheus\n• Метрики можно получать с эндпоинта /panel/metrics"
 

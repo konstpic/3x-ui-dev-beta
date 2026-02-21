@@ -1,4 +1,4 @@
-// Package session provides session management utilities for the 3x-ui web panel.
+// Package session provides session management utilities for the SharX web panel.
 // It handles user authentication state, login sessions, and session storage using Gin sessions.
 package session
 
@@ -6,7 +6,7 @@ import (
 	"encoding/gob"
 	"net/http"
 
-	"github.com/mhsanaei/3x-ui/v2/database/model"
+	"github.com/konstpic/sharx/v2/database/model"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"

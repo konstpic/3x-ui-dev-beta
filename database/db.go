@@ -1,5 +1,5 @@
 // Package database provides database initialization, migration, and management utilities
-// for the 3x-ui panel using GORM with PostgreSQL.
+// for the SharX panel using GORM with PostgreSQL.
 package database
 
 import (
@@ -8,9 +8,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v2/config"
-	"github.com/mhsanaei/3x-ui/v2/database/model"
-	"github.com/mhsanaei/3x-ui/v2/util/crypto"
+	"github.com/konstpic/sharx/v2/config"
+	"github.com/konstpic/sharx/v2/database/model"
+	"github.com/konstpic/sharx/v2/util/crypto"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"

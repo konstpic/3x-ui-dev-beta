@@ -2,10 +2,10 @@ package service
 
 import (
 	"github.com/google/uuid"
-	"github.com/mhsanaei/3x-ui/v2/database"
-	"github.com/mhsanaei/3x-ui/v2/database/model"
-	"github.com/mhsanaei/3x-ui/v2/logger"
-	"github.com/mhsanaei/3x-ui/v2/util/random"
+	"github.com/konstpic/sharx/v2/database"
+	"github.com/konstpic/sharx/v2/database/model"
+	"github.com/konstpic/sharx/v2/logger"
+	"github.com/konstpic/sharx/v2/util/random"
 )
 
 // RotateAllClientKeys rotates keys (UUID/password) for all active clients across all inbounds.

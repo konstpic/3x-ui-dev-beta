@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/mhsanaei/3x-ui/v2/logger"
+	"github.com/konstpic/sharx/v2/logger"
 )
 
 const (
