@@ -242,7 +242,7 @@ jobs:
     needs: [prepare, build-sharx, build-sharxnode, postgres]
     runs-on: ubuntu-latest
     steps:
-      - name: Create GitHub Release
+      - name: Create GitHub Release in sharx-code
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.prepare.outputs.tag }}
@@ -279,3 +279,108 @@ jobs:
           prerelease: ${{ needs.prepare.outputs.is_beta == 'true' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release in SharX repository
+        if: ${{ secrets.SHARX_REPO_TOKEN != '' }}
+        run: |
+          TAG="${{ needs.prepare.outputs.tag }}"
+          VERSION="${{ needs.prepare.outputs.version }}"
+          IS_BETA="${{ needs.prepare.outputs.is_beta }}"
+          
+          # Prepare release body
+          RELEASE_BODY=$(cat <<EOF
+          ## Release $TAG
+          
+          ### 🐳 Docker Images
+          
+          Images are available in Harbor:
+          
+          - **sharx**: \`${{ needs.prepare.outputs.sharx_tag_version }}\` / \`${{ needs.prepare.outputs.sharx_tag_latest }}\`
+          - **sharxnode**: \`${{ needs.prepare.outputs.sharxnode_tag_version }}\` / \`${{ needs.prepare.outputs.sharxnode_tag_latest }}\`
+          - **postgres**: ${{ secrets.HARBOR_HOST }}/${{ secrets.HARBOR_PROJECT }}/postgres:16-alpine / ${{ secrets.HARBOR_HOST }}/${{ secrets.HARBOR_PROJECT }}/postgres:latest
+          
+          ### 📦 Quick Start
+          
+          Update your \`docker-compose.yml\`:
+          
+          \`\`\`yaml
+          services:
+            sharx:
+              image: ${{ needs.prepare.outputs.sharx_tag_latest }}
+            sharxnode:
+              image: ${{ needs.prepare.outputs.sharxnode_tag_latest }}
+            postgres:
+              image: ${{ secrets.HARBOR_HOST }}/${{ secrets.HARBOR_PROJECT }}/postgres:latest
+          \`\`\`
+          
+          ### 📝 Installation
+          
+          For detailed installation instructions, see the [README](https://github.com/konstpic/SharX#quick-start--быстрый-старт).
+          
+          ### 🔄 Changes
+          
+          See commit history for detailed changes.
+          EOF
+          )
+          
+          # Create release using GitHub API
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.SHARX_REPO_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/konstpic/SharX/releases \
+            -d "{
+              \"tag_name\": \"$TAG\",
+              \"name\": \"Release $TAG\",
+              \"body\": $(echo "$RELEASE_BODY" | jq -Rs .),
+              \"draft\": false,
+              \"prerelease\": $IS_BETA
+            }")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          RESPONSE_BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          if [ "$HTTP_CODE" -eq 201 ]; then
+            echo "✅ Release created successfully in konstpic/SharX"
+            echo "$RESPONSE_BODY" | jq -r '.html_url'
+          elif [ "$HTTP_CODE" -eq 422 ]; then
+            echo "⚠️ Release already exists, attempting to update..."
+            # Get release ID
+            RELEASE_ID=$(curl -s \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${{ secrets.SHARX_REPO_TOKEN }}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/konstpic/SharX/releases/tags/$TAG" | jq -r '.id')
+            
+            if [ "$RELEASE_ID" != "null" ] && [ -n "$RELEASE_ID" ]; then
+              # Update existing release
+              UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X PATCH \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${{ secrets.SHARX_REPO_TOKEN }}" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/konstpic/SharX/releases/$RELEASE_ID" \
+                -d "{
+                  \"name\": \"Release $TAG\",
+                  \"body\": $(echo "$RELEASE_BODY" | jq -Rs .),
+                  \"draft\": false,
+                  \"prerelease\": $IS_BETA
+                })
+              
+              UPDATE_CODE=$(echo "$UPDATE_RESPONSE" | tail -n1)
+              if [ "$UPDATE_CODE" -eq 200 ]; then
+                echo "✅ Release updated successfully in konstpic/SharX"
+                echo "$UPDATE_RESPONSE" | sed '$d' | jq -r '.html_url'
+              else
+                echo "❌ Failed to update release. HTTP code: $UPDATE_CODE"
+                echo "$UPDATE_RESPONSE" | sed '$d'
+                exit 1
+              fi
+            else
+              echo "❌ Release exists but could not get release ID"
+              exit 1
+            fi
+          else
+            echo "❌ Failed to create release. HTTP code: $HTTP_CODE"
+            echo "$RESPONSE_BODY"
+            exit 1
+          fi
