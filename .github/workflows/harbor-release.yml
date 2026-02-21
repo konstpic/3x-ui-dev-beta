@@ -22,8 +22,8 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       sharx_tag_version: ${{ steps.tags.outputs.sharx_tag_version }}
       sharx_tag_latest: ${{ steps.tags.outputs.sharx_tag_latest }}
-      node_tag_version: ${{ steps.tags.outputs.node_tag_version }}
-      node_tag_latest: ${{ steps.tags.outputs.node_tag_latest }}
+      sharxnode_tag_version: ${{ steps.tags.outputs.sharxnode_tag_version }}
+      sharxnode_tag_latest: ${{ steps.tags.outputs.sharxnode_tag_latest }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
@@ -112,23 +112,23 @@ jobs:
             # For beta: push version with -beta suffix and latest-beta
             SHARX_TAG_VERSION="$HARBOR_HOST/$HARBOR_PROJECT/sharx:$VERSION"
             SHARX_TAG_LATEST="$HARBOR_HOST/$HARBOR_PROJECT/sharx:latest-beta"
-            NODE_TAG_VERSION="$HARBOR_HOST/$HARBOR_PROJECT/node:$VERSION"
-            NODE_TAG_LATEST="$HARBOR_HOST/$HARBOR_PROJECT/node:latest-beta"
+            SHARXNODE_TAG_VERSION="$HARBOR_HOST/$HARBOR_PROJECT/sharxnode:$VERSION"
+            SHARXNODE_TAG_LATEST="$HARBOR_HOST/$HARBOR_PROJECT/sharxnode:latest-beta"
           else
             # For main: push version and latest
             SHARX_TAG_VERSION="$HARBOR_HOST/$HARBOR_PROJECT/sharx:$VERSION"
             SHARX_TAG_LATEST="$HARBOR_HOST/$HARBOR_PROJECT/sharx:latest"
-            NODE_TAG_VERSION="$HARBOR_HOST/$HARBOR_PROJECT/node:$VERSION"
-            NODE_TAG_LATEST="$HARBOR_HOST/$HARBOR_PROJECT/node:latest"
+            SHARXNODE_TAG_VERSION="$HARBOR_HOST/$HARBOR_PROJECT/sharxnode:$VERSION"
+            SHARXNODE_TAG_LATEST="$HARBOR_HOST/$HARBOR_PROJECT/sharxnode:latest"
           fi
           
           echo "sharx_tag_version=$SHARX_TAG_VERSION" >> $GITHUB_OUTPUT
           echo "sharx_tag_latest=$SHARX_TAG_LATEST" >> $GITHUB_OUTPUT
-          echo "node_tag_version=$NODE_TAG_VERSION" >> $GITHUB_OUTPUT
-          echo "node_tag_latest=$NODE_TAG_LATEST" >> $GITHUB_OUTPUT
+          echo "sharxnode_tag_version=$SHARXNODE_TAG_VERSION" >> $GITHUB_OUTPUT
+          echo "sharxnode_tag_latest=$SHARXNODE_TAG_LATEST" >> $GITHUB_OUTPUT
           
           echo "SharX tags: $SHARX_TAG_VERSION, $SHARX_TAG_LATEST"
-          echo "Node tags: $NODE_TAG_VERSION, $NODE_TAG_LATEST"
+          echo "SharXNode tags: $SHARXNODE_TAG_VERSION, $SHARXNODE_TAG_LATEST"
 
   build-sharx:
     needs: prepare
@@ -172,7 +172,7 @@ jobs:
           build-args: |
             BUILDKIT_INLINE_CACHE=1
 
-  build-node:
+  build-sharxnode:
     needs: prepare
     runs-on: ubuntu-latest
     steps:
@@ -189,23 +189,23 @@ jobs:
           username: ${{ secrets.HARBOR_USER }}
           password: ${{ secrets.HARBOR_PASSWORD }}
 
-      - name: Build and push node image
+      - name: Build and push sharxnode image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./node/Dockerfile
           push: true
           tags: |
-            ${{ needs.prepare.outputs.node_tag_version }}
-            ${{ needs.prepare.outputs.node_tag_latest }}
+            ${{ needs.prepare.outputs.sharxnode_tag_version }}
+            ${{ needs.prepare.outputs.sharxnode_tag_latest }}
           # Build only for amd64 by default for faster builds
           # Change to "linux/amd64,linux/arm64,linux/arm/v7" for multi-arch
           platforms: linux/amd64
           cache-from: |
-            type=registry,ref=${{ secrets.HARBOR_HOST }}/${{ secrets.HARBOR_PROJECT }}/node:buildcache
+            type=registry,ref=${{ secrets.HARBOR_HOST }}/${{ secrets.HARBOR_PROJECT }}/sharxnode:buildcache
             type=gha
           cache-to: |
-            type=registry,ref=${{ secrets.HARBOR_HOST }}/${{ secrets.HARBOR_PROJECT }}/node:buildcache,mode=max
+            type=registry,ref=${{ secrets.HARBOR_HOST }}/${{ secrets.HARBOR_PROJECT }}/sharxnode:buildcache,mode=max
             type=gha,mode=max
           build-args: |
             BUILDKIT_INLINE_CACHE=1
@@ -239,7 +239,7 @@ jobs:
           echo "✅ Postgres image pushed successfully"
 
   release:
-    needs: [prepare, build-sharx, build-node, postgres]
+    needs: [prepare, build-sharx, build-sharxnode, postgres]
     runs-on: ubuntu-latest
     steps:
       - name: Create GitHub Release
@@ -255,7 +255,7 @@ jobs:
             Images are available in Harbor:
             
             - **sharx**: `${{ needs.prepare.outputs.sharx_tag_version }}` / `${{ needs.prepare.outputs.sharx_tag_latest }}`
-            - **node**: `${{ needs.prepare.outputs.node_tag_version }}` / `${{ needs.prepare.outputs.node_tag_latest }}`
+            - **sharxnode**: `${{ needs.prepare.outputs.sharxnode_tag_version }}` / `${{ needs.prepare.outputs.sharxnode_tag_latest }}`
             - **postgres**: ${{ secrets.HARBOR_HOST }}/${{ secrets.HARBOR_PROJECT }}/postgres:16-alpine / ${{ secrets.HARBOR_HOST }}/${{ secrets.HARBOR_PROJECT }}/postgres:latest
             
             ### Usage
@@ -266,8 +266,8 @@ jobs:
             services:
               sharx:
                 image: ${{ needs.prepare.outputs.sharx_tag_latest }}
-              node:
-                image: ${{ needs.prepare.outputs.node_tag_latest }}
+              sharxnode:
+                image: ${{ needs.prepare.outputs.sharxnode_tag_latest }}
               postgres:
                 image: ${{ secrets.HARBOR_HOST }}/${{ secrets.HARBOR_PROJECT }}/postgres:latest
             ```

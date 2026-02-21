@@ -1,7 +1,7 @@
 services:
   node:
     # Используем образ из Harbor вместо локальной сборки
-    image: registry.konstpic.ru/sharx/node:latest
+    image: registry.konstpic.ru/sharx/sharxnode:latest
     container_name: sharx-node
     restart: unless-stopped
     #environment:
