@@ -283,7 +283,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release in SharX repository
-        if: ${{ secrets.SHARX_REPO_TOKEN != '' }}
+        if: ${{ secrets.SHARX_REPO_TOKEN }}
         run: |
           TAG="${{ needs.prepare.outputs.tag }}"
           VERSION="${{ needs.prepare.outputs.version }}"
