@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/mhsanaei/3x-ui/v2/config"
@@ -33,22 +34,51 @@ var (
 
 // InitLogger initializes dual logging backends: console/syslog and file.
 // Console logging uses the specified level, file logging always uses DEBUG level.
+// If lokiURL is provided and grafanaEnabled is true, Loki backend will be used instead of file/console.
 func InitLogger(level logging.Level) {
+	InitLoggerWithLoki(level, "", false, "")
+}
+
+// InitLoggerWithLoki initializes logging with optional Loki backend.
+// If grafanaEnabled is true and lokiURL is provided, file and console logging will be disabled
+// and all logs will be sent to Loki with DEBUG level enabled.
+func InitLoggerWithLoki(level logging.Level, lokiURL string, grafanaEnabled bool, nodeID string) {
 	newLogger := logging.MustGetLogger("x-ui")
 	backends := make([]logging.Backend, 0, 2)
 
-	// Console/syslog backend with configurable level
-	if consoleBackend := initDefaultBackend(); consoleBackend != nil {
-		leveledBackend := logging.AddModuleLevel(consoleBackend)
-		leveledBackend.SetLevel(level, "x-ui")
-		backends = append(backends, leveledBackend)
-	}
+	// Initialize Loki if enabled
+	if grafanaEnabled && lokiURL != "" {
+		err := InitLokiClient(lokiURL, "x-ui", nodeID)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to initialize Loki client: %v\n", err)
+		} else {
+			// When Grafana is enabled, disable file and console logging
+			// Only use minimal console for critical errors
+			if consoleBackend := initDefaultBackend(); consoleBackend != nil {
+				leveledBackend := logging.AddModuleLevel(consoleBackend)
+				leveledBackend.SetLevel(logging.ERROR, "x-ui") // Only errors to console
+				backends = append(backends, leveledBackend)
+			}
+			// File backend is disabled when Grafana is enabled
+		}
+	} else {
+		// Normal mode: use console and file backends
+		// Console/syslog backend with configurable level
+		if consoleBackend := initDefaultBackend(); consoleBackend != nil {
+			leveledBackend := logging.AddModuleLevel(consoleBackend)
+			leveledBackend.SetLevel(level, "x-ui")
+			backends = append(backends, leveledBackend)
+		}
 
-	// File backend with DEBUG level for comprehensive logging
-	if fileBackend := initFileBackend(); fileBackend != nil {
-		leveledBackend := logging.AddModuleLevel(fileBackend)
-		leveledBackend.SetLevel(logging.DEBUG, "x-ui")
-		backends = append(backends, leveledBackend)
+		// File backend with DEBUG level for comprehensive logging
+		if fileBackend := initFileBackend(); fileBackend != nil {
+			leveledBackend := logging.AddModuleLevel(fileBackend)
+			leveledBackend.SetLevel(logging.DEBUG, "x-ui")
+			backends = append(backends, leveledBackend)
+		}
+
+		// Stop Loki if it was previously enabled
+		StopLokiClient()
 	}
 
 	multiBackend := logging.MultiLogger(backends...)
@@ -69,12 +99,19 @@ func initDefaultBackend() logging.Backend {
 		includeTime = true
 	} else {
 		// Unix-like: Try syslog, fallback to stderr
-		if syslogBackend, err := logging.NewSyslogBackend(""); err != nil {
-			fmt.Fprintf(os.Stderr, "syslog backend disabled: %v\n", err)
-			backend = logging.NewLogBackend(os.Stderr, "", 0)
-			includeTime = os.Getppid() > 0
-		} else {
+		// Try syslog with "x-ui" tag first
+		if syslogBackend, err := logging.NewSyslogBackend("x-ui"); err == nil {
 			backend = syslogBackend
+		} else {
+			// Try with empty tag as fallback
+			if syslogBackend2, err2 := logging.NewSyslogBackend(""); err2 == nil {
+				backend = syslogBackend2
+			} else {
+				// Syslog unavailable - use stderr (normal in containers/Docker)
+				// In containers, syslog is often not configured - this is normal and expected
+				backend = logging.NewLogBackend(os.Stderr, "", 0)
+				includeTime = os.Getppid() > 0
+			}
 		}
 	}
 
@@ -202,6 +239,27 @@ func addToBuffer(level string, newLog string) {
 		level: logLevel,
 		log:   newLog,
 	})
+
+	// Push to Loki if enabled
+	PushLogToLoki(level, newLog)
+
+	// If running on node, push log to panel in real-time
+	// pushLogToPanel is set by node package if log pusher is initialized
+	// Always call it - it will check internally if pusher is enabled
+	// Format log line as "timestamp level - message" for panel
+	logLine := fmt.Sprintf("%s %s - %s", t.Format(timeFormat), strings.ToUpper(level), newLog)
+	pushLogToPanel(logLine)
+}
+
+// pushLogToPanel pushes a log line to the panel (called from node mode only).
+// This function will be implemented in node package to avoid circular dependency.
+var pushLogToPanel = func(logLine string) {
+	// Default: no-op, will be overridden by node package if available
+}
+
+// SetLogPusher sets the function to push logs to panel (called from node package).
+func SetLogPusher(pusher func(string)) {
+	pushLogToPanel = pusher
 }
 
 // GetLogs retrieves up to c log entries from the buffer that are at or below the specified level.

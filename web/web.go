@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"embed"
+	"fmt"
 	"html/template"
 	"io"
 	"io/fs"
@@ -31,6 +32,7 @@ import (
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
+	"github.com/mhsanaei/3x-ui/v2/web/cache"
 	"github.com/robfig/cron/v3"
 )
 
@@ -42,6 +44,9 @@ var htmlFS embed.FS
 
 //go:embed translation/*
 var i18nFS embed.FS
+
+//go:embed docs
+var docsFS embed.FS
 
 var startTime = time.Now()
 
@@ -89,6 +94,11 @@ func EmbeddedHTML() embed.FS {
 // EmbeddedAssets returns the embedded assets filesystem for reuse by other servers.
 func EmbeddedAssets() embed.FS {
 	return assetsFS
+}
+
+// EmbeddedDocs returns the embedded docs filesystem.
+func EmbeddedDocs() embed.FS {
+	return docsFS
 }
 
 // Server represents the main web server for the 3x-ui panel with controllers, services, and scheduled jobs.
@@ -203,7 +213,19 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	engine.Use(gzip.Gzip(gzip.DefaultCompression, gzip.WithExcludedPaths([]string{basePath + "panel/api/"})))
 	assetsBasePath := basePath + "assets/"
 
-	store := cookie.NewStore(secret)
+	// Use Redis store for sessions if available, otherwise fallback to cookie store
+	var store sessions.Store
+	redisClient := cache.GetClient()
+	if redisClient != nil {
+		// Use Redis store
+		store = cache.NewRedisStore(redisClient, []byte(secret))
+		logger.Info("Using Redis store for sessions")
+	} else {
+		// Fallback to cookie store
+		store = cookie.NewStore(secret)
+		logger.Info("Using cookie store for sessions (Redis not available)")
+	}
+	
 	// Configure default session cookie options, including expiration (MaxAge)
 	if sessionMaxAge, err := s.settingService.GetSessionMaxAge(); err == nil {
 		store.Options(sessions.Options{
@@ -220,7 +242,14 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	engine.Use(func(c *gin.Context) {
 		uri := c.Request.RequestURI
 		if strings.HasPrefix(uri, assetsBasePath) {
-			c.Header("Cache-Control", "max-age=31536000")
+			// Cache static assets for 1 year with immutable flag
+			c.Header("Cache-Control", "max-age=31536000, public, immutable")
+		} else if strings.HasPrefix(uri, basePath+"panel/") {
+			// For all panel requests (HTML pages, API calls, settings), disable caching
+			// This ensures that settings and dynamic content are always fresh
+			c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
+			c.Header("Pragma", "no-cache")
+			c.Header("Expires", "0")
 		}
 	})
 
@@ -266,9 +295,19 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 
 	g := engine.Group(basePath)
 
+	// Prometheus metrics endpoint (no auth required for scraping)
+	panelMetrics := g.Group("/panel")
+	panelMetrics.GET("/metrics", func(c *gin.Context) {
+		metrics := service.CollectMetrics()
+		c.Header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		c.String(http.StatusOK, metrics)
+	})
+
 	s.index = controller.NewIndexController(g)
 	s.panel = controller.NewXUIController(g)
 	s.api = controller.NewAPIController(g)
+	// Set embedded docs filesystem for API controller
+	s.api.SetDocsFS(docsFS)
 
 	// Initialize WebSocket hub
 	s.wsHub = websocket.NewHub()
@@ -314,12 +353,16 @@ func (s *Server) startTask() {
 
 	go func() {
 		time.Sleep(time.Second * 5)
-		// Statistics every 10 seconds, start the delay for 5 seconds for the first time, and staggered with the time to restart xray
-		s.cron.AddJob("@every 10s", job.NewXrayTrafficJob())
+		// Statistics every 1 second for real-time traffic updates, start the delay for 5 seconds for the first time, and staggered with the time to restart xray
+		s.cron.AddJob("@every 1s", job.NewXrayTrafficJob())
 	}()
 
-	// check client ips from log file every 10 sec
-	s.cron.AddJob("@every 10s", job.NewCheckClientIpJob())
+	// check client ips from log file every 1 second for real-time updates
+	// IP limit job disabled - using HWID only
+	// s.cron.AddJob("@every 1s", job.NewCheckClientIpJob())
+	
+	// Check client HWIDs from log file every 1 second for real-time updates
+	s.cron.AddJob("@every 1s", job.NewCheckClientHWIDJob())
 
 	// check client ips from log file every day
 	s.cron.AddJob("@daily", job.NewClearLogsJob())
@@ -343,6 +386,64 @@ func (s *Server) startTask() {
 		s.cron.AddJob(runtime, j)
 	}
 
+	// Node health check job (every 1 second for real-time updates)
+	s.cron.AddJob("@every 1s", job.NewCheckNodeHealthJob())
+	// Collect node statistics (traffic and online clients) every 1 second for real-time updates
+	s.cron.AddJob("@every 1s", job.NewCollectNodeStatsJob())
+
+	// Client keys rotation job (runs before subscription update interval)
+	// Schedule dynamically based on subscription update interval
+	// Priority: 1) Custom header ProfileUpdateInterval (in hours) - takes precedence
+	//           2) Base subUpdates setting (in minutes)
+	go func() {
+		// Wait a bit for settings to be loaded
+		time.Sleep(time.Second * 2)
+		
+		autoRotate, err := s.settingService.GetSubAutoRotateKeys()
+		if err == nil && autoRotate {
+			var subUpdatesMinutes int
+			
+			// Check custom headers first
+			customHeaders, err := s.settingService.GetSubHeadersParsed()
+			if err == nil && customHeaders != nil && customHeaders.ProfileUpdateInterval != "" {
+				// Use custom header value (in hours, convert to minutes)
+				profileUpdateIntervalHours, err := strconv.Atoi(customHeaders.ProfileUpdateInterval)
+				if err == nil && profileUpdateIntervalHours > 0 {
+					subUpdatesMinutes = profileUpdateIntervalHours * 60
+					logger.Infof("Client keys auto-rotation: using custom ProfileUpdateInterval: %d hours (%d minutes)", 
+						profileUpdateIntervalHours, subUpdatesMinutes)
+				}
+			}
+			
+			// If custom header not set, use base subUpdates
+			if subUpdatesMinutes == 0 {
+				subUpdatesStr, err := s.settingService.GetSubUpdates()
+				if err == nil && subUpdatesStr != "" {
+					subUpdates, err := strconv.Atoi(subUpdatesStr)
+					if err == nil && subUpdates > 0 {
+						subUpdatesMinutes = subUpdates
+						logger.Infof("Client keys auto-rotation: using base subUpdates: %d minutes", subUpdatesMinutes)
+					}
+				}
+			}
+			
+			if subUpdatesMinutes > 1 {
+				// Rotate keys 1 minute before subscription update interval
+				// If subUpdates is 60 minutes, rotate every 59 minutes
+				rotateInterval := subUpdatesMinutes - 1
+				if rotateInterval < 1 {
+					rotateInterval = 1
+				}
+				cronSpec := fmt.Sprintf("@every %dm", rotateInterval)
+				s.cron.AddJob(cronSpec, job.NewRotateClientKeysJob())
+				logger.Infof("Client keys auto-rotation enabled: rotating keys every %d minutes (subscription update: %d minutes)", 
+					rotateInterval, subUpdatesMinutes)
+			} else {
+				logger.Warning("Client keys auto-rotation: subscription update interval is too small or not set, skipping")
+			}
+		}
+	}()
+
 	// Make a traffic condition every day, 8:30
 	var entry cron.EntryID
 	isTgbotenabled, err := s.settingService.GetTgbotEnabled()
@@ -362,10 +463,10 @@ func (s *Server) startTask() {
 		// check for Telegram bot callback query hash storage reset
 		s.cron.AddJob("@every 2m", job.NewCheckHashStorageJob())
 
-		// Check CPU load and alarm to TgBot if threshold passes
+		// Check CPU load and alarm to TgBot if threshold passes (every 1 second for real-time)
 		cpuThreshold, err := s.settingService.GetTgCpu()
 		if (err == nil) && (cpuThreshold > 0) {
-			s.cron.AddJob("@every 10s", job.NewCheckCpuJob())
+			s.cron.AddJob("@every 1s", job.NewCheckCpuJob())
 		}
 	} else {
 		s.cron.Remove(entry)
@@ -489,4 +590,14 @@ func (s *Server) GetCron() *cron.Cron {
 // GetWSHub returns the WebSocket hub instance.
 func (s *Server) GetWSHub() any {
 	return s.wsHub
+}
+
+// InitRedisCache initializes Redis cache. If redisAddr is empty, uses embedded Redis.
+func InitRedisCache(redisAddr string) error {
+	return cache.InitRedis(redisAddr)
+}
+
+// CloseRedisCache closes Redis cache connection.
+func CloseRedisCache() error {
+	return cache.Close()
 }

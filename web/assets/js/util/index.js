@@ -591,6 +591,16 @@ class SizeFormatter {
         if (size < this.ONE_PB) return (size / this.ONE_TB).toFixed(2) + " TB";
         return (size / this.ONE_PB).toFixed(2) + " PB";
     }
+    
+    // Format speed in bits per second (bps, Kbps, Mbps, Gbps)
+    static speedFormat(bitsPerSecond) {
+        if (bitsPerSecond <= 0) return "0 bps";
+        if (bitsPerSecond < this.ONE_KB) return bitsPerSecond.toFixed(0) + " bps";
+        if (bitsPerSecond < this.ONE_MB) return (bitsPerSecond / this.ONE_KB).toFixed(2) + " Kbps";
+        if (bitsPerSecond < this.ONE_GB) return (bitsPerSecond / this.ONE_MB).toFixed(2) + " Mbps";
+        if (bitsPerSecond < this.ONE_TB) return (bitsPerSecond / this.ONE_GB).toFixed(2) + " Gbps";
+        return (bitsPerSecond / this.ONE_TB).toFixed(2) + " Tbps";
+    }
 }
 
 class CPUFormatter {

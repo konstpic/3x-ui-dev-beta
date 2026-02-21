@@ -8,6 +8,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v2/config"
 	"github.com/mhsanaei/3x-ui/v2/logger"
 	"github.com/mhsanaei/3x-ui/v2/web/entity"
+	"github.com/mhsanaei/3x-ui/v2/web/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -51,6 +52,7 @@ func jsonMsgObj(c *gin.Context, msg string, obj any, err error) {
 	} else {
 		m.Success = false
 		m.Msg = msg + " (" + err.Error() + ")"
+		logger.Infof("[DEBUG-AGENT] jsonMsgObj: ERROR response, path=%s, msg=%s, error=%v, errorType=%T", c.Request.URL.Path, msg, err, err)
 		logger.Warning(msg+" "+I18nWeb(c, "fail")+": ", err)
 	}
 	c.JSON(http.StatusOK, m)
@@ -92,6 +94,16 @@ func getContext(h gin.H) gin.H {
 	a := gin.H{
 		"cur_ver": config.GetVersion(),
 	}
+	
+	// Add multiNodeMode to context for all pages
+	settingService := service.SettingService{}
+	multiNodeMode, err := settingService.GetMultiNodeMode()
+	if err != nil {
+		// If error, default to false (single mode)
+		multiNodeMode = false
+	}
+	a["multiNodeMode"] = multiNodeMode
+	
 	for key, value := range h {
 		a[key] = value
 	}

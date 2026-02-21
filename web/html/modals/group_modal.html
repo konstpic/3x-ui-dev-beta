@@ -1,0 +1,121 @@
+{{define "modals/groupModal"}}
+<a-modal id="group-modal" v-model="groupModal.visible" :title="groupModal.title" @ok="groupModal.ok"
+  :confirm-loading="groupModal.confirmLoading" :closable="true" :mask-closable="false"
+  :class="themeSwitcher.currentTheme"
+  :ok-text="groupModal.okText" cancel-text='{{ i18n "close" }}' :width="600">
+  <a-form layout="vertical" v-if="groupModal.formData">
+    <a-form-item label='{{ i18n "pages.groups.name" }}' :required="true">
+      <a-input v-model="groupModal.formData.name" :max-length="30"
+        placeholder='{{ i18n "pages.groups.enterGroupName" }}'></a-input>
+      <div :style="{ textAlign: 'right', fontSize: '12px', color: (groupModal.formData.name || '').length > 25 ? '#ff4d4f' : '#999' }">
+        [[ (groupModal.formData.name || '').length ]]/30
+      </div>
+    </a-form-item>
+    <a-form-item label='{{ i18n "pages.groups.groupDescription" }}'>
+      <a-textarea v-model="groupModal.formData.description" :rows="3" 
+        :max-length="100"
+        placeholder='{{ i18n "pages.groups.enterGroupDescription" }}'></a-textarea>
+      <div :style="{ textAlign: 'right', fontSize: '12px', color: (groupModal.formData.description || '').length > 80 ? '#ff4d4f' : '#999' }">
+        [[ (groupModal.formData.description || '').length ]]/100
+      </div>
+    </a-form-item>
+  </a-form>
+</a-modal>
+<script>
+  const groupModal = window.groupModal = {
+    visible: false,
+    confirmLoading: false,
+    title: '',
+    okText: '{{ i18n "sure" }}',
+    isEdit: false,
+    confirm: null,
+    formData: {
+      name: '',
+      description: ''
+    },
+    ok() {
+      // Validate form data
+      // Trim only for validation, but preserve original for length counting
+      const trimmedName = (groupModal.formData.name || '').trim();
+      if (!trimmedName) {
+        if (typeof app !== 'undefined' && app.$message) {
+          app.$message.error('{{ i18n "pages.groups.enterGroupName" }}');
+        } else if (typeof Vue !== 'undefined' && Vue.prototype && Vue.prototype.$message) {
+          Vue.prototype.$message.error('{{ i18n "pages.groups.enterGroupName" }}');
+        }
+        return;
+      }
+      
+      // Trim whitespace from name and description before sending
+      const dataToSend = { 
+        ...groupModal.formData,
+        name: trimmedName,
+        description: (groupModal.formData.description || '').trim()
+      };
+      
+      groupModal.confirmLoading = true;
+      if (groupModal.confirm) {
+        try {
+          const result = groupModal.confirm(dataToSend);
+          // If confirm returns a promise, handle it
+          if (result && typeof result.then === 'function') {
+            result.catch(() => {
+              // Error handling is done in submitGroup
+            }).finally(() => {
+              groupModal.confirmLoading = false;
+            });
+          } else {
+            // If not async, reset loading after a short delay
+            setTimeout(() => {
+              groupModal.confirmLoading = false;
+            }, 100);
+          }
+        } catch (e) {
+          console.error("Error in groupModal.ok():", e);
+          groupModal.confirmLoading = false;
+        }
+      } else {
+        groupModal.confirmLoading = false;
+      }
+    },
+    show({ title = '', okText = '{{ i18n "sure" }}', group = null, confirm = () => {}, isEdit = false }) {
+      this.title = title;
+      this.okText = okText;
+      this.isEdit = isEdit;
+      this.confirm = confirm;
+      
+      if (group) {
+        this.formData = {
+          name: group.name || '',
+          description: group.description || ''
+        };
+      } else {
+        this.formData = {
+          name: '',
+          description: ''
+        };
+      }
+      
+      this.visible = true;
+    },
+    close() {
+      this.visible = false;
+      this.confirmLoading = false;
+    },
+    loading(loading = true) {
+      this.confirmLoading = loading;
+    }
+  };
+
+  const groupModalApp = new Vue({
+    delimiters: ['[[', ']]'],
+    el: '#group-modal',
+    data: {
+      groupModal: groupModal,
+      get themeSwitcher() {
+        return typeof themeSwitcher !== 'undefined' ? themeSwitcher : { currentTheme: 'light' };
+      }
+    }
+  });
+</script>
+{{end}}

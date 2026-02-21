@@ -1,0 +1,1690 @@
+{{ template "page/head_start" .}}
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+<a-layout id="app" v-cloak :class="themeSwitcher.currentTheme + ' clients-page'">
+  <a-sidebar></a-sidebar>
+  <a-layout id="content-layout">
+    <a-layout-content :style="{ padding: '24px 16px' }">
+      <a-spin :spinning="loadingStates.spinning" :delay="0" tip='{{ i18n "loading"}}'>
+        <transition name="list">
+          <a-row :gutter="[isMobile ? 8 : 16, isMobile ? 0 : 12]" v-if="loadingStates.fetched">
+        <a-col>
+          <a-card hoverable>
+            <template #title>
+              <a-space direction="horizontal">
+                <a-button type="primary" icon="plus" @click="openAddClient">
+                  <template v-if="!isMobile">{{ i18n "pages.clients.addClient" }}</template>
+                </a-button>
+                <a-dropdown :trigger="['click']">
+                  <a-button type="primary" icon="menu">
+                    <template v-if="!isMobile">{{ i18n "pages.inbounds.generalActions" }}</template>
+                  </a-button>
+                  <a-menu slot="overlay" @click="a => generalActions(a)" :theme="themeSwitcher.currentTheme">
+                    <a-menu-item key="resetClients">
+                      <a-icon type="file-done"></a-icon>
+                      {{ i18n "pages.inbounds.resetAllClientTraffics" }}
+                    </a-menu-item>
+                    <a-menu-item key="clearAllHwids">
+                      <a-icon type="mobile"></a-icon>
+                      {{ i18n "pages.clients.clearAllHwids" }}
+                    </a-menu-item>
+                    <a-menu-item key="setHwidLimitAll">
+                      <a-icon type="setting"></a-icon>
+                      {{ i18n "pages.clients.setHwidLimitAll" }}
+                    </a-menu-item>
+                    <a-menu-item key="delDepletedClients" :style="{ color: '#FF4D4F' }">
+                      <a-icon type="rest"></a-icon>
+                      {{ i18n "pages.inbounds.delDepletedClients" }}
+                    </a-menu-item>
+                  </a-menu>
+                </a-dropdown>
+              </a-space>
+            </template>
+            <a-space direction="vertical" :style="{ width: '100%' }">
+              <div class="clients-filters-wrapper">
+                <a-input-search v-model.lazy="searchKey" 
+                  placeholder='{{ i18n "search" }}' 
+                  :style="{ width: isMobile ? '140px' : '180px' }" 
+                  :size="isMobile ? 'small' : 'default'"
+                  allow-clear></a-input-search>
+                <a-select v-model="filterByGroup" 
+                  :style="{ minWidth: isMobile ? '100px' : '130px' }" 
+                  :size="isMobile ? 'small' : 'default'"
+                  :dropdown-class-name="themeSwitcher.currentTheme"
+                  placeholder='{{ i18n "pages.clients.group" }}'>
+                  <a-select-option :value="null">{{ i18n "allGroups" }}</a-select-option>
+                  <a-select-option v-for="group in groups" :key="group.id" :value="group.id">
+                    [[ group.name ]]
+                  </a-select-option>
+                </a-select>
+                <a-select v-model="filterBy" 
+                  :style="{ minWidth: isMobile ? '90px' : '120px' }" 
+                  :size="isMobile ? 'small' : 'default'"
+                  :dropdown-class-name="themeSwitcher.currentTheme"
+                  placeholder='{{ i18n "status" }}'>
+                  <a-select-option value="">{{ i18n "all" }}</a-select-option>
+                  <a-select-option value="online">{{ i18n "online" }}</a-select-option>
+                  <a-select-option value="deactive">{{ i18n "disabled" }}</a-select-option>
+                  <a-select-option value="depleted">{{ i18n "depleted" }}</a-select-option>
+                  <a-select-option value="hwidExceeded">HWID !</a-select-option>
+                </a-select>
+              </div>
+              <div v-if="selectedClientIds.length > 0" class="clients-selection-actions">
+                <a-space :direction="isMobile ? 'vertical' : 'horizontal'" :style="{ width: '100%' }">
+                  <a-tag color="blue" :style="{ marginRight: '8px' }">
+                    <a-icon type="check-circle"></a-icon>
+                    {{ i18n "pages.clients.selectedCount" }}: [[ selectedClientIds.length ]]
+                  </a-tag>
+                  <a-space :wrap="true" :size="isMobile ? 4 : 8">
+                    <a-button @click="bulkResetTraffic" icon="reload" size="small">
+                      <template v-if="!isMobile">{{ i18n "pages.inbounds.resetTraffic" }}</template>
+                    </a-button>
+                    <a-button @click="bulkClearHwid" icon="mobile" size="small">
+                      <template v-if="!isMobile">{{ i18n "pages.clients.clearHwid" }}</template>
+                    </a-button>
+                    <a-button @click="bulkEnable(true)" icon="check" size="small">
+                      <template v-if="!isMobile">{{ i18n "enable" }}</template>
+                    </a-button>
+                    <a-button @click="bulkEnable(false)" icon="close" size="small">
+                      <template v-if="!isMobile">{{ i18n "disable" }}</template>
+                    </a-button>
+                    <a-button @click="bulkSetHwidLimit" icon="setting" size="small">
+                      <template v-if="!isMobile">HWID</template>
+                    </a-button>
+                    <a-button @click="bulkAssignGroup" icon="team" size="small">
+                      <template v-if="!isMobile">{{ i18n "pages.clients.assignGroup" }}</template>
+                    </a-button>
+                    <a-button @click="bulkDelete" icon="delete" type="danger" size="small">
+                      <template v-if="!isMobile">{{ i18n "delete" }}</template>
+                    </a-button>
+                  </a-space>
+                  <a-button @click="clearSelection" icon="close-circle" size="small" type="link">
+                    {{ i18n "pages.clients.clearSelection" }}
+                  </a-button>
+                </a-space>
+              </div>
+              <a-table :columns="isMobile ? mobileColumns : columns" :row-key="client => client.id"
+                :data-source="searchedClients" :scroll="isMobile ? {} : { x: 1150 }"
+                :pagination="false"
+                :row-selection="{ selectedRowKeys: selectedClientIds, onChange: onSelectionChange }"
+                :style="{ marginTop: '10px' }"
+                class="clients-table"
+              :locale='{ filterConfirm: `{{ i18n "confirm" }}`, filterReset: `{{ i18n "reset" }}`, emptyText: `{{ i18n "noData" }}` }'>
+              <template slot="action" slot-scope="text, client">
+                <a-dropdown :trigger="['click']">
+                  <a-icon @click="e => e.preventDefault()" type="more"
+                    :style="{ fontSize: '20px', textDecoration: 'solid' }"></a-icon>
+                  <a-menu slot="overlay" @click="a => clickAction(a, client)"
+                    :theme="themeSwitcher.currentTheme">
+                    <a-menu-item key="qrcode" v-if="client.inbounds && client.inbounds.length > 0">
+                      <a-icon type="qrcode"></a-icon>
+                      {{ i18n "qrCode" }}
+                    </a-menu-item>
+                    <a-menu-item key="edit">
+                      <a-icon type="edit"></a-icon>
+                      {{ i18n "edit" }}
+                    </a-menu-item>
+                    <a-menu-item key="resetTraffic">
+                      <a-icon type="reload"></a-icon>
+                      {{ i18n "pages.inbounds.resetTraffic" }}
+                    </a-menu-item>
+                    <a-menu-item key="clearHwid" v-if="client.hwidEnabled || (client.hwids && client.hwids.length > 0)">
+                      <a-icon type="mobile"></a-icon>
+                      {{ i18n "pages.clients.clearHwid" }}
+                    </a-menu-item>
+                    <a-menu-item key="delete" :style="{ color: '#FF4D4F' }">
+                      <a-icon type="delete"></a-icon>
+                      {{ i18n "delete" }}
+                    </a-menu-item>
+                  </a-menu>
+                </a-dropdown>
+              </template>
+              <template slot="email" slot-scope="text, client">
+                <span>[[ client.email || '-' ]]</span>
+              </template>
+              <template slot="inbounds" slot-scope="text, client">
+                <template v-if="client.inbounds && client.inbounds.length > 0">
+                  <a-tag v-for="(inbound, index) in client.inbounds" :key="inbound.id" color="blue" :style="{ margin: '0 4px 4px 0' }">
+                    [[ inbound.remark || `Port ${inbound.port}` ]] (ID: [[ inbound.id ]])
+                  </a-tag>
+                </template>
+                <a-tag v-else color="default">{{ i18n "none" }}</a-tag>
+              </template>
+              <template slot="enable" slot-scope="text, client">
+                <a-switch v-model="client.enable" @change="switchEnable(client.id, client.enable)"></a-switch>
+              </template>
+              <template slot="status" slot-scope="text, client">
+                <!-- Use client properties directly from WebSocket (like traffic uses client.up/down) -->
+                <!-- Check if client is online: must be enabled, not expired, and traffic is active (changed within last 5 seconds) -->
+                <a-tag v-if="client.enable && 
+                             client.status !== 'expired_time' && 
+                             client.status !== 'expired_traffic' && 
+                             (!client.expiryTime || client.expiryTime > Date.now()) && 
+                             isClientTrafficActive(client)" 
+                       color="green">{{ i18n "online" }}</a-tag>
+                <a-tag v-else class="offline-tag">{{ i18n "offline" }}</a-tag>
+              </template>
+              <template slot="traffic" slot-scope="text, client">
+                <a-popover :overlay-class-name="themeSwitcher.currentTheme">
+                  <template slot="content">
+                    <table cellpadding="2" width="100%">
+                      <tr>
+                        <td>↓[[ getSpeedFormatted(client, 'up') ]]</td>
+                        <td>↑[[ getSpeedFormatted(client, 'down') ]]</td>
+                      </tr>
+                    </table>
+                  </template>
+                  <a-tag :color="ColorUtils.usageColor((client.up || 0) + (client.down || 0), 0, getClientTotal(client))">
+                    [[ SizeFormatter.sizeFormat((client.up || 0) + (client.down || 0)) ]] /
+                    <template v-if="getClientTotal(client) > 0">
+                      [[ SizeFormatter.sizeFormat(getClientTotal(client)) ]]
+                    </template>
+                    <template v-else>
+                      <svg height="10px" width="14px" viewBox="0 0 640 512" fill="currentColor">
+                        <path d="M484.4 96C407 96 349.2 164.1 320 208.5C290.8 164.1 233 96 155.6 96C69.75 96 0 167.8 0 256s69.75 160 155.6 160C233.1 416 290.8 347.9 320 303.5C349.2 347.9 407 416 484.4 416C570.3 416 640 344.2 640 256S570.3 96 484.4 96zM155.6 368C96.25 368 48 317.8 48 256s48.25-112 107.6-112c67.75 0 120.5 82.25 137.1 112C276 285.8 223.4 368 155.6 368zM484.4 368c-67.75 0-120.5-82.25-137.1-112C364 226.2 416.6 144 484.4 144C543.8 144 592 194.2 592 256S543.8 368 484.4 368z" fill="currentColor"></path>
+                      </svg>
+                    </template>
+                  </a-tag>
+                </a-popover>
+              </template>
+              <template slot="hwid" slot-scope="text, client">
+                <a-popover v-if="client.hwids && client.hwids.length > 0" :overlay-class-name="themeSwitcher.currentTheme">
+                  <template slot="content">
+                    <div v-for="hwid in client.hwids" :key="hwid.id" :style="{ marginBottom: '4px' }">
+                      <a-icon type="mobile" :style="{ marginRight: '4px' }"></a-icon>
+                      <span>[[ hwid.deviceOs || 'Unknown' ]] - [[ hwid.deviceModel || hwid.hwid.substring(0, 8) + '...' ]]</span>
+                    </div>
+                  </template>
+                  <a-tag :color="isHwidExceeded(client) ? 'red' : (client.hwidEnabled ? 'blue' : 'default')">
+                    [[ client.hwids.length ]]/[[ client.maxHwid || '∞' ]]
+                  </a-tag>
+                </a-popover>
+                <a-tag v-else-if="client.hwidEnabled" color="default">
+                  0/[[ client.maxHwid || '∞' ]]
+                </a-tag>
+                <a-tag v-else color="default" style="opacity: 0.6;">
+                  -
+                </a-tag>
+              </template>
+              <template slot="expiryTime" slot-scope="text, client">
+                <!-- Use client.expiryTime directly from WebSocket (like traffic uses client.up/down) -->
+                <!-- Also check client.status to show expired state in real-time -->
+                <a-popover v-if="client.expiryTime > 0" :overlay-class-name="themeSwitcher.currentTheme">
+                  <template slot="content">
+                    [[ IntlUtil.formatDate(client.expiryTime) ]]
+                  </template>
+                  <a-tag :style="{ minWidth: '50px' }"
+                    :color="(client.status === 'expired_time' || client.expiryTime <= Date.now()) ? 'red' : ColorUtils.usageColor(new Date().getTime(), 0, client.expiryTime)">
+                    [[ IntlUtil.formatRelativeTime(client.expiryTime) ]]
+                  </a-tag>
+                </a-popover>
+                <a-tag v-else color="purple" class="infinite-tag">
+                  <svg height="10px" width="14px" viewBox="0 0 640 512" fill="currentColor">
+                    <path d="M484.4 96C407 96 349.2 164.1 320 208.5C290.8 164.1 233 96 155.6 96C69.75 96 0 167.8 0 256s69.75 160 155.6 160C233.1 416 290.8 347.9 320 303.5C349.2 347.9 407 416 484.4 416C570.3 416 640 344.2 640 256S570.3 96 484.4 96zM155.6 368C96.25 368 48 317.8 48 256s48.25-112 107.6-112c67.75 0 120.5 82.25 137.1 112C276 285.8 223.4 368 155.6 368zM484.4 368c-67.75 0-120.5-82.25-137.1-112C364 226.2 416.6 144 484.4 144C543.8 144 592 194.2 592 256S543.8 368 484.4 368z" fill="currentColor"></path>
+                  </svg>
+                </a-tag>
+              </template>
+              <template slot="comment" slot-scope="text, client">
+                <span v-if="client.comment" :style="{ maxWidth: '150px', display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }" :title="client.comment">[[ client.comment ]]</span>
+                <span v-else style="color: #999;">-</span>
+              </template>
+              <template slot="group" slot-scope="text, client">
+                <a-tag v-if="client.groupId && getGroupById(client.groupId)" 
+                  color="blue"
+                  :style="{ cursor: 'pointer', maxWidth: '150px', display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }"
+                  :title="getGroupById(client.groupId).name"
+                  @click="viewGroupClients(getGroupById(client.groupId))">
+                  [[ getGroupById(client.groupId).name ]]
+                </a-tag>
+                <span v-else style="color: #999;">-</span>
+              </template>
+            </a-table>
+            </a-space>
+          </a-card>
+        </a-col>
+      </a-row>
+      <a-row v-else>
+        <a-card
+          :style="{ textAlign: 'center', padding: '30px 0', marginTop: '10px', background: 'transparent', border: 'none' }">
+          <a-spin tip='{{ i18n "loading" }}'></a-spin>
+        </a-card>
+      </a-row>
+        </transition>
+      </a-spin>
+    </a-layout-content>
+  </a-layout>
+</a-layout>
+
+{{template "page/body_scripts" .}}
+<script src="{{ .base_path }}assets/qrcode/qrious2.min.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/uri/URI.min.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/js/model/inbound.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/js/model/dbinbound.js?{{ .cur_ver }}"></script>
+{{template "component/aSidebar" .}}
+{{template "component/aThemeSwitch" .}}
+{{template "modals/qrcodeModal"}}
+{{template "modals/clientEntityModal"}}
+<style>
+  /* Fix selected row background in Glass Morphism theme */
+  [data-glass-morphism] .clients-table .ant-table-tbody > tr.ant-table-row-selected > td {
+    background-color: rgba(24, 144, 255, 0.15) !important;
+    color: inherit !important;
+  }
+  
+  [data-glass-morphism] .clients-table .ant-table-tbody > tr.ant-table-row-selected:hover > td {
+    background-color: rgba(24, 144, 255, 0.25) !important;
+  }
+  
+  /* Ensure text remains visible in selected rows */
+  [data-glass-morphism] .clients-table .ant-table-tbody > tr.ant-table-row-selected > td * {
+    color: inherit !important;
+  }
+  .clients-page.dark .ant-table,
+.clients-page.dark .ant-table-content,
+.clients-page.dark .ant-table-body,
+.clients-page.dark .ant-table-header,
+.clients-page.dark .ant-table-scroll,
+.clients-page.dark .ant-table-container {
+  outline-color: var(--dark-color-table-ring) !important;
+  background-color: transparent !important;
+}
+  .ant-tag {
+  min-height: 22px;
+}
+
+</style>
+<script>
+  const columns = [{
+    title: "ID",
+    align: 'center',
+    dataIndex: "id",
+    width: 50,
+    sorter: (a, b) => a.id - b.id,
+    defaultSortOrder: 'ascend',
+  }, {
+    title: '{{ i18n "pages.clients.operate" }}',
+    align: 'center',
+    width: 80,
+    scopedSlots: { customRender: 'action' },
+  }, {
+    title: '{{ i18n "pages.clients.group" }}',
+    align: 'center',
+    width: 150,
+    scopedSlots: { customRender: 'group' },
+  }, {
+    title: '{{ i18n "pages.clients.email" }}',
+    align: 'left',
+    width: 200,
+    dataIndex: "email",
+    sorter: (a, b) => (a.email || '').localeCompare(b.email || ''),
+    scopedSlots: { customRender: 'email' },
+  }, {
+    title: '{{ i18n "pages.clients.comment" }}',
+    align: 'center',
+    width: 150,
+    dataIndex: "comment",
+    sorter: (a, b) => (a.comment || '').localeCompare(b.comment || ''),
+    scopedSlots: { customRender: 'comment' },
+  }, {
+    title: '{{ i18n "pages.clients.inbounds" }}',
+    align: 'center',
+    width: 250,
+    sorter: (a, b) => (a.inbounds?.length || 0) - (b.inbounds?.length || 0),
+    scopedSlots: { customRender: 'inbounds' },
+  }, {
+    title: '{{ i18n "status" }}',
+    align: 'center',
+    width: 100,
+    sorter: (a, b) => (a.enable === b.enable ? 0 : a.enable ? -1 : 1),
+    scopedSlots: { customRender: 'status' },
+  }, {
+    title: '{{ i18n "pages.clients.traffic" }}',
+    align: 'center',
+    width: 150,
+    sorter: (a, b) => ((a.up || 0) + (a.down || 0)) - ((b.up || 0) + (b.down || 0)),
+    scopedSlots: { customRender: 'traffic' },
+  }, {
+    title: 'HWID',
+    align: 'center',
+    width: 100,
+    sorter: (a, b) => (a.hwids?.length || 0) - (b.hwids?.length || 0),
+    scopedSlots: { customRender: 'hwid' },
+  }, {
+    title: '{{ i18n "pages.clients.expiryTime" }}',
+    align: 'center',
+    width: 120,
+    sorter: (a, b) => (a.expiryTime || 0) - (b.expiryTime || 0),
+    scopedSlots: { customRender: 'expiryTime' },
+  }, {
+    title: '{{ i18n "pages.clients.enable" }}',
+    align: 'center',
+    width: 95,
+    sorter: (a, b) => (a.enable === b.enable ? 0 : a.enable ? -1 : 1),
+    scopedSlots: { customRender: 'enable' },
+  }];
+
+  const mobileColumns = [{
+    title: "ID",
+    align: 'right',
+    dataIndex: "id",
+    width: 30,
+    sorter: (a, b) => a.id - b.id,
+    defaultSortOrder: 'ascend',
+  }, {
+    title: '{{ i18n "pages.clients.operate" }}',
+    align: 'center',
+    width: 60,
+    scopedSlots: { customRender: 'action' },
+  }, {
+    title: '{{ i18n "pages.clients.email" }}',
+    align: 'left',
+    width: 150,
+    dataIndex: "email",
+    sorter: (a, b) => (a.email || '').localeCompare(b.email || ''),
+    scopedSlots: { customRender: 'email' },
+  }, {
+    title: '{{ i18n "pages.clients.enable" }}',
+    align: 'center',
+    width: 60,
+    sorter: (a, b) => (a.enable === b.enable ? 0 : a.enable ? -1 : 1),
+    scopedSlots: { customRender: 'enable' },
+  }];
+
+  const app = window.app = new Vue({
+    delimiters: ['[[', ']]'],
+    el: '#app',
+    mixins: [MediaQueryMixin],
+    data: {
+      themeSwitcher,
+      loadingStates: {
+        fetched: false,
+        spinning: false
+      },
+      clients: [],
+      searchedClients: [],
+      allInbounds: [],
+      availableNodes: [],
+      refreshing: false,
+      onlineClients: [],
+      lastOnlineMap: {},
+      searchKey: '',
+      filterBy: '',
+      filterByGroup: null,
+      expireDiff: 0,
+      trafficDiff: 0,
+      selectedClientIds: [],
+      selectedGroupId: null,
+      groups: [],
+      subSettings: {
+        enable: false,
+        subTitle: '',
+        subURI: '',
+        subJsonURI: '',
+        subJsonEnable: false,
+      },
+      remarkModel: '-ieo',
+      hwidLimitValue: 3,
+    },
+    methods: {
+      loading(spinning = true) {
+        this.loadingStates.spinning = spinning;
+      },
+      async loadClients() {
+        this.refreshing = true;
+        try {
+          // Load online clients and last online map first
+          await this.getOnlineUsers();
+          await this.getLastOnlineMap();
+          
+          const msg = await HttpUtil.get('/panel/client/list');
+          if (msg && msg.success && msg.obj) {
+            this.clients = msg.obj;
+            // Don't initialize lastTrafficUpdate here - it should only be set when traffic actually changes
+            // This ensures that clients with old traffic (up/down > 0 but no recent changes) are shown as offline
+            // Load inbounds for each client
+            await this.loadInboundsForClients();
+            // Apply current filters
+            this.applyAllFilters();
+            // Ensure searchedClients is initialized (only if no filters are applied)
+            if (this.searchedClients.length === 0 && this.clients.length > 0 && 
+                !this.filterByGroup && !this.searchKey && !this.filterBy) {
+              this.searchedClients = this.clients.slice();
+            }
+          }
+        } catch (e) {
+          console.error("Failed to load clients:", e);
+          app.$message.error('{{ i18n "pages.clients.loadError" }}');
+        } finally {
+          this.refreshing = false;
+          this.loadingStates.fetched = true;
+        }
+      },
+      async getOnlineUsers() {
+        const msg = await HttpUtil.post('/panel/api/inbounds/onlines');
+        if (!msg.success) {
+          return;
+        }
+        this.onlineClients = msg.obj != null ? msg.obj : [];
+      },
+      async getLastOnlineMap() {
+        const msg = await HttpUtil.post('/panel/api/inbounds/lastOnline');
+        if (!msg.success || !msg.obj) return;
+        this.lastOnlineMap = msg.obj || {}
+      },
+      isClientOnline(email) {
+        return this.onlineClients.includes(email);
+      },
+      isClientTrafficActive(client) {
+        // Check if client has active traffic based on speed only (no delay - real-time)
+        // IMPORTANT: We check for actual traffic speed, not just presence of traffic values
+        if (!client) return false;
+        
+        // Check if speed is active (speed > 0 and recently updated)
+        const upSpeed = client._upSpeed || 0;
+        const downSpeed = client._downSpeed || 0;
+        const hasActiveSpeed = (upSpeed > 0 || downSpeed > 0);
+        
+        if (hasActiveSpeed) {
+          // Check if speed was updated recently (within last 2 seconds for real-time)
+          const now = Date.now();
+          if (client._speedUpdateTime && (now - client._speedUpdateTime) < 2000) {
+            return true;
+          }
+        }
+        
+        // If no active speed, client is offline
+        return false;
+      },
+      getClientSpeed(client, type) {
+        // Return current speed (bits per second) from backend
+        // Backend calculates speed accurately based on 1-second update intervals
+        // Speed is in BITS per second (not bytes) - matches standard internet speed measurement
+        if (!client) return 0;
+        
+        // Use backend-calculated speed if available (more accurate)
+        if (client.upSpeed !== undefined || client.downSpeed !== undefined) {
+          if (type === 'up') {
+            return client.upSpeed || 0;
+          } else if (type === 'down') {
+            return client.downSpeed || 0;
+          }
+          return (client.upSpeed || 0) + (client.downSpeed || 0);
+        }
+        
+        // Fallback to frontend calculation for backward compatibility
+        // Check if speed is still valid (updated within last 2 seconds for real-time)
+        const now = Date.now();
+        if (client._speedUpdateTime && (now - client._speedUpdateTime) > 2000) {
+          return 0;
+        }
+
+        if (type === 'up') {
+          return client._upSpeed || 0;
+        } else if (type === 'down') {
+          return client._downSpeed || 0;
+        }
+        
+        return (client._upSpeed || 0) + (client._downSpeed || 0);
+      },
+      getSpeedFormatted(client, type) {
+        // Format speed in bits per second using speedFormat if available, otherwise sizeFormat
+        try {
+          const speed = this.getClientSpeed(client, type);
+          if (speed <= 0) return "0 bps";
+          if (SizeFormatter.speedFormat) {
+            return SizeFormatter.speedFormat(speed);
+          }
+          // Fallback to sizeFormat if speedFormat is not available
+          return SizeFormatter.sizeFormat(speed) + "/s";
+        } catch (e) {
+          console.error("Error formatting speed:", e);
+          return "0 bps";
+        }
+      },
+      getLastOnline(email) {
+        return this.lastOnlineMap[email] || null
+      },
+      formatLastOnline(email) {
+        const ts = this.getLastOnline(email)
+        if (!ts) return '-'
+        // Check if IntlUtil is available (may not be loaded yet)
+        if (typeof IntlUtil !== 'undefined' && IntlUtil.formatDate) {
+          return IntlUtil.formatDate(ts)
+        }
+        // Fallback to simple date formatting if IntlUtil is not available
+        return new Date(ts).toLocaleString()
+      },
+      getClientTotal(client) {
+        // Convert TotalGB to bytes (1 GB = 1024^3 bytes)
+        // TotalGB can now be a decimal value (e.g., 0.01 for MB)
+        if (client.totalGB && client.totalGB > 0) {
+          return client.totalGB * 1024 * 1024 * 1024;
+        }
+        return 0;
+      },
+      async loadInboundsForClients() {
+        try {
+          const inboundsMsg = await HttpUtil.get('/panel/api/inbounds/list');
+          if (inboundsMsg && inboundsMsg.success && inboundsMsg.obj) {
+            this.allInbounds = inboundsMsg.obj;
+            // Map inbound IDs to full inbound objects for each client
+            this.clients.forEach(client => {
+              if (client.inboundIds && Array.isArray(client.inboundIds)) {
+                client.inbounds = client.inboundIds.map(id => {
+                  return this.allInbounds.find(ib => ib.id === id);
+                }).filter(ib => ib != null);
+              } else {
+                client.inbounds = [];
+              }
+            });
+          }
+        } catch (e) {
+          console.error("Failed to load inbounds for clients:", e);
+        }
+      },
+      async getDefaultSettings() {
+        const msg = await HttpUtil.post('/panel/setting/defaultSettings');
+        if (!msg.success) {
+          return;
+        }
+        with (msg.obj) {
+          this.expireDiff = expireDiff * 86400000;
+          this.trafficDiff = trafficDiff * 1073741824;
+          this.subSettings = {
+            enable: subEnable,
+            subTitle: subTitle,
+            subURI: subURI,
+            subJsonURI: subJsonURI,
+            subJsonEnable: subJsonEnable,
+          };
+          this.remarkModel = remarkModel;
+        }
+      },
+      async loadAvailableNodes() {
+        try {
+          const msg = await HttpUtil.get("/panel/node/list");
+          if (msg && msg.success && msg.obj) {
+            this.availableNodes = msg.obj.map(node => ({
+              id: node.id,
+              name: node.name,
+              address: node.address,
+              status: node.status || 'unknown'
+            }));
+          }
+        } catch (e) {
+          console.error("Failed to load available nodes:", e);
+        }
+      },
+      clickAction(action, client) {
+        switch (action.key) {
+          case 'qrcode':
+            this.showQrcode(client);
+            break;
+          case 'edit':
+            this.editClient(client);
+            break;
+          case 'resetTraffic':
+            this.resetClientTraffic(client);
+            break;
+          case 'clearHwid':
+            this.clearClientHWIDs(client);
+            break;
+          case 'delete':
+            this.deleteClient(client.id);
+            break;
+        }
+      },
+      isHwidExceeded(client) {
+        if (!client.hwidEnabled || !client.maxHwid) return false;
+        return (client.hwids?.length || 0) >= client.maxHwid;
+      },
+      async clearClientHWIDs(client) {
+        this.$confirm({
+          title: '{{ i18n "pages.clients.clearHwidTitle" }}',
+          content: `{{ i18n "pages.clients.clearHwidContent" }} ${client.email}?`,
+          okText: '{{ i18n "sure" }}',
+          cancelText: '{{ i18n "close" }}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post(`/panel/client/clearHwid/${client.id}`);
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.clients.hwidCleared" }}');
+                await this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to clear HWIDs:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      showQrcode(client) {
+        // Show QR codes for all inbounds assigned to this client
+        if (!client.inbounds || client.inbounds.length === 0) {
+          app.$message.warning('{{ i18n "tgbot.noInbounds" }}');
+          return;
+        }
+        
+        // Convert ClientEntity to client format for qrModal
+        const clientForQR = {
+          email: client.email,
+          id: client.uuid || client.email,
+          password: client.password || '',
+          security: client.security || 'auto',
+          flow: client.flow || '',
+          subId: client.subId || '' // Add subId for subscription link generation
+        };
+        
+        // Collect QR codes from all inbounds
+        const allQRCodes = [];
+        
+        // Process each inbound assigned to this client
+        client.inbounds.forEach(inbound => {
+          if (!inbound) return;
+          
+          // Load full inbound data to create DBInbound
+          const dbInbound = this.allInbounds.find(ib => ib.id === inbound.id);
+          if (!dbInbound) return;
+          
+          // Create a DBInbound object from the inbound data
+          const dbInboundObj = new DBInbound(dbInbound);
+          const inboundObj = dbInboundObj.toInbound();
+          
+          // Generate links for this inbound
+          // Get inbound remark (fallback to ID if remark is empty)
+          const inboundRemarkForWireguard = (dbInbound.remark && dbInbound.remark.trim()) || ('Inbound #' + dbInbound.id);
+          
+          if (inboundObj.protocol == Protocols.WIREGUARD) {
+            inboundObj.genInboundLinks(dbInbound.remark).split('\r\n').forEach((l, index) => {
+              allQRCodes.push({
+                remark: inboundRemarkForWireguard + " - Peer " + (index + 1),
+                link: l,
+                useIPv4: false,
+                originalLink: l
+              });
+            });
+          } else {
+            const links = inboundObj.genAllLinks(dbInbound.remark, this.remarkModel, clientForQR);
+            const hasMultipleNodes = links.length > 1 && links.some(l => l.nodeId !== null);
+            const hasMultipleInbounds = client.inbounds.length > 1;
+            
+            // Get inbound remark (fallback to ID if remark is empty)
+            const inboundRemark = (dbInbound.remark && dbInbound.remark.trim()) || ('Inbound #' + dbInbound.id);
+            
+            links.forEach(l => {
+              // Build display remark - always start with inbound name
+              let displayRemark = inboundRemark;
+              
+              // If multiple nodes, append node name
+              if (hasMultipleNodes && l.nodeId !== null) {
+                const node = this.availableNodes && this.availableNodes.find(n => n.id === l.nodeId);
+                if (node && node.name) {
+                  displayRemark = inboundRemark + " - " + node.name;
+                }
+              }
+              
+              // Ensure remark is never empty
+              if (!displayRemark || !displayRemark.trim()) {
+                displayRemark = 'Inbound #' + dbInbound.id;
+              }
+              
+              allQRCodes.push({
+                remark: displayRemark,
+                link: l.link,
+                useIPv4: false,
+                originalLink: l.link,
+                nodeId: l.nodeId
+              });
+            });
+          }
+        });
+        
+        // If we have QR codes, show them in the modal
+        if (allQRCodes.length > 0) {
+          // Set up qrModal with first inbound (for subscription links if enabled)
+          const firstDbInbound = this.allInbounds.find(ib => ib.id === client.inbounds[0].id);
+          if (firstDbInbound) {
+            const firstDbInboundObj = new DBInbound(firstDbInbound);
+            
+            // Set modal properties
+            qrModal.title = '{{ i18n "qrCode"}} - ' + client.email;
+            qrModal.dbInbound = firstDbInboundObj;
+            qrModal.inbound = firstDbInboundObj.toInbound();
+            qrModal.client = clientForQR;
+            qrModal.subId = clientForQR.subId || '';
+            
+            // Clear and set qrcodes array - use Vue.set for reactivity if needed
+            qrModal.qrcodes.length = 0;
+            allQRCodes.forEach(qr => {
+              // Ensure remark is set and not empty
+              if (!qr.remark || !qr.remark.trim()) {
+                qr.remark = 'QR Code';
+              }
+              qrModal.qrcodes.push(qr);
+            });
+            
+            // Show modal
+            qrModal.visible = true;
+            
+            // Reset the status fetched flag
+            if (qrModalApp) {
+              qrModalApp.statusFetched = false;
+            }
+          }
+        } else {
+          app.$message.warning('{{ i18n "tgbot.noInbounds" }}');
+        }
+      },
+      openAddClient() {
+        // Call directly like inModal.show() in inbounds.html
+        if (typeof window.clientEntityModal !== 'undefined') {
+          window.clientEntityModal.show({
+            title: '{{ i18n "pages.clients.addClient" }}',
+            okText: '{{ i18n "create" }}',
+            confirm: async (client) => {
+              await this.submitClient(client, false);
+            },
+            isEdit: false
+          });
+        } else if (typeof clientEntityModal !== 'undefined') {
+          clientEntityModal.show({
+            title: '{{ i18n "pages.clients.addClient" }}',
+            okText: '{{ i18n "create" }}',
+            confirm: async (client) => {
+              await this.submitClient(client, false);
+            },
+            isEdit: false
+          });
+        } else {
+          console.error('[openAddClient] ERROR: clientEntityModal is not defined!');
+        }
+      },
+      async editClient(client) {
+        // Load full client data including HWIDs
+        try {
+          const msg = await HttpUtil.get(`/panel/client/get/${client.id}`);
+          if (msg && msg.success && msg.obj) {
+            client = msg.obj; // Use full client data from API
+          }
+        } catch (e) {
+          console.error("Failed to load full client data:", e);
+        }
+        
+        // Call directly like inModal.show() in inbounds.html
+        if (typeof window.clientEntityModal !== 'undefined') {
+          window.clientEntityModal.show({
+            title: '{{ i18n "pages.clients.editClient" }}',
+            okText: '{{ i18n "update" }}',
+            client: client,
+            confirm: async (client) => {
+              await this.submitClient(client, true);
+            },
+            isEdit: true
+          });
+        } else if (typeof clientEntityModal !== 'undefined') {
+          clientEntityModal.show({
+            title: '{{ i18n "pages.clients.editClient" }}',
+            okText: '{{ i18n "update" }}',
+            client: client,
+            confirm: async (client) => {
+              await this.submitClient(client, true);
+            },
+            isEdit: true
+          });
+        }
+      },
+      async submitClient(client, isEdit) {
+        if (!client.email || !client.email.trim()) {
+          app.$message.error('{{ i18n "pages.clients.emailRequired" }}');
+          return;
+        }
+        
+        clientEntityModal.loading(true);
+        try {
+          // Convert date picker value to timestamp
+          if (client._expiryTime) {
+            if (moment && moment.isMoment(client._expiryTime)) {
+              client.expiryTime = client._expiryTime.valueOf();
+            } else if (client._expiryTime instanceof Date) {
+              client.expiryTime = client._expiryTime.getTime();
+            } else if (typeof client._expiryTime === 'number') {
+              client.expiryTime = client._expiryTime;
+            } else {
+              client.expiryTime = parseInt(client._expiryTime) || 0;
+            }
+          } else {
+            client.expiryTime = 0;
+          }
+          
+          let msg;
+          if (isEdit) {
+            msg = await HttpUtil.post(`/panel/client/update/${client.id}`, client);
+          } else {
+            msg = await HttpUtil.post('/panel/client/add', client);
+          }
+          
+          if (msg.success) {
+            app.$message.success(isEdit ? '{{ i18n "pages.clients.updateSuccess" }}' : '{{ i18n "pages.clients.addSuccess" }}');
+            clientEntityModal.close();
+            // Reload groups in case group assignment changed
+            await this.loadGroups();
+            await this.loadClients();
+          } else {
+            app.$message.error(msg.msg || (isEdit ? '{{ i18n "pages.clients.updateError" }}' : '{{ i18n "pages.clients.addError" }}'));
+          }
+        } catch (e) {
+          console.error("Failed to submit client:", e);
+          app.$message.error(isEdit ? '{{ i18n "pages.clients.updateError" }}' : '{{ i18n "pages.clients.addError" }}');
+        } finally {
+          clientEntityModal.loading(false);
+        }
+      },
+      async deleteClient(id) {
+        this.$confirm({
+          title: '{{ i18n "pages.clients.deleteConfirm" }}',
+          content: '{{ i18n "pages.clients.deleteConfirmText" }}',
+          okText: '{{ i18n "sure" }}',
+          okType: 'danger',
+          cancelText: '{{ i18n "close" }}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post(`/panel/client/del/${id}`);
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.clients.deleteSuccess" }}');
+                await this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "pages.clients.deleteError" }}');
+              }
+            } catch (e) {
+              console.error("Failed to delete client:", e);
+              app.$message.error('{{ i18n "pages.clients.deleteError" }}');
+            }
+          }
+        });
+      },
+      async switchEnable(id, enable) {
+        try {
+          const msg = await HttpUtil.post(`/panel/client/update/${id}`, { enable: enable });
+          if (msg.success) {
+            app.$message.success('{{ i18n "pages.clients.updateSuccess" }}');
+          } else {
+            app.$message.error(msg.msg || '{{ i18n "pages.clients.updateError" }}');
+            // Revert switch
+            const client = this.clients.find(c => c.id === id);
+            if (client) {
+              client.enable = !enable;
+            }
+          }
+        } catch (e) {
+          console.error("Failed to update client:", e);
+          app.$message.error('{{ i18n "pages.clients.updateError" }}');
+          // Revert switch
+          const client = this.clients.find(c => c.id === id);
+          if (client) {
+            client.enable = !enable;
+          }
+        }
+      },
+      async manualRefresh() {
+        if (!this.refreshing) {
+          this.loadingStates.spinning = true;
+          await this.loadClients();
+          this.loadingStates.spinning = false;
+        }
+      },
+      searchClients(key) {
+        this.searchedClients.splice(0, this.searchedClients.length);
+        let filteredClients = this.clients.slice();
+        
+        // Apply group filter first
+        if (this.filterByGroup !== null && this.filterByGroup !== undefined) {
+          filteredClients = filteredClients.filter(client => client.groupId === this.filterByGroup);
+        }
+        
+        if (ObjectUtil.isEmpty(key)) {
+          this.searchedClients = filteredClients;
+        } else {
+          const searchKey = key.toLowerCase().trim();
+          filteredClients.forEach(client => {
+            // Search by email (client name) starting from the first character
+            const email = (client.email || '').toLowerCase();
+            if (email.startsWith(searchKey)) {
+              this.searchedClients.push(client);
+            }
+          });
+        }
+      },
+      filterClients() {
+        this.searchedClients.splice(0, this.searchedClients.length);
+        let filteredClients = this.clients.slice();
+        
+        // Apply group filter first
+        if (this.filterByGroup !== null && this.filterByGroup !== undefined) {
+          filteredClients = filteredClients.filter(client => client.groupId === this.filterByGroup);
+        }
+        
+        if (ObjectUtil.isEmpty(this.filterBy)) {
+          this.searchedClients = filteredClients;
+        } else {
+          const now = new Date().getTime();
+          filteredClients.forEach(client => {
+            let shouldInclude = false;
+            switch (this.filterBy) {
+              case 'deactive':
+                shouldInclude = !client.enable;
+                break;
+              case 'depleted':
+                const exhausted = client.totalGB > 0 && (client.up || 0) + (client.down || 0) >= client.totalGB * 1024 * 1024 * 1024;
+                const expired = client.expiryTime > 0 && client.expiryTime <= now;
+                shouldInclude = expired || exhausted;
+                break;
+              case 'online':
+                shouldInclude = this.isClientOnline(client.email);
+                break;
+              case 'hwidExceeded':
+                shouldInclude = this.isHwidExceeded(client);
+                break;
+            }
+            if (shouldInclude) {
+              this.searchedClients.push(client);
+            }
+          });
+        }
+      },
+      applyAllFilters() {
+        // Combined filter: applies search, group filter, and status filter together
+        let filteredClients = this.clients.slice();
+        
+        // 1. Apply group filter
+        if (this.filterByGroup !== null && this.filterByGroup !== undefined) {
+          filteredClients = filteredClients.filter(client => client.groupId === this.filterByGroup);
+        }
+        
+        // 2. Apply search filter
+        if (this.searchKey && this.searchKey.trim()) {
+          const searchKeyLower = this.searchKey.toLowerCase().trim();
+          filteredClients = filteredClients.filter(client => {
+            const email = (client.email || '').toLowerCase();
+            return email.startsWith(searchKeyLower);
+          });
+        }
+        
+        // 3. Apply status filter
+        if (this.filterBy && this.filterBy.trim()) {
+          const now = new Date().getTime();
+          filteredClients = filteredClients.filter(client => {
+            switch (this.filterBy) {
+              case 'deactive':
+                return !client.enable;
+              case 'depleted':
+                const exhausted = client.totalGB > 0 && (client.up || 0) + (client.down || 0) >= client.totalGB * 1024 * 1024 * 1024;
+                const expired = client.expiryTime > 0 && client.expiryTime <= now;
+                return expired || exhausted;
+              case 'online':
+                return this.isClientOnline(client.email);
+              case 'hwidExceeded':
+                return this.isHwidExceeded(client);
+              default:
+                return true;
+            }
+          });
+        }
+        
+        this.searchedClients = filteredClients;
+      },
+      isClientDepleted(client) {
+        const now = new Date().getTime();
+        const exhausted = client.totalGB > 0 && (client.up || 0) + (client.down || 0) >= client.totalGB * 1024 * 1024 * 1024;
+        const expired = client.expiryTime > 0 && client.expiryTime <= now;
+        return expired || exhausted;
+      },
+      generalActions(action) {
+        switch (action.key) {
+          case "resetClients":
+            this.resetAllClientTraffics();
+            break;
+          case "clearAllHwids":
+            this.clearAllHwids();
+            break;
+          case "setHwidLimitAll":
+            this.showSetHwidLimitModal();
+            break;
+          case "delDepletedClients":
+            this.delDepletedClients();
+            break;
+        }
+      },
+      clearAllHwids() {
+        this.$confirm({
+          title: '{{ i18n "pages.clients.clearAllHwidsTitle" }}',
+          content: '{{ i18n "pages.clients.clearAllHwidsContent" }}',
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "sure" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post('/panel/client/clearAllHwids');
+              if (msg.success) {
+                app.$message.success(msg.msg || '{{ i18n "pages.clients.hwidCleared" }}');
+                await this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to clear all HWIDs:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      showSetHwidLimitModal() {
+        const _this = this;
+        this.$confirm({
+          title: '{{ i18n "pages.clients.setHwidLimitAllTitle" }}',
+          content: h => {
+            return h('div', [
+              h('p', '{{ i18n "pages.clients.setHwidLimitAllContent" }}'),
+              h('a-input-number', {
+                props: { min: 0, max: 100, defaultValue: 3 },
+                style: { width: '100%', marginTop: '10px' },
+                on: { change: val => { _this.hwidLimitValue = val; } }
+              })
+            ]);
+          },
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "sure" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            try {
+              const limit = _this.hwidLimitValue || 3;
+              const msg = await HttpUtil.post('/panel/client/setHwidLimitAll', { maxHwid: limit, enabled: limit > 0 });
+              if (msg.success) {
+                app.$message.success(msg.msg || '{{ i18n "pages.clients.hwidLimitSet" }}');
+                await this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to set HWID limit:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      resetAllClientTraffics() {
+        this.$confirm({
+          title: '{{ i18n "pages.inbounds.resetAllClientTrafficTitle"}}',
+          content: '{{ i18n "pages.inbounds.resetAllClientTrafficContent"}}',
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "reset"}}',
+          cancelText: '{{ i18n "cancel"}}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post('/panel/client/resetAllTraffics');
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.inbounds.toasts.resetAllClientTrafficSuccess" }}');
+                await this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to reset all client traffics:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      resetClientTraffic(client) {
+        this.$confirm({
+          title: '{{ i18n "pages.inbounds.resetTraffic"}}' + ' ' + client.email,
+          content: '{{ i18n "pages.inbounds.resetTrafficContent"}}',
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "reset"}}',
+          cancelText: '{{ i18n "cancel"}}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post('/panel/client/resetTraffic/' + client.id);
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.inbounds.toasts.resetInboundClientTrafficSuccess" }}');
+                await this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to reset client traffic:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      delDepletedClients() {
+        this.$confirm({
+          title: '{{ i18n "pages.inbounds.delDepletedClientsTitle"}}',
+          content: '{{ i18n "pages.inbounds.delDepletedClientsContent"}}',
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "delete"}}',
+          cancelText: '{{ i18n "cancel"}}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post('/panel/client/delDepletedClients');
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.inbounds.toasts.delDepletedClientsSuccess" }}');
+                await this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to delete depleted clients:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      async loadGroups() {
+        try {
+          const msg = await HttpUtil.get('/panel/group/list');
+          if (msg && msg.success && msg.obj) {
+            this.groups = msg.obj;
+          }
+        } catch (e) {
+          console.error("Failed to load groups:", e);
+        }
+      },
+      getGroupById(groupId) {
+        return this.groups.find(g => g.id === groupId);
+      },
+      viewGroupClients(group) {
+        // Navigate to clients page with group filter
+        location.href = `{{ .base_path }}panel/clients?group=${group.id}`;
+      },
+      onSelectionChange(selectedRowKeys) {
+        this.selectedClientIds = selectedRowKeys;
+      },
+      clearSelection() {
+        this.selectedClientIds = [];
+      },
+      async bulkResetTraffic() {
+        if (this.selectedClientIds.length === 0) {
+          app.$message.warning('{{ i18n "pages.clients.noClientsSelected" }}');
+          return;
+        }
+        this.$confirm({
+          title: '{{ i18n "pages.inbounds.resetTraffic"}}',
+          content: `{{ i18n "pages.clients.bulkResetTrafficConfirm" }} ${this.selectedClientIds.length} {{ i18n "pages.clients.clients" }}?`,
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "reset"}}',
+          cancelText: '{{ i18n "cancel"}}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post('/panel/client/bulk/resetTraffic', { clientIds: this.selectedClientIds });
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.inbounds.toasts.resetAllClientTrafficSuccess" }}');
+                this.clearSelection();
+                await this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to reset traffic:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      async bulkClearHwid() {
+        if (this.selectedClientIds.length === 0) {
+          app.$message.warning('{{ i18n "pages.clients.noClientsSelected" }}');
+          return;
+        }
+        this.$confirm({
+          title: '{{ i18n "pages.clients.clearHwidTitle" }}',
+          content: `{{ i18n "pages.clients.bulkClearHwidConfirm" }} ${this.selectedClientIds.length} {{ i18n "pages.clients.clients" }}?`,
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "sure" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post('/panel/client/bulk/clearHwid', { clientIds: this.selectedClientIds });
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.clients.hwidCleared" }}');
+                this.clearSelection();
+                await this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to clear HWIDs:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      async bulkDelete() {
+        if (this.selectedClientIds.length === 0) {
+          app.$message.warning('{{ i18n "pages.clients.noClientsSelected" }}');
+          return;
+        }
+        this.$confirm({
+          title: '{{ i18n "pages.clients.deleteConfirm" }}',
+          content: `{{ i18n "pages.clients.bulkDeleteConfirm" }} ${this.selectedClientIds.length} {{ i18n "pages.clients.clients" }}?`,
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "delete"}}',
+          okType: 'danger',
+          cancelText: '{{ i18n "cancel"}}',
+          onOk: async () => {
+            try {
+              const msg = await HttpUtil.post('/panel/client/bulk/delete', { clientIds: this.selectedClientIds });
+              if (msg.success) {
+                app.$message.success('{{ i18n "pages.clients.deleteSuccess" }}');
+                this.clearSelection();
+                await this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "pages.clients.deleteError" }}');
+              }
+            } catch (e) {
+              console.error("Failed to delete clients:", e);
+              app.$message.error('{{ i18n "pages.clients.deleteError" }}');
+            }
+          }
+        });
+      },
+      async bulkEnable(enable) {
+        if (this.selectedClientIds.length === 0) {
+          app.$message.warning('{{ i18n "pages.clients.noClientsSelected" }}');
+          return;
+        }
+        try {
+          const msg = await HttpUtil.post('/panel/client/bulk/enable', { clientIds: this.selectedClientIds, enable: enable });
+          if (msg.success) {
+            app.$message.success('{{ i18n "pages.clients.updateSuccess" }}');
+            this.clearSelection();
+            await this.loadClients();
+          } else {
+            app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+          }
+        } catch (e) {
+          console.error("Failed to enable/disable clients:", e);
+          app.$message.error('{{ i18n "somethingWentWrong" }}');
+        }
+      },
+      bulkSetHwidLimit() {
+        if (this.selectedClientIds.length === 0) {
+          app.$message.warning('{{ i18n "pages.clients.noClientsSelected" }}');
+          return;
+        }
+        const _this = this;
+        this.$confirm({
+          title: '{{ i18n "pages.clients.setHwidLimitAllTitle" }}',
+          content: h => {
+            return h('div', [
+              h('p', `{{ i18n "pages.clients.bulkSetHwidLimitConfirm" }} ${_this.selectedClientIds.length} {{ i18n "pages.clients.clients" }}?`),
+              h('a-input-number', {
+                props: { min: 0, max: 100, defaultValue: 3 },
+                style: { width: '100%', marginTop: '10px' },
+                on: { change: val => { _this.hwidLimitValue = val; } }
+              })
+            ]);
+          },
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "sure" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            try {
+              const limit = _this.hwidLimitValue || 3;
+              const msg = await HttpUtil.post('/panel/client/bulk/setHwidLimit', { clientIds: _this.selectedClientIds, maxHwid: limit, enabled: limit > 0 });
+              if (msg.success) {
+                app.$message.success(msg.msg || '{{ i18n "pages.clients.hwidLimitSet" }}');
+                _this.clearSelection();
+                await _this.loadClients();
+              } else {
+                app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+              }
+            } catch (e) {
+              console.error("Failed to set HWID limit:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      },
+      bulkAssignGroup() {
+        if (this.selectedClientIds.length === 0) {
+          app.$message.warning('{{ i18n "pages.clients.noClientsSelected" }}');
+          return;
+        }
+        const _this = this;
+        this.$confirm({
+          title: '{{ i18n "pages.clients.assignGroup" }}',
+          width: 520,
+          content: h => {
+            return h('div', {
+              style: { width: '100%' }
+            }, [
+              h('p', {
+                style: { marginBottom: '16px' }
+              }, `{{ i18n "pages.clients.bulkAssignGroupConfirm" }} ${_this.selectedClientIds.length} {{ i18n "pages.clients.clients" }}?`),
+              h('a-select', {
+                props: {
+                  placeholder: '{{ i18n "pages.clients.selectGroup" }}',
+                  'dropdown-class-name': themeSwitcher.currentTheme,
+                  'allow-clear': true,
+                  'show-search': true,
+                  'option-filter-prop': 'children'
+                },
+                style: { width: '100%', marginTop: '10px' },
+                on: {
+                  change: (value) => { _this.selectedGroupId = value; }
+                }
+              }, [
+                h('a-select-option', { props: { value: null } }, '{{ i18n "none" }}'),
+                ...(_this.groups || []).map(group => 
+                  h('a-select-option', { props: { value: group.id } }, group.name)
+                )
+              ])
+            ]);
+          },
+          class: themeSwitcher.currentTheme,
+          okText: '{{ i18n "sure" }}',
+          cancelText: '{{ i18n "cancel" }}',
+          onOk: async () => {
+            try {
+              const groupId = _this.selectedGroupId;
+              if (groupId === null || groupId === undefined) {
+                // Remove from group - update each client to set groupId to null
+                const updatePromises = _this.selectedClientIds.map(clientId => 
+                  HttpUtil.post(`/panel/client/update/${clientId}`, { groupId: null })
+                );
+                await Promise.all(updatePromises);
+                app.$message.success('{{ i18n "pages.clients.groupRemoved" }}');
+              } else {
+                // Assign to group
+                const msg = await HttpUtil.post(`/panel/group/${groupId}/assignClients`, { clientIds: _this.selectedClientIds });
+                if (msg.success) {
+                  app.$message.success('{{ i18n "pages.clients.groupAssigned" }}');
+                } else {
+                  app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+                  return;
+                }
+              }
+              _this.clearSelection();
+              _this.selectedGroupId = null;
+              await _this.loadGroups();
+              await _this.loadClients();
+            } catch (e) {
+              console.error("Failed to assign group:", e);
+              app.$message.error('{{ i18n "somethingWentWrong" }}');
+            }
+          }
+        });
+      }
+    },
+    async mounted() {
+      // Load default settings (subSettings, remarkModel) first
+      await this.getDefaultSettings();
+      // Load available nodes for proper host addresses in QR codes
+      await this.loadAvailableNodes();
+      // Load groups before clients so they're available when rendering
+      await this.loadGroups();
+      
+      // Check URL parameters for group filter
+      const urlParams = new URLSearchParams(window.location.search);
+      const groupIdParam = urlParams.get('group');
+      if (groupIdParam) {
+        const groupId = parseInt(groupIdParam, 10);
+        if (!isNaN(groupId) && this.groups.find(g => g.id === groupId)) {
+          this.filterByGroup = groupId;
+        }
+      }
+      
+      this.loading();
+      
+      // Initial data fetch
+      this.loadClients().then(() => {
+        this.loading(false);
+        // Apply filters after loading clients
+        this.applyAllFilters();
+      });
+
+      // Setup WebSocket for real-time updates (EXACT same as nodes page)
+      if (window.wsClient) {
+        window.wsClient.connect();
+        
+        // Listen for clients updates (direct from ClientEntity - real-time traffic)
+        // Update clients directly like nodes page does - EXACT same approach
+        window.wsClient.on('clients', (payload) => {
+          if (payload && Array.isArray(payload)) {
+            // Update client traffic directly from ClientEntity payload (real-time, no HTTP request)
+            // EXACT same approach as nodes page - update objects directly by reference
+            payload.forEach(updatedClient => {
+              // Find client in main array by id or email (like nodes page finds by id)
+              const existingClient = this.clients.find(c => 
+                (c.id && c.id === updatedClient.id) || 
+                (c.email && c.email.toLowerCase() === (updatedClient.email || '').toLowerCase())
+              );
+              
+              if (existingClient) {
+                // Update traffic in real-time from ClientEntity (EXACT same as nodes page)
+                // Use Vue.set to ensure reactivity for nested properties
+                // Track traffic changes to determine online status and calculate speed
+                // IMPORTANT: Only update lastTrafficUpdate when traffic VALUES actually change
+                const oldUp = existingClient.up || 0;
+                const oldDown = existingClient.down || 0;
+                const now = Date.now();
+                let trafficChanged = false;
+                
+                // Store previous values and timestamp for speed calculation
+                const prevUp = existingClient._prevUp || oldUp;
+                const prevDown = existingClient._prevDown || oldDown;
+                const prevTime = existingClient._prevTrafficTime || now;
+                
+                // Update traffic values
+                if (updatedClient.up !== undefined) {
+                  const newUp = updatedClient.up || 0;
+                  if (newUp !== oldUp) {
+                    this.$set(existingClient, 'up', newUp);
+                    trafficChanged = true;
+                  }
+                }
+                
+                if (updatedClient.down !== undefined) {
+                  const newDown = updatedClient.down || 0;
+                  if (newDown !== oldDown) {
+                    this.$set(existingClient, 'down', newDown);
+                    trafficChanged = true;
+                  }
+                }
+                
+                // Use backend-calculated speed if available (more accurate, calculated every 1 second)
+                if (updatedClient.upSpeed !== undefined) {
+                  this.$set(existingClient, 'upSpeed', updatedClient.upSpeed || 0);
+                }
+                if (updatedClient.downSpeed !== undefined) {
+                  this.$set(existingClient, 'downSpeed', updatedClient.downSpeed || 0);
+                }
+                
+                // Fallback to frontend calculation only if backend speed is not available
+                // Note: Frontend calculation should match backend (bits per second, * 8)
+                if ((updatedClient.upSpeed === undefined && updatedClient.downSpeed === undefined) && trafficChanged) {
+                  const timeDiff = (now - prevTime) / 1000; // seconds
+                  const effectiveTimeDiff = Math.min(Math.max(timeDiff, 0.5), 5.0); // Between 0.5s and 5s
+                  if (timeDiff > 0 && timeDiff < 60) {
+                    const newUp = existingClient.up || 0;
+                    const newDown = existingClient.down || 0;
+                    // Calculate speed in bits per second (match backend calculation: bytes/sec * 8)
+                    const upSpeed = ((newUp - prevUp) / effectiveTimeDiff) * 8;
+                    const downSpeed = ((newDown - prevDown) / effectiveTimeDiff) * 8;
+                    this.$set(existingClient, '_upSpeed', Math.max(0, upSpeed));
+                    this.$set(existingClient, '_downSpeed', Math.max(0, downSpeed));
+                    this.$set(existingClient, '_speedUpdateTime', now);
+                  }
+                  this.$set(existingClient, '_prevUp', existingClient.up || 0);
+                  this.$set(existingClient, '_prevDown', existingClient.down || 0);
+                  this.$set(existingClient, '_prevTrafficTime', now);
+                }
+                
+                if (trafficChanged) {
+                  this.$set(existingClient, 'lastTrafficUpdate', now);
+                } else {
+                  // Reset backend speed if no traffic change for more than 2 seconds
+                  if (existingClient.upSpeed !== undefined && (now - (existingClient.lastTrafficUpdate || 0)) > 2000) {
+                    this.$set(existingClient, 'upSpeed', 0);
+                    this.$set(existingClient, 'downSpeed', 0);
+                  }
+                }
+                
+                if (updatedClient.allTime !== undefined) this.$set(existingClient, 'allTime', updatedClient.allTime);
+                if (updatedClient.lastOnline !== undefined) this.$set(existingClient, 'lastOnline', updatedClient.lastOnline);
+                if (updatedClient.status !== undefined) this.$set(existingClient, 'status', updatedClient.status);
+                if (updatedClient.expiryTime !== undefined) {
+                  this.$set(existingClient, 'expiryTime', updatedClient.expiryTime);
+                  // Update _expiryTime for date picker if expiryTime changed
+                  this.$set(existingClient, '_expiryTime', updatedClient.expiryTime > 0 ? (moment ? moment(updatedClient.expiryTime) : new Date(updatedClient.expiryTime)) : null);
+                }
+                if (updatedClient.hwids !== undefined) this.$set(existingClient, 'hwids', updatedClient.hwids);
+                if (updatedClient.hwidEnabled !== undefined) this.$set(existingClient, 'hwidEnabled', updatedClient.hwidEnabled);
+                if (updatedClient.maxHwid !== undefined) this.$set(existingClient, 'maxHwid', updatedClient.maxHwid);
+                
+                // Update HWIDs in searchedClients as well (use $set for reactivity, same as traffic)
+                const searchedClient = this.searchedClients.find(c => 
+                  (c.id && c.id === updatedClient.id) || 
+                  (c.email && c.email.toLowerCase() === (updatedClient.email || '').toLowerCase())
+                );
+                if (searchedClient) {
+                  // Use Vue.set to ensure reactivity (same as traffic updates)
+                  // Track traffic changes to determine online status and calculate speed
+                  // IMPORTANT: Only update lastTrafficUpdate when traffic VALUES actually change
+                  const oldUp = searchedClient.up || 0;
+                  const oldDown = searchedClient.down || 0;
+                  const now = Date.now();
+                  let trafficChanged = false;
+                  
+                  // Store previous values and timestamp for speed calculation
+                  const prevUp = searchedClient._prevUp || oldUp;
+                  const prevDown = searchedClient._prevDown || oldDown;
+                  const prevTime = searchedClient._prevTrafficTime || now;
+                  
+                  // Check if up changed (strict comparison to detect actual changes)
+                  if (updatedClient.up !== undefined) {
+                    const newUp = updatedClient.up || 0;
+                    if (newUp !== oldUp) {
+                      this.$set(searchedClient, 'up', newUp);
+                      trafficChanged = true;
+                    }
+                  }
+                  
+                  // Check if down changed (strict comparison to detect actual changes)
+                  if (updatedClient.down !== undefined) {
+                    const newDown = updatedClient.down || 0;
+                    if (newDown !== oldDown) {
+                      this.$set(searchedClient, 'down', newDown);
+                      trafficChanged = true;
+                    }
+                  }
+                  
+                  // Calculate speed (bytes per second) when traffic changes
+                  if (trafficChanged) {
+                    const timeDiff = (now - prevTime) / 1000; // seconds
+                    // Limit timeDiff to reasonable range for accurate speed calculation
+                    // If timeDiff is too large (>5s), it means updates are delayed and speed will be underestimated
+                    // Use minimum of actual timeDiff and 5 seconds to prevent speed underestimation
+                    const effectiveTimeDiff = Math.min(Math.max(timeDiff, 0.5), 5.0); // Between 0.5s and 5s
+                    if (timeDiff > 0 && timeDiff < 60) { // Only calculate if time diff is reasonable (less than 60 seconds)
+                      const newUp = updatedClient.up !== undefined ? (updatedClient.up || 0) : oldUp;
+                      const newDown = updatedClient.down !== undefined ? (updatedClient.down || 0) : oldDown;
+                      // Use effectiveTimeDiff to prevent speed underestimation due to delayed updates
+                      // Calculate speed in bits per second (match backend calculation: bytes/sec * 8)
+                      const upSpeed = ((newUp - prevUp) / effectiveTimeDiff) * 8;
+                      const downSpeed = ((newDown - prevDown) / effectiveTimeDiff) * 8;
+                      this.$set(searchedClient, '_upSpeed', Math.max(0, upSpeed)); // Ensure non-negative
+                      this.$set(searchedClient, '_downSpeed', Math.max(0, downSpeed)); // Ensure non-negative
+                      this.$set(searchedClient, '_speedUpdateTime', now);
+                    }
+                    // Update previous values for next calculation
+                    this.$set(searchedClient, '_prevUp', oldUp);
+                    this.$set(searchedClient, '_prevDown', oldDown);
+                    this.$set(searchedClient, '_prevTrafficTime', now);
+                    this.$set(searchedClient, 'lastTrafficUpdate', now);
+                  } else {
+                    // If traffic didn't change, check if we should reset speed to 0
+                    // Reset speed if no traffic change for more than 2 seconds (real-time)
+                    if (searchedClient._speedUpdateTime && (now - searchedClient._speedUpdateTime) > 2000) {
+                      this.$set(searchedClient, '_upSpeed', 0);
+                      this.$set(searchedClient, '_downSpeed', 0);
+                    }
+                  }
+                  
+                  if (updatedClient.allTime !== undefined) this.$set(searchedClient, 'allTime', updatedClient.allTime);
+                  if (updatedClient.lastOnline !== undefined) this.$set(searchedClient, 'lastOnline', updatedClient.lastOnline);
+                  if (updatedClient.status !== undefined) this.$set(searchedClient, 'status', updatedClient.status);
+                  if (updatedClient.expiryTime !== undefined) {
+                    this.$set(searchedClient, 'expiryTime', updatedClient.expiryTime);
+                    this.$set(searchedClient, '_expiryTime', updatedClient.expiryTime > 0 ? (moment ? moment(updatedClient.expiryTime) : new Date(updatedClient.expiryTime)) : null);
+                  }
+                  if (updatedClient.hwids !== undefined) this.$set(searchedClient, 'hwids', updatedClient.hwids);
+                  if (updatedClient.hwidEnabled !== undefined) this.$set(searchedClient, 'hwidEnabled', updatedClient.hwidEnabled);
+                  if (updatedClient.maxHwid !== undefined) this.$set(searchedClient, 'maxHwid', updatedClient.maxHwid);
+                }
+              }
+            });
+            
+            // searchedClients contains references to the same objects from clients array
+            // Since we update clients directly, searchedClients should also update automatically
+            // But we update it explicitly to ensure Vue reactivity (same as nodes page approach)
+            if (this.searchedClients && Array.isArray(this.searchedClients)) {
+              payload.forEach(updatedClient => {
+                const searchedClient = this.searchedClients.find(c => 
+                  (c.id && c.id === updatedClient.id) || 
+                  (c.email && c.email.toLowerCase() === (updatedClient.email || '').toLowerCase())
+                );
+                if (searchedClient) {
+                  // Update the same object reference (EXACT same as nodes page)
+                  // Use Vue.set to ensure reactivity for nested properties
+                  if (updatedClient.up !== undefined) this.$set(searchedClient, 'up', updatedClient.up);
+                  if (updatedClient.down !== undefined) this.$set(searchedClient, 'down', updatedClient.down);
+                  if (updatedClient.allTime !== undefined) this.$set(searchedClient, 'allTime', updatedClient.allTime);
+                  if (updatedClient.lastOnline !== undefined) this.$set(searchedClient, 'lastOnline', updatedClient.lastOnline);
+                  if (updatedClient.status !== undefined) this.$set(searchedClient, 'status', updatedClient.status);
+                  if (updatedClient.expiryTime !== undefined) {
+                    this.$set(searchedClient, 'expiryTime', updatedClient.expiryTime);
+                    // Update _expiryTime for date picker if expiryTime changed
+                    this.$set(searchedClient, '_expiryTime', updatedClient.expiryTime > 0 ? (moment ? moment(updatedClient.expiryTime) : new Date(updatedClient.expiryTime)) : null);
+                  }
+                }
+              });
+            }
+          }
+        });
+        
+        // Listen for traffic updates (real-time online status)
+        window.wsClient.on('traffic', (payload) => {
+          // Update online clients list in real-time
+          if (payload && Array.isArray(payload.onlineClients)) {
+            // Use Vue.set to ensure reactivity
+            this.$set(this, 'onlineClients', payload.onlineClients);
+          }
+          
+          // Update last online map in real-time
+          if (payload && payload.lastOnlineMap && typeof payload.lastOnlineMap === 'object') {
+            // Merge with existing map and use Vue.set for reactivity
+            const newLastOnlineMap = { ...this.lastOnlineMap, ...payload.lastOnlineMap };
+            this.$set(this, 'lastOnlineMap', newLastOnlineMap);
+          }
+        });
+      }
+    },
+    watch: {
+      searchKey: Utils.debounce(function (newVal) {
+        this.applyAllFilters();
+      }, 500),
+      filterBy: function (newVal) {
+        this.applyAllFilters();
+      },
+      filterByGroup: function (newVal) {
+        this.applyAllFilters();
+      }
+    }
+  });
+</script>
+{{ template "page/body_end" .}}

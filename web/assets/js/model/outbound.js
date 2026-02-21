@@ -596,6 +596,8 @@ class Outbound extends CommonClass {
         this.stream = streamSettings;
         this.sendThrough = sendThrough;
         this.mux = mux;
+        this.nodeIds = []; // Node IDs array for multi-node mode
+        this.coreConfigProfileId = null; // Core config profile ID for multi-node mode
     }
 
     get protocol() {
@@ -701,7 +703,7 @@ class Outbound extends CommonClass {
                 stream = { sockopt: this.stream.sockopt.toJson() };
         }
         let settingsOut = this.settings instanceof CommonClass ? this.settings.toJson() : this.settings;
-        return {
+        const result = {
             protocol: this.protocol,
             settings: settingsOut,
             // Only include tag, streamSettings, sendThrough, mux if present and not empty
@@ -710,6 +712,15 @@ class Outbound extends CommonClass {
             ...(this.sendThrough ? { sendThrough: this.sendThrough } : {}),
             ...(this.mux?.enabled ? { mux: this.mux } : {}),
         };
+        // Include nodeIds if present (for multi-node mode)
+        if (this.nodeIds && Array.isArray(this.nodeIds) && this.nodeIds.length > 0) {
+            result.nodeIds = this.nodeIds;
+        }
+        // Include coreConfigProfileId if present (for multi-node mode)
+        if (this.coreConfigProfileId !== null && this.coreConfigProfileId !== undefined) {
+            result.coreConfigProfileId = this.coreConfigProfileId;
+        }
+        return result;
     }
 
     static fromLink(link) {
@@ -840,7 +851,35 @@ class Outbound extends CommonClass {
         let remark = decodeURIComponent(url.hash);
         // Remove '#' from url.hash
         remark = remark.length > 0 ? remark.substring(1) : 'out-' + protocol + '-' + port;
-        return new Outbound(remark, protocol, settings, stream);
+        const outbound = new Outbound(remark, protocol, settings, stream);
+        return outbound;
+    }
+
+    static fromJson(json = {}) {
+        if (!json || typeof json !== 'object') {
+            return new Outbound();
+        }
+
+        const protocol = json.protocol || Protocols.VLESS;
+        const settings = Outbound.Settings.fromJson(protocol, json.settings || {});
+        const streamSettings = json.streamSettings ? StreamSettings.fromJson(json.streamSettings) : new StreamSettings();
+        const sendThrough = json.sendThrough;
+        const mux = json.mux ? Mux.fromJson(json.mux) : new Mux();
+        const tag = json.tag || '';
+
+        const outbound = new Outbound(tag, protocol, settings, streamSettings, sendThrough, mux);
+        
+        // Set nodeIds if present
+        if (json.nodeIds && Array.isArray(json.nodeIds)) {
+            outbound.nodeIds = json.nodeIds;
+        }
+        
+        // Set coreConfigProfileId if present
+        if (json.coreConfigProfileId !== null && json.coreConfigProfileId !== undefined) {
+            outbound.coreConfigProfileId = json.coreConfigProfileId;
+        }
+
+        return outbound;
     }
 }
 

@@ -31,8 +31,10 @@ func (a *XraySettingController) initRouter(g *gin.RouterGroup) {
 	g.GET("/getXrayResult", a.getXrayResult)
 
 	g.POST("/", a.getXraySetting)
+	g.POST("/getFullConfig", a.getFullXrayConfig)
 	g.POST("/warp/:action", a.warp)
 	g.POST("/update", a.updateSetting)
+	g.POST("/resetToDefault", a.resetToDefault)
 	g.POST("/resetOutboundsTraffic", a.resetOutboundsTraffic)
 }
 
@@ -59,6 +61,13 @@ func (a *XraySettingController) updateSetting(c *gin.Context) {
 	jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), err)
 }
 
+// resetToDefault resets the Xray template configuration to default values stored in the application.
+// It overwrites the current xrayTemplateConfig value in the settings table.
+func (a *XraySettingController) resetToDefault(c *gin.Context) {
+	err := a.SettingService.ResetXrayTemplateConfigToDefault()
+	jsonMsg(c, I18nWeb(c, "pages.settings.toasts.modifySettings"), err)
+}
+
 // getDefaultXrayConfig retrieves the default Xray configuration.
 func (a *XraySettingController) getDefaultXrayConfig(c *gin.Context) {
 	defaultJsonConfig, err := a.SettingService.GetDefaultXrayConfig()
@@ -72,6 +81,16 @@ func (a *XraySettingController) getDefaultXrayConfig(c *gin.Context) {
 // getXrayResult retrieves the current Xray service result.
 func (a *XraySettingController) getXrayResult(c *gin.Context) {
 	jsonObj(c, a.XrayService.GetXrayResult(), nil)
+}
+
+// getFullXrayConfig retrieves the full Xray configuration including inbounds and outbounds.
+func (a *XraySettingController) getFullXrayConfig(c *gin.Context) {
+	xrayConfig, err := a.XrayService.GetXrayConfig()
+	if err != nil {
+		jsonMsg(c, I18nWeb(c, "pages.settings.toasts.getSettings"), err)
+		return
+	}
+	jsonObj(c, xrayConfig, nil)
 }
 
 // warp handles Warp-related operations based on the action parameter.

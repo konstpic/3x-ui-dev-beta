@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"embed"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -27,6 +29,8 @@ import (
 	"github.com/mhsanaei/3x-ui/v2/web/global"
 	"github.com/mhsanaei/3x-ui/v2/web/locale"
 	"github.com/mhsanaei/3x-ui/v2/xray"
+
+	"gorm.io/gorm"
 
 	"github.com/google/uuid"
 	"github.com/mymmrac/telego"
@@ -75,7 +79,6 @@ var (
 	client_Id           string
 	client_Flow         string
 	client_Email        string
-	client_LimitIP      int
 	client_TotalGB      int64
 	client_ExpiryTime   int64
 	client_Enable       bool
@@ -87,6 +90,8 @@ var (
 	client_ShPassword   string
 	client_TrPassword   string
 	client_Method       string
+	client_MaxHWID      int
+	client_HWIDEnabled  bool
 )
 
 var userStates = make(map[int64]string)
@@ -528,13 +533,15 @@ func (t *Tgbot) OnReceive() {
 						t.addClient(message.Chat.ID, message_text)
 					}
 				case "awaiting_email":
-					if client_Email == strings.TrimSpace(message.Text) {
+					newEmail := strings.ToLower(strings.TrimSpace(message.Text))
+					if strings.ToLower(client_Email) == newEmail {
 						t.SendMsgToTgbotDeleteAfter(message.Chat.ID, t.I18nBot("tgbot.messages.using_default_value"), 3, tu.ReplyKeyboardRemove())
 						delete(userStates, message.Chat.ID)
 						return nil
 					}
 
-					client_Email = strings.TrimSpace(message.Text)
+					client_Email = newEmail // Already normalized to lowercase
+					logger.Debugf("awaiting_email: Updated email to '%s'", client_Email)
 					if t.isSingleWord(client_Email) {
 						userStates[message.Chat.ID] = "awaiting_email"
 
@@ -572,10 +579,26 @@ func (t *Tgbot) OnReceive() {
 					if checkAdmin(message.From.ID) {
 						for _, sharedUser := range message.UsersShared.Users {
 							userID := sharedUser.UserID
-							needRestart, err := t.inboundService.SetClientTelegramUserID(message.UsersShared.RequestID, userID)
+							// RequestID is now clientEntity.Id (new architecture) instead of traffic.Id
+							clientId := int(message.UsersShared.RequestID)
+							
+							// Use ClientService to update TgID directly (new architecture)
+							clientService := ClientService{}
+							client, err := clientService.GetClient(clientId)
+							if err != nil {
+								output := t.I18nBot("tgbot.messages.selectUserFailed")
+								t.SendMsgToTgbot(message.Chat.ID, output, tu.ReplyKeyboardRemove())
+								continue
+							}
+							
+							// Update TgID
+							client.TgID = userID
+							client.UpdatedAt = time.Now().Unix()
+							needRestart, err := clientService.UpdateClient(client.UserId, client)
 							if needRestart {
 								t.xrayService.SetToNeedRestart()
 							}
+							
 							output := ""
 							if err != nil {
 								output += t.I18nBot("tgbot.messages.selectUserFailed")
@@ -718,6 +741,11 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 		if len(dataArray) >= 2 && len(dataArray[1]) > 0 {
 			email := dataArray[1]
 			switch dataArray[0] {
+			case "get_client_info":
+				// Show client info - this is called from client list
+				t.sendCallbackAnswerTgBot(callbackQuery.ID, "")
+				t.searchClient(chatId, email, callbackQuery.Message.GetMessageID())
+				return
 			case "get_clients_for_sub":
 				inboundId := dataArray[1]
 				inboundIdInt, err := strconv.Atoi(inboundId)
@@ -725,13 +753,22 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 					t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
 					return
 				}
+				inbound, err := t.inboundService.GetInbound(inboundIdInt)
+				if err != nil || inbound == nil {
+					logger.Warningf("Error getting inbound %d: %v", inboundIdInt, err)
+					t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.wentWrong"))
+					return
+				}
 				clientsKB, err := t.getInboundClientsFor(inboundIdInt, "client_sub_links")
 				if err != nil {
 					t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
 					return
 				}
-				inbound, _ := t.inboundService.GetInbound(inboundIdInt)
-				t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseClient", "Inbound=="+inbound.Remark), clientsKB)
+				// Edit message instead of sending new one, fallback to send if edit fails
+				err = t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), t.I18nBot("tgbot.answers.chooseClient", "Inbound=="+inbound.Remark), clientsKB)
+				if err != nil {
+					t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseClient", "Inbound=="+inbound.Remark), clientsKB)
+				}
 			case "get_clients_for_individual":
 				inboundId := dataArray[1]
 				inboundIdInt, err := strconv.Atoi(inboundId)
@@ -739,13 +776,22 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 					t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
 					return
 				}
+				inbound, err := t.inboundService.GetInbound(inboundIdInt)
+				if err != nil || inbound == nil {
+					logger.Warningf("Error getting inbound %d: %v", inboundIdInt, err)
+					t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.wentWrong"))
+					return
+				}
 				clientsKB, err := t.getInboundClientsFor(inboundIdInt, "client_individual_links")
 				if err != nil {
 					t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
 					return
 				}
-				inbound, _ := t.inboundService.GetInbound(inboundIdInt)
-				t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseClient", "Inbound=="+inbound.Remark), clientsKB)
+				// Edit message instead of sending new one, fallback to send if edit fails
+				err = t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), t.I18nBot("tgbot.answers.chooseClient", "Inbound=="+inbound.Remark), clientsKB)
+				if err != nil {
+					t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseClient", "Inbound=="+inbound.Remark), clientsKB)
+				}
 			case "get_clients_for_qr":
 				inboundId := dataArray[1]
 				inboundIdInt, err := strconv.Atoi(inboundId)
@@ -753,37 +799,57 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 					t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
 					return
 				}
+				inbound, err := t.inboundService.GetInbound(inboundIdInt)
+				if err != nil || inbound == nil {
+					logger.Warningf("Error getting inbound %d: %v", inboundIdInt, err)
+					t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.wentWrong"))
+					return
+				}
 				clientsKB, err := t.getInboundClientsFor(inboundIdInt, "client_qr_links")
 				if err != nil {
 					t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
 					return
 				}
-				inbound, _ := t.inboundService.GetInbound(inboundIdInt)
-				t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseClient", "Inbound=="+inbound.Remark), clientsKB)
+				// Edit message instead of sending new one, fallback to send if edit fails
+				err = t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), t.I18nBot("tgbot.answers.chooseClient", "Inbound=="+inbound.Remark), clientsKB)
+				if err != nil {
+					t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseClient", "Inbound=="+inbound.Remark), clientsKB)
+				}
 			case "client_sub_links":
-				t.sendClientSubLinks(chatId, email)
+				t.sendClientSubLinks(chatId, email, callbackQuery.Message.GetMessageID())
 				return
 			case "client_individual_links":
-				t.sendClientIndividualLinks(chatId, email)
+				t.sendClientIndividualLinks(chatId, email, callbackQuery.Message.GetMessageID())
 				return
 			case "client_qr_links":
-				t.sendClientQRLinks(chatId, email)
+				t.sendClientQRLinks(chatId, email, callbackQuery.Message.GetMessageID())
+				return
+			case "delete_message":
+				// Extract message ID from callback data
+				if len(dataArray) >= 2 {
+					msgID, err := strconv.Atoi(dataArray[1])
+					if err == nil {
+						t.deleteMessageTgBot(chatId, msgID)
+						t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.successfulOperation"))
+						return
+					}
+				}
 				return
 			case "client_get_usage":
 				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.messages.email", "Email=="+email))
-				t.searchClient(chatId, email)
+				t.searchClient(chatId, email, callbackQuery.Message.GetMessageID())
 			case "client_refresh":
 				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.clientRefreshSuccess", "Email=="+email))
 				t.searchClient(chatId, email, callbackQuery.Message.GetMessageID())
 			case "client_cancel":
 				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.canceled", "Email=="+email))
 				t.searchClient(chatId, email, callbackQuery.Message.GetMessageID())
-			case "ips_refresh":
-				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.IpRefreshSuccess", "Email=="+email))
-				t.searchClientIps(chatId, email, callbackQuery.Message.GetMessageID())
-			case "ips_cancel":
+			case "devices_refresh":
+				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.deviceRefreshSuccess", "Email=="+email))
+				t.searchClientDevices(chatId, email, callbackQuery.Message.GetMessageID())
+			case "devices_cancel":
 				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.canceled", "Email=="+email))
-				t.searchClientIps(chatId, email, callbackQuery.Message.GetMessageID())
+				t.searchClientDevices(chatId, email, callbackQuery.Message.GetMessageID())
 			case "tgid_refresh":
 				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.TGIdRefreshSuccess", "Email=="+email))
 				t.clientTelegramUserInfo(chatId, email, callbackQuery.Message.GetMessageID())
@@ -801,7 +867,29 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 				)
 				t.editMessageCallbackTgBot(chatId, callbackQuery.Message.GetMessageID(), inlineKeyboard)
 			case "reset_traffic_c":
-				err := t.inboundService.ResetClientTrafficByEmail(email)
+				// Use ClientService to reset traffic (new architecture)
+				clientEntity, userId, err := t.getClientByEmailWithUserId(email)
+				if err != nil {
+					if err == gorm.ErrRecordNotFound {
+						t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
+						return
+					}
+					logger.Warning(err)
+					t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
+					return
+				}
+				
+				// Reset traffic counters
+				clientEntity.Up = 0
+				clientEntity.Down = 0
+				clientEntity.AllTime = 0
+				clientEntity.UpdatedAt = time.Now().Unix()
+				
+				clientService := ClientService{}
+				needRestart, err := clientService.UpdateClient(userId, clientEntity)
+				if needRestart {
+					t.xrayService.SetToNeedRestart()
+				}
 				if err == nil {
 					t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.resetTrafficSuccess", "Email=="+email))
 					t.searchClient(chatId, email, callbackQuery.Message.GetMessageID())
@@ -843,7 +931,24 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 				if len(dataArray) == 3 {
 					limitTraffic, err := strconv.Atoi(dataArray[2])
 					if err == nil {
-						needRestart, err := t.inboundService.ResetClientTrafficLimitByEmail(email, limitTraffic)
+						// Use ClientService to set traffic limit (new architecture)
+						clientEntity, userId, err := t.getClientByEmailWithUserId(email)
+						if err != nil {
+							if err == gorm.ErrRecordNotFound {
+								t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
+								return
+							}
+							logger.Warning(err)
+							t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
+							return
+						}
+						
+						// Set traffic limit (convert GB to float64)
+						clientEntity.TotalGB = float64(limitTraffic)
+						clientEntity.UpdatedAt = time.Now().Unix()
+						
+						clientService := ClientService{}
+						needRestart, err := clientService.UpdateClient(userId, clientEntity)
 						if needRestart {
 							t.xrayService.SetToNeedRestart()
 						}
@@ -1026,33 +1131,37 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 				if len(dataArray) == 3 {
 					days, err := strconv.ParseInt(dataArray[2], 10, 64)
 					if err == nil {
+						// Use ClientService to get and update expiry time (new architecture)
+						clientEntity, userId, err := t.getClientByEmailWithUserId(email)
+						if err != nil {
+							if err == gorm.ErrRecordNotFound {
+								t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
+								return
+							}
+							logger.Warning(err)
+							t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
+							return
+						}
+
 						var date int64
 						if days > 0 {
-							traffic, err := t.inboundService.GetClientTrafficByEmail(email)
-							if err != nil {
-								logger.Warning(err)
-								msg := t.I18nBot("tgbot.wentWrong")
-								t.SendMsgToTgbot(chatId, msg)
-								return
-							}
-							if traffic == nil {
-								msg := t.I18nBot("tgbot.noResult")
-								t.SendMsgToTgbot(chatId, msg)
-								return
-							}
-
-							if traffic.ExpiryTime > 0 {
-								if traffic.ExpiryTime-time.Now().Unix()*1000 < 0 {
+							if clientEntity.ExpiryTime > 0 {
+								if clientEntity.ExpiryTime-time.Now().Unix()*1000 < 0 {
 									date = -int64(days * 24 * 60 * 60000)
 								} else {
-									date = traffic.ExpiryTime + int64(days*24*60*60000)
+									date = clientEntity.ExpiryTime + int64(days*24*60*60000)
 								}
 							} else {
-								date = traffic.ExpiryTime - int64(days*24*60*60000)
+								date = clientEntity.ExpiryTime - int64(days*24*60*60000)
 							}
-
 						}
-						needRestart, err := t.inboundService.ResetClientExpiryTimeByEmail(email, date)
+						
+						// Use ClientService to set expiry time (new architecture)
+						clientEntity.ExpiryTime = date
+						clientEntity.UpdatedAt = time.Now().Unix()
+						
+						clientService := ClientService{}
+						needRestart, err := clientService.UpdateClient(userId, clientEntity)
 						if needRestart {
 							t.xrayService.SetToNeedRestart()
 						}
@@ -1156,6 +1265,29 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 
 				t.addClient(callbackQuery.Message.GetChat().ID, message_text, messageId)
 				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.successfulOperation"))
+			case "add_client_hwid_c":
+				// Format: add_client_hwid_c maxHwid enabled
+				if len(dataArray) >= 3 {
+					maxHwid, err1 := strconv.Atoi(dataArray[1])
+					enabled := dataArray[2] == "true"
+					if err1 == nil {
+						client_MaxHWID = maxHwid
+						client_HWIDEnabled = enabled
+						messageId := callbackQuery.Message.GetMessageID()
+						inbound, err := t.inboundService.GetInbound(receiver_inbound_ID)
+						if err != nil {
+							t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
+							return
+						}
+						message_text, err := t.BuildInboundClientDataMessage(inbound.Remark, inbound.Protocol)
+						if err != nil {
+							t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
+							return
+						}
+						t.addClient(chatId, message_text, messageId)
+						t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.successfulOperation"))
+					}
+				}
 			case "add_client_reset_exp_in":
 				if len(dataArray) >= 2 {
 					oldInputNumber, err := strconv.Atoi(dataArray[1])
@@ -1216,215 +1348,29 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 						return
 					}
 				}
-			case "ip_limit":
-				inlineKeyboard := tu.InlineKeyboard(
-					tu.InlineKeyboardRow(
-						tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.cancelIpLimit")).WithCallbackData(t.encodeQuery("client_cancel "+email)),
-					),
-					tu.InlineKeyboardRow(
-						tu.InlineKeyboardButton(t.I18nBot("tgbot.unlimited")).WithCallbackData(t.encodeQuery("ip_limit_c "+email+" 0")),
-						tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.custom")).WithCallbackData(t.encodeQuery("ip_limit_in "+email+" 0")),
-					),
-					tu.InlineKeyboardRow(
-						tu.InlineKeyboardButton("1").WithCallbackData(t.encodeQuery("ip_limit_c "+email+" 1")),
-						tu.InlineKeyboardButton("2").WithCallbackData(t.encodeQuery("ip_limit_c "+email+" 2")),
-					),
-					tu.InlineKeyboardRow(
-						tu.InlineKeyboardButton("3").WithCallbackData(t.encodeQuery("ip_limit_c "+email+" 3")),
-						tu.InlineKeyboardButton("4").WithCallbackData(t.encodeQuery("ip_limit_c "+email+" 4")),
-					),
-					tu.InlineKeyboardRow(
-						tu.InlineKeyboardButton("5").WithCallbackData(t.encodeQuery("ip_limit_c "+email+" 5")),
-						tu.InlineKeyboardButton("6").WithCallbackData(t.encodeQuery("ip_limit_c "+email+" 6")),
-						tu.InlineKeyboardButton("7").WithCallbackData(t.encodeQuery("ip_limit_c "+email+" 7")),
-					),
-					tu.InlineKeyboardRow(
-						tu.InlineKeyboardButton("8").WithCallbackData(t.encodeQuery("ip_limit_c "+email+" 8")),
-						tu.InlineKeyboardButton("9").WithCallbackData(t.encodeQuery("ip_limit_c "+email+" 9")),
-						tu.InlineKeyboardButton("10").WithCallbackData(t.encodeQuery("ip_limit_c "+email+" 10")),
-					),
-				)
-				t.editMessageCallbackTgBot(chatId, callbackQuery.Message.GetMessageID(), inlineKeyboard)
-			case "ip_limit_c":
-				if len(dataArray) == 3 {
-					count, err := strconv.Atoi(dataArray[2])
-					if err == nil {
-						needRestart, err := t.inboundService.ResetClientIpLimitByEmail(email, count)
-						if needRestart {
-							t.xrayService.SetToNeedRestart()
-						}
-						if err == nil {
-							t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.resetIpSuccess", "Email=="+email, "Count=="+strconv.Itoa(count)))
-							t.searchClient(chatId, email, callbackQuery.Message.GetMessageID())
-							return
-						}
-					}
-				}
-				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
-				t.searchClient(chatId, email, callbackQuery.Message.GetMessageID())
-			case "ip_limit_in":
+			case "remove_device":
+				// device_list email hwidId
 				if len(dataArray) >= 3 {
-					oldInputNumber, err := strconv.Atoi(dataArray[2])
-					inputNumber := oldInputNumber
+					hwidIdStr := dataArray[2]
+					hwidId, err := strconv.Atoi(hwidIdStr)
 					if err == nil {
-						if len(dataArray) == 4 {
-							num, err := strconv.Atoi(dataArray[3])
-							if err == nil {
-								switch num {
-								case -2:
-									inputNumber = 0
-								case -1:
-									if inputNumber > 0 {
-										inputNumber = (inputNumber / 10)
-									}
-								default:
-									inputNumber = (inputNumber * 10) + num
-								}
-							}
-							if inputNumber == oldInputNumber {
-								t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.successfulOperation"))
-								return
-							}
-							if inputNumber >= 999999 {
-								t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
-								return
-							}
+						hwidService := ClientHWIDService{}
+						err := hwidService.RemoveHWID(hwidId)
+						if err == nil {
+							t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.deviceRemovedSuccess"))
+							t.searchClientDevices(chatId, email, callbackQuery.Message.GetMessageID())
+						} else {
+							t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
 						}
-						inlineKeyboard := tu.InlineKeyboard(
-							tu.InlineKeyboardRow(
-								tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.cancel")).WithCallbackData(t.encodeQuery("client_cancel "+email)),
-							),
-							tu.InlineKeyboardRow(
-								tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.confirmNumber", "Num=="+strconv.Itoa(inputNumber))).WithCallbackData(t.encodeQuery("ip_limit_c "+email+" "+strconv.Itoa(inputNumber))),
-							),
-							tu.InlineKeyboardRow(
-								tu.InlineKeyboardButton("1").WithCallbackData(t.encodeQuery("ip_limit_in "+email+" "+strconv.Itoa(inputNumber)+" 1")),
-								tu.InlineKeyboardButton("2").WithCallbackData(t.encodeQuery("ip_limit_in "+email+" "+strconv.Itoa(inputNumber)+" 2")),
-								tu.InlineKeyboardButton("3").WithCallbackData(t.encodeQuery("ip_limit_in "+email+" "+strconv.Itoa(inputNumber)+" 3")),
-							),
-							tu.InlineKeyboardRow(
-								tu.InlineKeyboardButton("4").WithCallbackData(t.encodeQuery("ip_limit_in "+email+" "+strconv.Itoa(inputNumber)+" 4")),
-								tu.InlineKeyboardButton("5").WithCallbackData(t.encodeQuery("ip_limit_in "+email+" "+strconv.Itoa(inputNumber)+" 5")),
-								tu.InlineKeyboardButton("6").WithCallbackData(t.encodeQuery("ip_limit_in "+email+" "+strconv.Itoa(inputNumber)+" 6")),
-							),
-							tu.InlineKeyboardRow(
-								tu.InlineKeyboardButton("7").WithCallbackData(t.encodeQuery("ip_limit_in "+email+" "+strconv.Itoa(inputNumber)+" 7")),
-								tu.InlineKeyboardButton("8").WithCallbackData(t.encodeQuery("ip_limit_in "+email+" "+strconv.Itoa(inputNumber)+" 8")),
-								tu.InlineKeyboardButton("9").WithCallbackData(t.encodeQuery("ip_limit_in "+email+" "+strconv.Itoa(inputNumber)+" 9")),
-							),
-							tu.InlineKeyboardRow(
-								tu.InlineKeyboardButton("🔄").WithCallbackData(t.encodeQuery("ip_limit_in "+email+" "+strconv.Itoa(inputNumber)+" -2")),
-								tu.InlineKeyboardButton("0").WithCallbackData(t.encodeQuery("ip_limit_in "+email+" "+strconv.Itoa(inputNumber)+" 0")),
-								tu.InlineKeyboardButton("⬅️").WithCallbackData(t.encodeQuery("ip_limit_in "+email+" "+strconv.Itoa(inputNumber)+" -1")),
-							),
-						)
-						t.editMessageCallbackTgBot(chatId, callbackQuery.Message.GetMessageID(), inlineKeyboard)
-						return
+					} else {
+						t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
 					}
-				}
-				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
-				t.searchClient(chatId, email, callbackQuery.Message.GetMessageID())
-			case "add_client_ip_limit_c":
-				if len(dataArray) == 2 {
-					count, _ := strconv.Atoi(dataArray[1])
-					client_LimitIP = count
-				}
-
-				messageId := callbackQuery.Message.GetMessageID()
-				inbound, err := t.inboundService.GetInbound(receiver_inbound_ID)
-				if err != nil {
-					t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
-					return
-				}
-				message_text, err := t.BuildInboundClientDataMessage(inbound.Remark, inbound.Protocol)
-				if err != nil {
-					t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
-					return
-				}
-
-				t.addClient(callbackQuery.Message.GetChat().ID, message_text, messageId)
-				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.successfulOperation"))
-			case "add_client_ip_limit_in":
-				if len(dataArray) >= 2 {
-					oldInputNumber, err := strconv.Atoi(dataArray[1])
-					inputNumber := oldInputNumber
-					if err == nil {
-						if len(dataArray) == 3 {
-							num, err := strconv.Atoi(dataArray[2])
-							if err == nil {
-								switch num {
-								case -2:
-									inputNumber = 0
-								case -1:
-									if inputNumber > 0 {
-										inputNumber = (inputNumber / 10)
-									}
-								default:
-									inputNumber = (inputNumber * 10) + num
-								}
-							}
-							if inputNumber == oldInputNumber {
-								t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.successfulOperation"))
-								return
-							}
-							if inputNumber >= 999999 {
-								t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
-								return
-							}
-						}
-						inlineKeyboard := tu.InlineKeyboard(
-							tu.InlineKeyboardRow(
-								tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.cancel")).WithCallbackData(t.encodeQuery("add_client_default_ip_limit")),
-							),
-							tu.InlineKeyboardRow(
-								tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.confirmNumber", "Num=="+strconv.Itoa(inputNumber))).WithCallbackData(t.encodeQuery("add_client_ip_limit_c "+strconv.Itoa(inputNumber))),
-							),
-							tu.InlineKeyboardRow(
-								tu.InlineKeyboardButton("1").WithCallbackData(t.encodeQuery("add_client_ip_limit_in "+strconv.Itoa(inputNumber)+" 1")),
-								tu.InlineKeyboardButton("2").WithCallbackData(t.encodeQuery("add_client_ip_limit_in "+strconv.Itoa(inputNumber)+" 2")),
-								tu.InlineKeyboardButton("3").WithCallbackData(t.encodeQuery("add_client_ip_limit_in "+strconv.Itoa(inputNumber)+" 3")),
-							),
-							tu.InlineKeyboardRow(
-								tu.InlineKeyboardButton("4").WithCallbackData(t.encodeQuery("add_client_ip_limit_in "+strconv.Itoa(inputNumber)+" 4")),
-								tu.InlineKeyboardButton("5").WithCallbackData(t.encodeQuery("add_client_ip_limit_in "+strconv.Itoa(inputNumber)+" 5")),
-								tu.InlineKeyboardButton("6").WithCallbackData(t.encodeQuery("add_client_ip_limit_in "+strconv.Itoa(inputNumber)+" 6")),
-							),
-							tu.InlineKeyboardRow(
-								tu.InlineKeyboardButton("7").WithCallbackData(t.encodeQuery("add_client_ip_limit_in "+strconv.Itoa(inputNumber)+" 7")),
-								tu.InlineKeyboardButton("8").WithCallbackData(t.encodeQuery("add_client_ip_limit_in "+strconv.Itoa(inputNumber)+" 8")),
-								tu.InlineKeyboardButton("9").WithCallbackData(t.encodeQuery("add_client_ip_limit_in "+strconv.Itoa(inputNumber)+" 9")),
-							),
-							tu.InlineKeyboardRow(
-								tu.InlineKeyboardButton("🔄").WithCallbackData(t.encodeQuery("add_client_ip_limit_in "+strconv.Itoa(inputNumber)+" -2")),
-								tu.InlineKeyboardButton("0").WithCallbackData(t.encodeQuery("add_client_ip_limit_in "+strconv.Itoa(inputNumber)+" 0")),
-								tu.InlineKeyboardButton("⬅️").WithCallbackData(t.encodeQuery("add_client_ip_limit_in "+strconv.Itoa(inputNumber)+" -1")),
-							),
-						)
-						t.editMessageCallbackTgBot(chatId, callbackQuery.Message.GetMessageID(), inlineKeyboard)
-						return
-					}
-				}
-			case "clear_ips":
-				inlineKeyboard := tu.InlineKeyboard(
-					tu.InlineKeyboardRow(
-						tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.cancel")).WithCallbackData(t.encodeQuery("ips_cancel "+email)),
-					),
-					tu.InlineKeyboardRow(
-						tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.confirmClearIps")).WithCallbackData(t.encodeQuery("clear_ips_c "+email)),
-					),
-				)
-				t.editMessageCallbackTgBot(chatId, callbackQuery.Message.GetMessageID(), inlineKeyboard)
-			case "clear_ips_c":
-				err := t.inboundService.ClearClientIps(email)
-				if err == nil {
-					t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.clearIpSuccess", "Email=="+email))
-					t.searchClientIps(chatId, email, callbackQuery.Message.GetMessageID())
 				} else {
 					t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
 				}
-			case "ip_log":
-				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.getIpLog", "Email=="+email))
-				t.searchClientIps(chatId, email)
+			case "device_list":
+				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.getDeviceList", "Email=="+email))
+				t.searchClientDevices(chatId, email, callbackQuery.Message.GetMessageID())
 			case "tg_user":
 				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.getUserInfo", "Email=="+email))
 				t.clientTelegramUserInfo(chatId, email)
@@ -1439,12 +1385,24 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 				)
 				t.editMessageCallbackTgBot(chatId, callbackQuery.Message.GetMessageID(), inlineKeyboard)
 			case "tgid_remove_c":
-				traffic, err := t.inboundService.GetClientTrafficByEmail(email)
-				if err != nil || traffic == nil {
+				// Use ClientService to remove TgID directly (new architecture)
+				clientEntity, userId, err := t.getClientByEmailWithUserId(email)
+				if err != nil {
+					if err == gorm.ErrRecordNotFound {
+						t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
+						return
+					}
+					logger.Warning(err)
 					t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
 					return
 				}
-				needRestart, err := t.inboundService.SetClientTelegramUserID(traffic.Id, EmptyTelegramUserID)
+				
+				// Update TgID to 0
+				clientEntity.TgID = EmptyTelegramUserID
+				clientEntity.UpdatedAt = time.Now().Unix()
+				
+				clientService := ClientService{}
+				needRestart, err := clientService.UpdateClient(userId, clientEntity)
 				if needRestart {
 					t.xrayService.SetToNeedRestart()
 				}
@@ -1465,10 +1423,28 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 				)
 				t.editMessageCallbackTgBot(chatId, callbackQuery.Message.GetMessageID(), inlineKeyboard)
 			case "toggle_enable_c":
-				enabled, needRestart, err := t.inboundService.ToggleClientEnableByEmail(email)
+				// Use ClientService to toggle enable status (new architecture)
+				clientEntity, userId, err := t.getClientByEmailWithUserId(email)
+				if err != nil {
+					if err == gorm.ErrRecordNotFound {
+						t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
+						return
+					}
+					logger.Warning(err)
+					t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.errorOperation"))
+					return
+				}
+				
+				// Toggle enable status
+				clientEntity.Enable = !clientEntity.Enable
+				clientEntity.UpdatedAt = time.Now().Unix()
+				
+				clientService := ClientService{}
+				needRestart, err := clientService.UpdateClient(userId, clientEntity)
 				if needRestart {
 					t.xrayService.SetToNeedRestart()
 				}
+				enabled := clientEntity.Enable
 				if err == nil {
 					if enabled {
 						t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.enableSuccess", "Email=="+email))
@@ -1487,8 +1463,9 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 					return
 				}
 				inbound, err := t.inboundService.GetInbound(inboundIdInt)
-				if err != nil {
-					t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
+				if err != nil || inbound == nil {
+					logger.Warningf("Error getting inbound %d: %v", inboundIdInt, err)
+					t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.wentWrong"))
 					return
 				}
 				clients, err := t.getInboundClients(inboundIdInt)
@@ -1496,13 +1473,16 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 					t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
 					return
 				}
-				t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseClient", "Inbound=="+inbound.Remark), clients)
+				// Edit message instead of sending new one, fallback to send if edit fails
+				err = t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), t.I18nBot("tgbot.answers.chooseClient", "Inbound=="+inbound.Remark), clients)
+				if err != nil {
+					t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseClient", "Inbound=="+inbound.Remark), clients)
+				}
 			case "add_client_to":
-				// assign default values to clients variables
+				// assign default values to clients variables - reset all to ensure clean state
 				client_Id = uuid.New().String()
 				client_Flow = ""
-				client_Email = t.randomLowerAndNum(8)
-				client_LimitIP = 0
+				client_Email = strings.ToLower(t.randomLowerAndNum(8)) // Ensure lowercase
 				client_TotalGB = 0
 				client_ExpiryTime = 0
 				client_Enable = true
@@ -1510,10 +1490,13 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 				client_SubID = t.randomLowerAndNum(16)
 				client_Comment = ""
 				client_Reset = 0
+				client_MaxHWID = 0
+				client_HWIDEnabled = false
 				client_Security = "auto"
 				client_ShPassword = t.randomShadowSocksPassword()
 				client_TrPassword = t.randomLowerAndNum(10)
 				client_Method = ""
+				logger.Debugf("add_client_to: Initialized new client with email '%s' for inbound %d", client_Email, receiver_inbound_ID)
 
 				inboundId := dataArray[1]
 				inboundIdInt, err := strconv.Atoi(inboundId)
@@ -1534,7 +1517,7 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 					return
 				}
 
-				t.addClient(callbackQuery.Message.GetChat().ID, message_text)
+				t.addClient(callbackQuery.Message.GetChat().ID, message_text, callbackQuery.Message.GetMessageID())
 			}
 			return
 		} else {
@@ -1547,67 +1530,169 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 
 				}
 				t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.buttons.allClients"))
-				t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+				// Always edit message instead of sending new one
+				// This ensures we don't create multiple messages when navigating
+				err = t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+				if err != nil {
+					// Only send new message if edit truly fails (shouldn't happen in normal flow)
+					logger.Debugf("Failed to edit message for get_inbounds, sending new: %v", err)
+					t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+				}
 			case "admin_client_sub_links":
 				inbounds, err := t.getInboundsFor("get_clients_for_sub")
 				if err != nil {
 					t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
 					return
 				}
-				t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+				err = t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+				if err != nil {
+					t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+				}
 			case "admin_client_individual_links":
 				inbounds, err := t.getInboundsFor("get_clients_for_individual")
 				if err != nil {
 					t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
 					return
 				}
-				t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+				err = t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+				if err != nil {
+					t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+				}
 			case "admin_client_qr_links":
 				inbounds, err := t.getInboundsFor("get_clients_for_qr")
 				if err != nil {
 					t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
 					return
 				}
-				t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+				err = t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+				if err != nil {
+					t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+				}
 			}
 
 		}
 	}
 
 	switch callbackQuery.Data {
+	case "back_to_main":
+		// Return to main menu - use full menu from SendAnswer
+		t.sendCallbackAnswerTgBot(callbackQuery.ID, "")
+		mainMenuText := t.I18nBot("tgbot.commands.pleaseChoose")
+		
+		// Build full menu same as SendAnswer
+		var mainMenu *telego.InlineKeyboardMarkup
+		if isAdmin {
+			mainMenu = tu.InlineKeyboard(
+				tu.InlineKeyboardRow(
+					tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.SortedTrafficUsageReport")).WithCallbackData(t.encodeQuery("get_sorted_traffic_usage_report")),
+				),
+				tu.InlineKeyboardRow(
+					tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.serverUsage")).WithCallbackData(t.encodeQuery("get_usage")),
+					tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.ResetAllTraffics")).WithCallbackData(t.encodeQuery("reset_all_traffics")),
+				),
+				tu.InlineKeyboardRow(
+					tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.dbBackup")).WithCallbackData(t.encodeQuery("get_backup")),
+				),
+				tu.InlineKeyboardRow(
+					tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.getInbounds")).WithCallbackData(t.encodeQuery("inbounds")),
+					tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.depleteSoon")).WithCallbackData(t.encodeQuery("deplete_soon")),
+				),
+				tu.InlineKeyboardRow(
+					tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.commands")).WithCallbackData(t.encodeQuery("commands")),
+					tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.onlines")).WithCallbackData(t.encodeQuery("onlines")),
+				),
+				tu.InlineKeyboardRow(
+					tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.allClients")).WithCallbackData(t.encodeQuery("get_inbounds")),
+					tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.addClient")).WithCallbackData(t.encodeQuery("add_client")),
+				),
+				tu.InlineKeyboardRow(
+					tu.InlineKeyboardButton(t.I18nBot("pages.settings.subSettings")).WithCallbackData(t.encodeQuery("admin_client_sub_links")),
+					tu.InlineKeyboardButton(t.I18nBot("subscription.individualLinks")).WithCallbackData(t.encodeQuery("admin_client_individual_links")),
+					tu.InlineKeyboardButton(t.I18nBot("qrCode")).WithCallbackData(t.encodeQuery("admin_client_qr_links")),
+				),
+			)
+		} else {
+			mainMenu = tu.InlineKeyboard(
+				tu.InlineKeyboardRow(
+					tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.clientUsage")).WithCallbackData(t.encodeQuery("client_traffic")),
+					tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.commands")).WithCallbackData(t.encodeQuery("client_commands")),
+				),
+				tu.InlineKeyboardRow(
+					tu.InlineKeyboardButton(t.I18nBot("pages.settings.subSettings")).WithCallbackData(t.encodeQuery("client_sub_links")),
+					tu.InlineKeyboardButton(t.I18nBot("subscription.individualLinks")).WithCallbackData(t.encodeQuery("client_individual_links")),
+				),
+				tu.InlineKeyboardRow(
+					tu.InlineKeyboardButton(t.I18nBot("qrCode")).WithCallbackData(t.encodeQuery("client_qr_links")),
+				),
+			)
+		}
+		
+		err := t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), mainMenuText, mainMenu)
+		if err != nil {
+			// If edit fails, send new message with menu
+			t.SendAnswer(chatId, mainMenuText, isAdmin)
+		}
+		return
 	case "get_usage":
 		t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.buttons.serverUsage"))
-		t.getServerUsage(chatId)
+		// Edit message instead of sending new one
+		t.getServerUsage(chatId, callbackQuery.Message.GetMessageID())
 	case "usage_refresh":
 		t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.successfulOperation"))
 		t.getServerUsage(chatId, callbackQuery.Message.GetMessageID())
 	case "inbounds":
 		t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.buttons.getInbounds"))
-		t.SendMsgToTgbot(chatId, t.getInboundUsages())
+		// Edit message instead of sending new one
+		info := t.getInboundUsages()
+		// Add back button to main menu
+		backKeyboard := tu.InlineKeyboard(
+			tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("back_to_main")),
+			),
+		)
+		err := t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), info, backKeyboard)
+		if err != nil {
+			t.SendMsgToTgbot(chatId, info, backKeyboard)
+		}
 	case "deplete_soon":
 		t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.buttons.depleteSoon"))
-		t.getExhausted(chatId)
+		// Edit message instead of sending new one
+		t.getExhausted(chatId, callbackQuery.Message.GetMessageID())
 	case "get_backup":
 		t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.buttons.dbBackup"))
+		// Backup sends file, so we can't edit - send new message is OK
 		t.sendBackup(chatId)
-	case "get_banlogs":
-		t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.buttons.getBanLogs"))
-		t.sendBanLogs(chatId, true)
 	case "client_traffic":
 		tgUserID := callbackQuery.From.ID
 		t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.buttons.clientUsage"))
-		t.getClientUsage(chatId, tgUserID)
+		// Edit message instead of sending new one
+		t.getClientUsage(chatId, tgUserID, callbackQuery.Message.GetMessageID())
 	case "client_commands":
 		t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.buttons.commands"))
-		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.commands.helpClientCommands"))
+		// Edit message instead of sending new one
+		helpText := t.I18nBot("tgbot.commands.helpClientCommands")
+		// Add back button to main menu (for client users)
+		backKeyboard := tu.InlineKeyboard(
+			tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData("back_to_main"),
+			),
+		)
+		err := t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), helpText, backKeyboard)
+		if err != nil {
+			t.SendMsgToTgbot(chatId, helpText, backKeyboard)
+		}
 	case "client_sub_links":
 		// show user's own clients to choose one for sub links
 		tgUserID := callbackQuery.From.ID
-		traffics, err := t.inboundService.GetClientTrafficTgBot(tgUserID)
-		if err != nil {
-			// fallback to message
-			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation")+"\r\n"+err.Error())
-			return
+		// Try new architecture first
+		traffics, err := t.getClientTrafficTgBotNew(tgUserID)
+		if err != nil || len(traffics) == 0 {
+			// Fallback to old method
+			traffics, err = t.inboundService.GetClientTrafficTgBot(tgUserID)
+			if err != nil {
+				t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation")+"\r\n"+err.Error())
+				return
+			}
 		}
 		if len(traffics) == 0 {
 			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.askToAddUserId", "TgUserID=="+strconv.FormatInt(tgUserID, 10)))
@@ -1621,15 +1706,27 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 		if len(buttons) >= 6 {
 			cols = 2
 		}
+		// Add back button to main menu (for client users)
+		backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData("back_to_main")
+		buttons = append(buttons, backButton)
 		keyboard := tu.InlineKeyboardGrid(tu.InlineKeyboardCols(cols, buttons...))
-		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.commands.pleaseChoose"), keyboard)
+		// Edit message instead of sending new one
+		err = t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), t.I18nBot("tgbot.commands.pleaseChoose"), keyboard)
+		if err != nil {
+			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.commands.pleaseChoose"), keyboard)
+		}
 	case "client_individual_links":
 		// show user's clients to choose for individual links
 		tgUserID := callbackQuery.From.ID
-		traffics, err := t.inboundService.GetClientTrafficTgBot(tgUserID)
-		if err != nil {
-			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation")+"\r\n"+err.Error())
-			return
+		// Try new architecture first
+		traffics, err := t.getClientTrafficTgBotNew(tgUserID)
+		if err != nil || len(traffics) == 0 {
+			// Fallback to old method
+			traffics, err = t.inboundService.GetClientTrafficTgBot(tgUserID)
+			if err != nil {
+				t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation")+"\r\n"+err.Error())
+				return
+			}
 		}
 		if len(traffics) == 0 {
 			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.askToAddUserId", "TgUserID=="+strconv.FormatInt(tgUserID, 10)))
@@ -1643,15 +1740,27 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 		if len(buttons2) >= 6 {
 			cols2 = 2
 		}
+		// Add back button to main menu (for client users)
+		backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData("back_to_main")
+		buttons2 = append(buttons2, backButton)
 		keyboard2 := tu.InlineKeyboardGrid(tu.InlineKeyboardCols(cols2, buttons2...))
-		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.commands.pleaseChoose"), keyboard2)
+		// Edit message instead of sending new one
+		err = t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), t.I18nBot("tgbot.commands.pleaseChoose"), keyboard2)
+		if err != nil {
+			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.commands.pleaseChoose"), keyboard2)
+		}
 	case "client_qr_links":
 		// show user's clients to choose for QR codes
 		tgUserID := callbackQuery.From.ID
-		traffics, err := t.inboundService.GetClientTrafficTgBot(tgUserID)
-		if err != nil {
-			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOccurred")+"\r\n"+err.Error())
-			return
+		// Try new architecture first
+		traffics, err := t.getClientTrafficTgBotNew(tgUserID)
+		if err != nil || len(traffics) == 0 {
+			// Fallback to old method
+			traffics, err = t.inboundService.GetClientTrafficTgBot(tgUserID)
+			if err != nil {
+				t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOccurred")+"\r\n"+err.Error())
+				return
+			}
 		}
 		if len(traffics) == 0 {
 			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.askToAddUserId", "TgUserID=="+strconv.FormatInt(tgUserID, 10)))
@@ -1665,23 +1774,41 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 		if len(buttons3) >= 6 {
 			cols3 = 2
 		}
+		// Add back button to main menu (for client users)
+		backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData("back_to_main")
+		buttons3 = append(buttons3, backButton)
 		keyboard3 := tu.InlineKeyboardGrid(tu.InlineKeyboardCols(cols3, buttons3...))
-		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.commands.pleaseChoose"), keyboard3)
+		// Edit message instead of sending new one
+		err = t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), t.I18nBot("tgbot.commands.pleaseChoose"), keyboard3)
+		if err != nil {
+			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.commands.pleaseChoose"), keyboard3)
+		}
 	case "onlines":
 		t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.buttons.onlines"))
-		t.onlineClients(chatId)
+		// Edit message instead of sending new one
+		t.onlineClients(chatId, callbackQuery.Message.GetMessageID())
 	case "onlines_refresh":
 		t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.successfulOperation"))
 		t.onlineClients(chatId, callbackQuery.Message.GetMessageID())
 	case "commands":
 		t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.buttons.commands"))
-		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.commands.helpAdminCommands"))
+		// Edit message instead of sending new one
+		helpText := t.I18nBot("tgbot.commands.helpAdminCommands")
+		// Add back button to main menu
+		backKeyboard := tu.InlineKeyboard(
+			tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("back_to_main")),
+			),
+		)
+		err := t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), helpText, backKeyboard)
+		if err != nil {
+			t.SendMsgToTgbot(chatId, helpText, backKeyboard)
+		}
 	case "add_client":
-		// assign default values to clients variables
+		// assign default values to clients variables - reset all to ensure clean state
 		client_Id = uuid.New().String()
 		client_Flow = ""
-		client_Email = t.randomLowerAndNum(8)
-		client_LimitIP = 0
+		client_Email = strings.ToLower(t.randomLowerAndNum(8)) // Ensure lowercase
 		client_TotalGB = 0
 		client_ExpiryTime = 0
 		client_Enable = true
@@ -1693,6 +1820,9 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 		client_ShPassword = t.randomShadowSocksPassword()
 		client_TrPassword = t.randomLowerAndNum(10)
 		client_Method = ""
+		client_MaxHWID = 0
+		client_HWIDEnabled = false
+		logger.Debugf("add_client: Initialized new client with email '%s'", client_Email)
 
 		inbounds, err := t.getInboundsAddClient()
 		if err != nil {
@@ -1700,7 +1830,11 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 			return
 		}
 		t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.buttons.addClient"))
-		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+		// Edit message instead of sending new one
+		err = t.editMessageTgBot(chatId, callbackQuery.Message.GetMessageID(), t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+		if err != nil {
+			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.chooseInbound"), inbounds)
+		}
 	case "add_client_ch_default_email":
 		t.deleteMessageTgBot(chatId, callbackQuery.Message.GetMessageID())
 		userStates[chatId] = "awaiting_email"
@@ -1809,42 +1943,49 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 			),
 		)
 		t.editMessageCallbackTgBot(chatId, callbackQuery.Message.GetMessageID(), inlineKeyboard)
-	case "add_client_ch_default_ip_limit":
+	case "add_client_ch_default_hwid":
 		inlineKeyboard := tu.InlineKeyboard(
 			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.cancel")).WithCallbackData(t.encodeQuery("add_client_default_ip_limit")),
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.cancel")).WithCallbackData(t.encodeQuery("add_client_default_hwid")),
 			),
 			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton(t.I18nBot("tgbot.unlimited")).WithCallbackData(t.encodeQuery("add_client_ip_limit_c 0")),
-				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.custom")).WithCallbackData(t.encodeQuery("add_client_ip_limit_in 0")),
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.disable")).WithCallbackData(t.encodeQuery("add_client_hwid_c 0 false")),
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.unlimited")).WithCallbackData(t.encodeQuery("add_client_hwid_c 0 true")),
 			),
 			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton("1").WithCallbackData(t.encodeQuery("add_client_ip_limit_c 1")),
-				tu.InlineKeyboardButton("2").WithCallbackData(t.encodeQuery("add_client_ip_limit_c 2")),
+				tu.InlineKeyboardButton("1").WithCallbackData(t.encodeQuery("add_client_hwid_c 1 true")),
+				tu.InlineKeyboardButton("2").WithCallbackData(t.encodeQuery("add_client_hwid_c 2 true")),
+				tu.InlineKeyboardButton("3").WithCallbackData(t.encodeQuery("add_client_hwid_c 3 true")),
 			),
 			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton("3").WithCallbackData(t.encodeQuery("add_client_ip_limit_c 3")),
-				tu.InlineKeyboardButton("4").WithCallbackData(t.encodeQuery("add_client_ip_limit_c 4")),
-			),
-			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton("5").WithCallbackData(t.encodeQuery("add_client_ip_limit_c 5")),
-				tu.InlineKeyboardButton("6").WithCallbackData(t.encodeQuery("add_client_ip_limit_c 6")),
-				tu.InlineKeyboardButton("7").WithCallbackData(t.encodeQuery("add_client_ip_limit_c 7")),
-			),
-			tu.InlineKeyboardRow(
-				tu.InlineKeyboardButton("8").WithCallbackData(t.encodeQuery("add_client_ip_limit_c 8")),
-				tu.InlineKeyboardButton("9").WithCallbackData(t.encodeQuery("add_client_ip_limit_c 9")),
-				tu.InlineKeyboardButton("10").WithCallbackData(t.encodeQuery("add_client_ip_limit_c 10")),
+				tu.InlineKeyboardButton("5").WithCallbackData(t.encodeQuery("add_client_hwid_c 5 true")),
+				tu.InlineKeyboardButton("10").WithCallbackData(t.encodeQuery("add_client_hwid_c 10 true")),
 			),
 		)
 		t.editMessageCallbackTgBot(chatId, callbackQuery.Message.GetMessageID(), inlineKeyboard)
 	case "add_client_default_info":
-		t.deleteMessageTgBot(chatId, callbackQuery.Message.GetMessageID())
+		messageId := callbackQuery.Message.GetMessageID()
+		t.deleteMessageTgBot(chatId, messageId)
 		t.SendMsgToTgbotDeleteAfter(chatId, t.I18nBot("tgbot.messages.using_default_value"), 3, tu.ReplyKeyboardRemove())
 		delete(userStates, chatId)
 		inbound, _ := t.inboundService.GetInbound(receiver_inbound_ID)
 		message_text, _ := t.BuildInboundClientDataMessage(inbound.Remark, inbound.Protocol)
+		// Note: messageId is not available here as message was deleted, so we send new message
 		t.addClient(chatId, message_text)
+	case "add_client_back_to_form":
+		// Return to client form after error
+		t.sendCallbackAnswerTgBot(callbackQuery.ID, "")
+		inbound, err := t.inboundService.GetInbound(receiver_inbound_ID)
+		if err != nil {
+			t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
+			return
+		}
+		message_text, err := t.BuildInboundClientDataMessage(inbound.Remark, inbound.Protocol)
+		if err != nil {
+			t.sendCallbackAnswerTgBot(callbackQuery.ID, err.Error())
+			return
+		}
+		t.addClient(chatId, message_text, callbackQuery.Message.GetMessageID())
 	case "add_client_cancel":
 		delete(userStates, chatId)
 		t.deleteMessageTgBot(chatId, callbackQuery.Message.GetMessageID())
@@ -1863,7 +2004,7 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 		}
 		t.addClient(chatId, message_text, messageId)
 		t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.canceled", "Email=="+client_Email))
-	case "add_client_default_ip_limit":
+	case "add_client_default_hwid":
 		messageId := callbackQuery.Message.GetMessageID()
 		inbound, err := t.inboundService.GetInbound(receiver_inbound_ID)
 		if err != nil {
@@ -1880,22 +2021,74 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 	case "add_client_submit_disable":
 		client_Enable = false
 		_, err := t.SubmitAddClient()
+		messageId := callbackQuery.Message.GetMessageID()
 		if err != nil {
 			errorMessage := fmt.Sprintf("%v", err)
-			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.messages.error_add_client", "error=="+errorMessage), tu.ReplyKeyboardRemove())
+			errorMsg := t.I18nBot("tgbot.messages.error_add_client", "error=="+errorMessage)
+			// Add back button to return to form
+			inbound, inboundErr := t.inboundService.GetInbound(receiver_inbound_ID)
+			if inboundErr == nil {
+				message_text, buildErr := t.BuildInboundClientDataMessage(inbound.Remark, inbound.Protocol)
+				if buildErr == nil {
+					// Show error with back button that returns to form
+					backKeyboard := tu.InlineKeyboard(
+						tu.InlineKeyboardRow(
+							tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("add_client_back_to_form")),
+						),
+					)
+					t.editMessageTgBot(chatId, messageId, errorMsg+"\r\n\r\n"+message_text, backKeyboard)
+				} else {
+					t.editMessageTgBot(chatId, messageId, errorMsg)
+				}
+			} else {
+				t.editMessageTgBot(chatId, messageId, errorMsg)
+			}
 		} else {
-			t.deleteMessageTgBot(chatId, callbackQuery.Message.GetMessageID())
-			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.successfulOperation"), tu.ReplyKeyboardRemove())
+			// Client created successfully - edit message with success notification and navigation buttons
+			successMsg := t.I18nBot("tgbot.answers.successfulOperation")
+			// Add navigation buttons
+			backKeyboard := tu.InlineKeyboard(
+				tu.InlineKeyboardRow(
+					tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("back_to_main")),
+				),
+			)
+			t.editMessageTgBot(chatId, messageId, successMsg, backKeyboard)
 		}
 	case "add_client_submit_enable":
 		client_Enable = true
 		_, err := t.SubmitAddClient()
+		messageId := callbackQuery.Message.GetMessageID()
 		if err != nil {
 			errorMessage := fmt.Sprintf("%v", err)
-			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.messages.error_add_client", "error=="+errorMessage), tu.ReplyKeyboardRemove())
+			errorMsg := t.I18nBot("tgbot.messages.error_add_client", "error=="+errorMessage)
+			// Add back button to return to form
+			inbound, inboundErr := t.inboundService.GetInbound(receiver_inbound_ID)
+			if inboundErr == nil {
+				message_text, buildErr := t.BuildInboundClientDataMessage(inbound.Remark, inbound.Protocol)
+				if buildErr == nil {
+					// Show error with back button that returns to form
+					backKeyboard := tu.InlineKeyboard(
+						tu.InlineKeyboardRow(
+							tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("add_client_back_to_form")),
+						),
+					)
+					t.editMessageTgBot(chatId, messageId, errorMsg+"\r\n\r\n"+message_text, backKeyboard)
+				} else {
+					t.editMessageTgBot(chatId, messageId, errorMsg)
+				}
+			} else {
+				t.editMessageTgBot(chatId, messageId, errorMsg)
+			}
 		} else {
-			t.deleteMessageTgBot(chatId, callbackQuery.Message.GetMessageID())
-			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.successfulOperation"), tu.ReplyKeyboardRemove())
+			// Client created successfully - edit message with success notification and navigation buttons
+			successMsg := t.I18nBot("tgbot.answers.successfulOperation")
+			// Add navigation buttons
+			backKeyboard := tu.InlineKeyboard(
+				tu.InlineKeyboardRow(
+					tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("back_to_main")),
+				),
+			)
+			t.editMessageTgBot(chatId, messageId, successMsg, backKeyboard)
 		}
 	case "reset_all_traffics_cancel":
 		t.deleteMessageTgBot(chatId, callbackQuery.Message.GetMessageID())
@@ -1935,52 +2128,111 @@ func (t *Tgbot) answerCallback(callbackQuery *telego.CallbackQuery, isAdmin bool
 		emails, err := t.inboundService.getAllEmails()
 
 		if err != nil {
-			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation"), tu.ReplyKeyboardRemove())
+			errorKeyboard := t.createBackAndDeleteKeyboard(chatId, 0)
+			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation"), errorKeyboard)
 			return
 		}
 		valid_emails, extra_emails, err := t.inboundService.FilterAndSortClientEmails(emails)
 		if err != nil {
-			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation"), tu.ReplyKeyboardRemove())
+			errorKeyboard := t.createBackAndDeleteKeyboard(chatId, 0)
+			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation"), errorKeyboard)
 			return
 		}
 
 		for _, valid_emails := range valid_emails {
-			traffic, err := t.inboundService.GetClientTrafficByEmail(valid_emails)
+			// Use ClientService to get client data (new architecture)
+			clientEntity, _, err := t.getClientByEmailWithUserId(valid_emails)
 			if err != nil {
+				if err == gorm.ErrRecordNotFound {
+					msg := fmt.Sprintf("📧 %s\n%s", valid_emails, t.I18nBot("tgbot.noResult"))
+					keyboard := t.createBackAndDeleteKeyboard(chatId, 0)
+					sentMsg, err := t.sendMessageWithKeyboard(chatId, msg, keyboard)
+					if err == nil && sentMsg != nil {
+						// Update keyboard with actual message ID
+						keyboard = t.createBackAndDeleteKeyboard(chatId, sentMsg.MessageID)
+						t.editMessageTgBot(chatId, sentMsg.MessageID, msg, keyboard)
+					}
+					continue
+				}
 				logger.Warning(err)
 				msg := t.I18nBot("tgbot.wentWrong")
-				t.SendMsgToTgbot(chatId, msg)
+				keyboard := t.createBackAndDeleteKeyboard(chatId, 0)
+				sentMsg, err := t.sendMessageWithKeyboard(chatId, msg, keyboard)
+				if err == nil && sentMsg != nil {
+					// Update keyboard with actual message ID
+					keyboard = t.createBackAndDeleteKeyboard(chatId, sentMsg.MessageID)
+					t.editMessageTgBot(chatId, sentMsg.MessageID, msg, keyboard)
+				}
 				continue
 			}
-			if traffic == nil {
-				msg := t.I18nBot("tgbot.noResult")
-				t.SendMsgToTgbot(chatId, msg)
-				continue
+
+			// Create ClientTraffic from ClientEntity for compatibility with clientInfoMsg
+			totalBytes := int64(clientEntity.TotalGB * 1024 * 1024 * 1024)
+			traffic := &xray.ClientTraffic{
+				Id:         0,
+				InboundId:  0,
+				Enable:     clientEntity.Enable,
+				Email:      clientEntity.Email,
+				UUID:       clientEntity.UUID,
+				SubId:      clientEntity.SubID,
+				Up:         clientEntity.Up,
+				Down:       clientEntity.Down,
+				AllTime:    clientEntity.AllTime,
+				ExpiryTime: clientEntity.ExpiryTime,
+				Total:      totalBytes,
+				Reset:      clientEntity.Reset,
+				LastOnline: clientEntity.LastOnline,
 			}
 
 			output := t.clientInfoMsg(traffic, false, false, false, false, true, false)
-			t.SendMsgToTgbot(chatId, output, tu.ReplyKeyboardRemove())
+			keyboard := t.createBackAndDeleteKeyboard(chatId, 0)
+			sentMsg, err := t.sendMessageWithKeyboard(chatId, output, keyboard)
+			if err == nil && sentMsg != nil {
+				// Update keyboard with actual message ID
+				keyboard = t.createBackAndDeleteKeyboard(chatId, sentMsg.MessageID)
+				t.editMessageTgBot(chatId, sentMsg.MessageID, output, keyboard)
+			}
 		}
 		for _, extra_emails := range extra_emails {
 			msg := fmt.Sprintf("📧 %s\n%s", extra_emails, t.I18nBot("tgbot.noResult"))
-			t.SendMsgToTgbot(chatId, msg, tu.ReplyKeyboardRemove())
-
+			keyboard := t.createBackAndDeleteKeyboard(chatId, 0)
+			sentMsg, err := t.sendMessageWithKeyboard(chatId, msg, keyboard)
+			if err == nil && sentMsg != nil {
+				// Update keyboard with actual message ID
+				keyboard = t.createBackAndDeleteKeyboard(chatId, sentMsg.MessageID)
+				t.editMessageTgBot(chatId, sentMsg.MessageID, msg, keyboard)
+			}
 		}
 	default:
 		if after, ok := strings.CutPrefix(callbackQuery.Data, "client_sub_links "); ok {
 			email := after
-			t.sendClientSubLinks(chatId, email)
+			t.sendClientSubLinks(chatId, email, callbackQuery.Message.GetMessageID())
 			return
 		}
 		if after, ok := strings.CutPrefix(callbackQuery.Data, "client_individual_links "); ok {
 			email := after
-			t.sendClientIndividualLinks(chatId, email)
+			t.sendClientIndividualLinks(chatId, email, callbackQuery.Message.GetMessageID())
 			return
 		}
 		if after, ok := strings.CutPrefix(callbackQuery.Data, "client_qr_links "); ok {
 			email := after
-			t.sendClientQRLinks(chatId, email)
+			t.sendClientQRLinks(chatId, email, callbackQuery.Message.GetMessageID())
 			return
+		}
+		// Handle delete_message callback with encoded query
+		decodedQuery, err := t.decodeQuery(callbackQuery.Data)
+		if err == nil {
+			if strings.HasPrefix(decodedQuery, "delete_message ") {
+				parts := strings.Fields(decodedQuery)
+				if len(parts) >= 2 {
+					msgID, err := strconv.Atoi(parts[1])
+					if err == nil {
+						t.deleteMessageTgBot(chatId, msgID)
+						t.sendCallbackAnswerTgBot(callbackQuery.ID, t.I18nBot("tgbot.answers.successfulOperation"))
+					}
+				}
+				return
+			}
 		}
 	}
 }
@@ -2011,22 +2263,15 @@ func (t *Tgbot) BuildInboundClientDataMessage(inbound_remark string, protocol mo
 		traffic_value = common.FormatTraffic(client_TotalGB)
 	}
 
-	ip_limit := ""
-	if client_LimitIP == 0 {
-		ip_limit = "♾️ Unlimited(Reset)"
-	} else {
-		ip_limit = fmt.Sprint(client_LimitIP)
-	}
-
 	switch protocol {
 	case model.VMESS, model.VLESS:
-		message = t.I18nBot("tgbot.messages.inbound_client_data_id", "InboundRemark=="+inbound_remark, "ClientId=="+client_Id, "ClientEmail=="+client_Email, "ClientTraffic=="+traffic_value, "ClientExp=="+expiryTime, "IpLimit=="+ip_limit, "ClientComment=="+client_Comment)
+		message = t.I18nBot("tgbot.messages.inbound_client_data_id", "InboundRemark=="+inbound_remark, "ClientId=="+client_Id, "ClientEmail=="+client_Email, "ClientTraffic=="+traffic_value, "ClientExp=="+expiryTime, "ClientComment=="+client_Comment)
 
 	case model.Trojan:
-		message = t.I18nBot("tgbot.messages.inbound_client_data_pass", "InboundRemark=="+inbound_remark, "ClientPass=="+client_TrPassword, "ClientEmail=="+client_Email, "ClientTraffic=="+traffic_value, "ClientExp=="+expiryTime, "IpLimit=="+ip_limit, "ClientComment=="+client_Comment)
+		message = t.I18nBot("tgbot.messages.inbound_client_data_pass", "InboundRemark=="+inbound_remark, "ClientPass=="+client_TrPassword, "ClientEmail=="+client_Email, "ClientTraffic=="+traffic_value, "ClientExp=="+expiryTime, "ClientComment=="+client_Comment)
 
 	case model.Shadowsocks:
-		message = t.I18nBot("tgbot.messages.inbound_client_data_pass", "InboundRemark=="+inbound_remark, "ClientPass=="+client_ShPassword, "ClientEmail=="+client_Email, "ClientTraffic=="+traffic_value, "ClientExp=="+expiryTime, "IpLimit=="+ip_limit, "ClientComment=="+client_Comment)
+		message = t.I18nBot("tgbot.messages.inbound_client_data_pass", "InboundRemark=="+inbound_remark, "ClientPass=="+client_ShPassword, "ClientEmail=="+client_Email, "ClientTraffic=="+traffic_value, "ClientExp=="+expiryTime, "ClientComment=="+client_Comment)
 
 	default:
 		return "", errors.New("unknown protocol")
@@ -2046,16 +2291,17 @@ func (t *Tgbot) BuildJSONForProtocol(protocol model.Protocol) (string, error) {
                 "id": "%s",
                 "security": "%s",
                 "email": "%s",
-                "limitIp": %d,
                 "totalGB": %d,
                 "expiryTime": %d,
                 "enable": %t,
                 "tgId": "%s",
                 "subId": "%s",
                 "comment": "%s",
-                "reset": %d
+                "reset": %d,
+                "hwidEnabled": %t,
+                "maxHwid": %d
             }]
-        }`, client_Id, client_Security, client_Email, client_LimitIP, client_TotalGB, client_ExpiryTime, client_Enable, client_TgID, client_SubID, client_Comment, client_Reset)
+        }`, client_Id, client_Security, client_Email, client_TotalGB, client_ExpiryTime, client_Enable, client_TgID, client_SubID, client_Comment, client_Reset, client_HWIDEnabled, client_MaxHWID)
 
 	case model.VLESS:
 		jsonString = fmt.Sprintf(`{
@@ -2063,7 +2309,6 @@ func (t *Tgbot) BuildJSONForProtocol(protocol model.Protocol) (string, error) {
                 "id": "%s",
                 "flow": "%s",
                 "email": "%s",
-                "limitIp": %d,
                 "totalGB": %d,
                 "expiryTime": %d,
                 "enable": %t,
@@ -2072,14 +2317,13 @@ func (t *Tgbot) BuildJSONForProtocol(protocol model.Protocol) (string, error) {
                 "comment": "%s",
                 "reset": %d
             }]
-        }`, client_Id, client_Flow, client_Email, client_LimitIP, client_TotalGB, client_ExpiryTime, client_Enable, client_TgID, client_SubID, client_Comment, client_Reset)
+        }`, client_Id, client_Flow, client_Email, client_TotalGB, client_ExpiryTime, client_Enable, client_TgID, client_SubID, client_Comment, client_Reset)
 
 	case model.Trojan:
 		jsonString = fmt.Sprintf(`{
             "clients": [{
                 "password": "%s",
                 "email": "%s",
-                "limitIp": %d,
                 "totalGB": %d,
                 "expiryTime": %d,
                 "enable": %t,
@@ -2088,7 +2332,7 @@ func (t *Tgbot) BuildJSONForProtocol(protocol model.Protocol) (string, error) {
                 "comment": "%s",
                 "reset": %d
             }]
-        }`, client_TrPassword, client_Email, client_LimitIP, client_TotalGB, client_ExpiryTime, client_Enable, client_TgID, client_SubID, client_Comment, client_Reset)
+        }`, client_TrPassword, client_Email, client_TotalGB, client_ExpiryTime, client_Enable, client_TgID, client_SubID, client_Comment, client_Reset)
 
 	case model.Shadowsocks:
 		jsonString = fmt.Sprintf(`{
@@ -2096,7 +2340,6 @@ func (t *Tgbot) BuildJSONForProtocol(protocol model.Protocol) (string, error) {
                 "method": "%s",
                 "password": "%s",
                 "email": "%s",
-                "limitIp": %d,
                 "totalGB": %d,
                 "expiryTime": %d,
                 "enable": %t,
@@ -2105,7 +2348,7 @@ func (t *Tgbot) BuildJSONForProtocol(protocol model.Protocol) (string, error) {
                 "comment": "%s",
                 "reset": %d
             }]
-        }`, client_Method, client_ShPassword, client_Email, client_LimitIP, client_TotalGB, client_ExpiryTime, client_Enable, client_TgID, client_SubID, client_Comment, client_Reset)
+        }`, client_Method, client_ShPassword, client_Email, client_TotalGB, client_ExpiryTime, client_Enable, client_TgID, client_SubID, client_Comment, client_Reset)
 
 	default:
 		return "", errors.New("unknown protocol")
@@ -2114,27 +2357,78 @@ func (t *Tgbot) BuildJSONForProtocol(protocol model.Protocol) (string, error) {
 	return jsonString, nil
 }
 
-// SubmitAddClient submits the client addition request to the inbound service.
+// SubmitAddClient submits the client addition request using new architecture (ClientEntity).
 func (t *Tgbot) SubmitAddClient() (bool, error) {
-
 	inbound, err := t.inboundService.GetInbound(receiver_inbound_ID)
 	if err != nil {
 		logger.Warning("getIboundClients run failed:", err)
 		return false, errors.New(t.I18nBot("tgbot.answers.getInboundsFailed"))
 	}
 
-	jsonString, err := t.BuildJSONForProtocol(inbound.Protocol)
+	// Normalize email to lowercase
+	client_Email = strings.ToLower(strings.TrimSpace(client_Email))
+	
+	// Log for debugging
+	logger.Debugf("SubmitAddClient: Creating client with email '%s' for inbound %d (userId: %d)", client_Email, receiver_inbound_ID, inbound.UserId)
+
+	// Create ClientEntity directly using new architecture
+	clientService := ClientService{}
+	
+	// Convert TotalGB from bytes to GB (client_TotalGB is stored in bytes)
+	totalGB := float64(0)
+	if client_TotalGB > 0 {
+		totalGB = float64(client_TotalGB) / (1024 * 1024 * 1024)
+	}
+	
+	// Convert TgID from string to int64
+	var tgID int64 = 0
+	if client_TgID != "" {
+		if parsedTgID, err := strconv.ParseInt(client_TgID, 10, 64); err == nil {
+			tgID = parsedTgID
+		}
+	}
+	
+	// Build ClientEntity from global variables
+	clientEntity := &model.ClientEntity{
+		UserId:      inbound.UserId,
+		Email:       client_Email,
+		UUID:        client_Id,
+		Security:    client_Security,
+		Flow:        client_Flow,
+		TotalGB:     totalGB,
+		ExpiryTime:  client_ExpiryTime,
+		Enable:      client_Enable,
+		TgID:        tgID,
+		SubID:       client_SubID,
+		Comment:     client_Comment,
+		Reset:       client_Reset,
+		HWIDEnabled: client_HWIDEnabled,
+		MaxHWID:     client_MaxHWID,
+	}
+	
+	// Set password based on protocol
+	switch inbound.Protocol {
+	case model.Trojan:
+		clientEntity.Password = client_TrPassword
+	case model.Shadowsocks:
+		clientEntity.Password = client_ShPassword
+		// Method is stored in inbound settings, not in client
+	case model.VMESS, model.VLESS:
+		// Password not used for VMESS/VLESS
+	}
+	
+	// Set inbound assignment
+	clientEntity.InboundIds = []int{receiver_inbound_ID}
+
+	// Add client using ClientService (new architecture)
+	needRestart, err := clientService.AddClient(inbound.UserId, clientEntity)
 	if err != nil {
-		logger.Warning("BuildJSONForProtocol run failed:", err)
-		return false, errors.New("failed to build JSON for protocol")
+		logger.Warningf("SubmitAddClient: Failed to add client: %v", err)
+		return false, err
 	}
-
-	newInbound := &model.Inbound{
-		Id:       receiver_inbound_ID,
-		Settings: jsonString,
-	}
-
-	return t.inboundService.AddInboundClient(newInbound)
+	
+	logger.Debugf("SubmitAddClient: Successfully added client with email '%s'", client_Email)
+	return needRestart, nil
 }
 
 // checkAdmin checks if the given Telegram ID is an admin.
@@ -2159,7 +2453,6 @@ func (t *Tgbot) SendAnswer(chatId int64, msg string, isAdmin bool) {
 		),
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.dbBackup")).WithCallbackData(t.encodeQuery("get_backup")),
-			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.getBanLogs")).WithCallbackData(t.encodeQuery("get_banlogs")),
 		),
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.getInbounds")).WithCallbackData(t.encodeQuery("inbounds")),
@@ -2259,11 +2552,20 @@ func (t *Tgbot) SendMsgToTgbot(chatId int64, msg string, replyMarkup ...telego.R
 
 // buildSubscriptionURLs builds the HTML sub page URL and JSON subscription URL for a client email
 func (t *Tgbot) buildSubscriptionURLs(email string) (string, string, error) {
-	// Resolve subId from client email
-	traffic, client, err := t.inboundService.GetClientByEmail(email)
-	_ = traffic
-	if err != nil || client == nil {
-		return "", "", errors.New("client not found")
+	// Use ClientService to find client by email (new architecture)
+	clientEntity, _, err := t.getClientByEmailWithUserId(email)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			logger.Warningf("Client not found for email: %s", email)
+			return "", "", errors.New("клиент не найден")
+		}
+		logger.Warningf("Error getting client by email %s: %v", email, err)
+		return "", "", fmt.Errorf("ошибка при получении клиента: %v", err)
+	}
+	
+	if clientEntity.SubID == "" {
+		logger.Warningf("Client %s has no SubID", email)
+		return "", "", errors.New("у клиента не установлен Subscription ID")
 	}
 
 	// Gather settings to construct absolute URLs
@@ -2314,8 +2616,8 @@ func (t *Tgbot) buildSubscriptionURLs(email string) (string, string, error) {
 		subJsonPath = subJsonPath + "/"
 	}
 
-	subURL := fmt.Sprintf("%s://%s%s%s", scheme, host, subPath, client.SubID)
-	subJsonURL := fmt.Sprintf("%s://%s%s%s", scheme, host, subJsonPath, client.SubID)
+	subURL := fmt.Sprintf("%s://%s%s%s", scheme, host, subPath, clientEntity.SubID)
+	subJsonURL := fmt.Sprintf("%s://%s%s%s", scheme, host, subJsonPath, clientEntity.SubID)
 	if !subJsonEnable {
 		subJsonURL = ""
 	}
@@ -2323,10 +2625,11 @@ func (t *Tgbot) buildSubscriptionURLs(email string) (string, string, error) {
 }
 
 // sendClientSubLinks sends the subscription links for the client to the chat.
-func (t *Tgbot) sendClientSubLinks(chatId int64, email string) {
+func (t *Tgbot) sendClientSubLinks(chatId int64, email string, messageID ...int) {
 	subURL, subJsonURL, err := t.buildSubscriptionURLs(email)
 	if err != nil {
-		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation")+"\r\n"+err.Error())
+		logger.Warningf("Error building subscription URLs for client %s: %v", email, err)
+		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.wentWrong")+"\r\n"+err.Error())
 		return
 	}
 	msg := "Subscription URL:\r\n<code>" + subURL + "</code>"
@@ -2340,16 +2643,27 @@ func (t *Tgbot) sendClientSubLinks(chatId int64, email string) {
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(t.I18nBot("qrCode")).WithCallbackData(t.encodeQuery("client_qr_links "+email)),
 		),
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("get_client_info "+email)),
+		),
 	)
-	t.SendMsgToTgbot(chatId, msg, inlineKeyboard)
+	if len(messageID) > 0 {
+		err := t.editMessageTgBot(chatId, messageID[0], msg, inlineKeyboard)
+		if err != nil {
+			t.SendMsgToTgbot(chatId, msg, inlineKeyboard)
+		}
+	} else {
+		t.SendMsgToTgbot(chatId, msg, inlineKeyboard)
+	}
 }
 
 // sendClientIndividualLinks fetches the subscription content (individual links) and sends it to the user
-func (t *Tgbot) sendClientIndividualLinks(chatId int64, email string) {
+func (t *Tgbot) sendClientIndividualLinks(chatId int64, email string, messageID ...int) {
 	// Build the HTML sub page URL; we'll call it with header Accept to get raw content
 	subURL, _, err := t.buildSubscriptionURLs(email)
 	if err != nil {
-		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation")+"\r\n"+err.Error())
+		logger.Warningf("Error building subscription URLs for client %s: %v", email, err)
+		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.wentWrong")+"\r\n"+err.Error())
 		return
 	}
 
@@ -2359,8 +2673,12 @@ func (t *Tgbot) sendClientIndividualLinks(chatId int64, email string) {
 		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation")+"\r\n"+err.Error())
 		return
 	}
-	// Force plain text to avoid HTML page; controller respects Accept header
-	req.Header.Set("Accept", "text/plain, */*;q=0.1")
+	// Set User-Agent as browser to pass encryption check if enabled
+	// The controller allows browser User-Agent when encryption is enabled (checks Accept header for text/html)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	// Set Accept to include text/html to pass encryption check (controller checks for text/html in Accept)
+	// But prioritize text/plain - controller will return plain text if html=1 is not in query and Accept has text/plain preference
+	req.Header.Set("Accept", "text/plain, text/html;q=0.8, */*;q=0.1")
 
 	// Use optimized client with connection pooling
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -2373,6 +2691,19 @@ func (t *Tgbot) sendClientIndividualLinks(chatId int64, email string) {
 		return
 	}
 	defer resp.Body.Close()
+
+	// Check HTTP status code
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		errorMsg := fmt.Sprintf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
+		logger.Warningf("Failed to fetch subscription links for client %s: %s", email, errorMsg)
+		if resp.StatusCode == http.StatusForbidden {
+			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation")+"\r\n"+t.I18nBot("tgbot.messages.subscriptionForbidden"))
+		} else {
+			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation")+"\r\n"+errorMsg)
+		}
+		return
+	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -2395,15 +2726,39 @@ func (t *Tgbot) sendClientIndividualLinks(chatId int64, email string) {
 		content = string(bodyBytes)
 	}
 
-	// Normalize line endings and trim
-	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	// Check if content is HTML (contains HTML tags)
+	isHTML := strings.Contains(strings.ToLower(content), "<html") || 
+	          strings.Contains(strings.ToLower(content), "<!doctype") ||
+	          strings.Contains(strings.ToLower(content), "<template") ||
+	          strings.Contains(strings.ToLower(content), "<script")
+	
 	var cleaned []string
-	for _, l := range lines {
-		l = strings.TrimSpace(l)
-		if l != "" {
-			cleaned = append(cleaned, l)
+	if isHTML {
+		// Parse HTML to extract subscription links
+		// Look for links that start with vmess://, vless://, trojan://, ss://, or https://
+		linkPattern := regexp.MustCompile(`(vmess://[^\s"<>]+|vless://[^\s"<>]+|trojan://[^\s"<>]+|ss://[^\s"<>]+|https?://[^\s"<>]+)`)
+		matches := linkPattern.FindAllString(content, -1)
+		for _, match := range matches {
+			// Clean up HTML entities and trim
+			match = strings.TrimSpace(match)
+			if match != "" && !strings.Contains(match, "<") && !strings.Contains(match, ">") {
+				cleaned = append(cleaned, match)
+			}
+		}
+	} else {
+		// Normalize line endings and trim
+		lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+		for _, l := range lines {
+			l = strings.TrimSpace(l)
+			// Filter out HTML tags and non-link content
+			if l != "" && !strings.HasPrefix(strings.ToLower(l), "<") && 
+			   !strings.Contains(l, "<template") && !strings.Contains(l, "<a-checkbox") &&
+			   !strings.Contains(l, "<script") && !strings.Contains(l, "</script>") {
+				cleaned = append(cleaned, l)
+			}
 		}
 	}
+	
 	if len(cleaned) == 0 {
 		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.noResult"))
 		return
@@ -2419,18 +2774,39 @@ func (t *Tgbot) sendClientIndividualLinks(chatId int64, email string) {
 		chunk := cleaned[i:j]
 		msg := t.I18nBot("subscription.individualLinks") + ":\r\n"
 		for _, link := range chunk {
-			// wrap each link in <code>
+			// Escape HTML special characters and wrap each link in <code>
+			link = strings.ReplaceAll(link, "&", "&amp;")
+			link = strings.ReplaceAll(link, "<", "&lt;")
+			link = strings.ReplaceAll(link, ">", "&gt;")
 			msg += "<code>" + link + "</code>\r\n"
 		}
-		t.SendMsgToTgbot(chatId, msg)
+		// Add back button to the last message
+		var inlineKeyboard *telego.InlineKeyboardMarkup
+		if j >= len(cleaned) {
+			inlineKeyboard = tu.InlineKeyboard(
+				tu.InlineKeyboardRow(
+					tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("get_client_info "+email)),
+				),
+			)
+		}
+		// Edit first message if messageID provided, otherwise send new
+		if i == 0 && len(messageID) > 0 {
+			err := t.editMessageTgBot(chatId, messageID[0], msg, inlineKeyboard)
+			if err != nil {
+				t.SendMsgToTgbot(chatId, msg, inlineKeyboard)
+			}
+		} else {
+			t.SendMsgToTgbot(chatId, msg, inlineKeyboard)
+		}
 	}
 }
 
 // sendClientQRLinks generates QR images for subscription URL, JSON URL, and a few individual links, then sends them
-func (t *Tgbot) sendClientQRLinks(chatId int64, email string) {
+func (t *Tgbot) sendClientQRLinks(chatId int64, email string, messageID ...int) {
 	subURL, subJsonURL, err := t.buildSubscriptionURLs(email)
 	if err != nil {
-		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.errorOperation")+"\r\n"+err.Error())
+		logger.Warningf("Error building subscription URLs for client %s: %v", email, err)
+		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.wentWrong")+"\r\n"+err.Error())
 		return
 	}
 
@@ -2442,8 +2818,16 @@ func (t *Tgbot) sendClientQRLinks(chatId int64, email string) {
 		return qrcode.Encode(content, qrcode.Medium, size)
 	}
 
-	// Inform user
-	t.SendMsgToTgbot(chatId, "QRCode"+":")
+	// Inform user - edit message if messageID provided
+	qrMsg := "QRCode" + ":"
+	if len(messageID) > 0 {
+		err := t.editMessageTgBot(chatId, messageID[0], qrMsg, nil)
+		if err != nil {
+			t.SendMsgToTgbot(chatId, qrMsg)
+		}
+	} else {
+		t.SendMsgToTgbot(chatId, qrMsg)
+	}
 
 	// Send sub URL QR (filename: sub.png)
 	if png, err := createQR(subURL, 320); err == nil {
@@ -2519,19 +2903,423 @@ func (t *Tgbot) sendClientQRLinks(chatId int64, email string) {
 			}
 		}
 	}
+	
+	// Add back button after sending all QR codes
+	backKeyboard := tu.InlineKeyboard(
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("get_client_info "+email)),
+		),
+	)
+	t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.successfulOperation"), backKeyboard)
 }
 
 // SendMsgToTgbotAdmins sends a message to all admin Telegram chats.
+// If no replyMarkup is provided, automatically adds a delete button.
 func (t *Tgbot) SendMsgToTgbotAdmins(msg string, replyMarkup ...telego.ReplyMarkup) {
 	if len(replyMarkup) > 0 {
 		for _, adminId := range adminIds {
 			t.SendMsgToTgbot(adminId, msg, replyMarkup[0])
 		}
 	} else {
+		// Automatically add delete button to informational messages
 		for _, adminId := range adminIds {
-			t.SendMsgToTgbot(adminId, msg)
+			keyboard := t.createBackAndDeleteKeyboard(adminId, 0)
+			sentMsg, err := t.sendMessageWithKeyboard(adminId, msg, keyboard)
+			if err == nil && sentMsg != nil {
+				// Update keyboard with actual message ID
+				keyboard = t.createBackAndDeleteKeyboard(adminId, sentMsg.MessageID)
+				t.editMessageTgBot(adminId, sentMsg.MessageID, msg, keyboard)
+			}
 		}
 	}
+}
+
+// NotifyClientCreated sends a notification when a client is created.
+// This is called from ClientService.AddClient and sends notifications to admins only.
+func (t *Tgbot) NotifyClientCreated(client *model.ClientEntity) {
+	if !t.IsRunning() {
+		return
+	}
+
+	msg := t.I18nBot("tgbot.messages.clientCreated")
+	msg += t.I18nBot("tgbot.messages.email", "Email=="+client.Email)
+	msg += t.I18nBot("tgbot.messages.status", "Status=="+client.Status)
+	msg += t.I18nBot("tgbot.messages.clientEnabled", "Enabled=="+fmt.Sprintf("%v", client.Enable))
+	msg += t.I18nBot("tgbot.messages.trafficLimit", "Limit=="+t.formatTrafficLimitLocalized(client.TotalGB))
+	msg += t.I18nBot("tgbot.messages.expiryTime", "Time=="+t.formatExpiryTimeLocalized(client.ExpiryTime))
+	msg += t.I18nBot("tgbot.messages.time", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
+
+	if client.Comment != "" {
+		msg += t.I18nBot("tgbot.messages.comment", "Comment=="+client.Comment)
+	}
+
+	// Send only to admins, not to the user who created the client
+	t.SendMsgToTgbotAdmins(msg)
+}
+
+// NotifyClientUpdated sends a notification when a client is updated.
+func (t *Tgbot) NotifyClientUpdated(client *model.ClientEntity, oldClient *model.ClientEntity) {
+	if !t.IsRunning() {
+		return
+	}
+
+	msg := t.I18nBot("tgbot.messages.clientUpdated")
+	msg += t.I18nBot("tgbot.messages.email", "Email=="+client.Email)
+	msg += t.I18nBot("tgbot.messages.status", "Status=="+client.Status)
+	msg += t.I18nBot("tgbot.messages.clientEnabled", "Enabled=="+fmt.Sprintf("%v", client.Enable))
+	msg += t.I18nBot("tgbot.messages.trafficLimit", "Limit=="+t.formatTrafficLimitLocalized(client.TotalGB))
+	msg += t.I18nBot("tgbot.messages.expiryTime", "Time=="+t.formatExpiryTimeLocalized(client.ExpiryTime))
+	msg += t.I18nBot("tgbot.messages.time", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
+
+	// Add traffic information
+	totalTraffic := client.Up + client.Down
+	msg += t.I18nBot("tgbot.messages.trafficInfo",
+		"Upload=="+common.FormatTraffic(client.Up),
+		"Download=="+common.FormatTraffic(client.Down),
+		"Total=="+common.FormatTraffic(totalTraffic))
+
+	// Add HWID information
+	if client.HWIDEnabled {
+		hwidCount := 0
+		if client.HWIDs != nil {
+			hwidCount = len(client.HWIDs)
+		}
+		maxHwidText := "∞"
+		if client.MaxHWID > 0 {
+			maxHwidText = fmt.Sprintf("%d", client.MaxHWID)
+		}
+		msg += t.I18nBot("tgbot.messages.hwidEnabled", "Count=="+fmt.Sprintf("%d", hwidCount), "Max=="+maxHwidText)
+	} else {
+		msg += t.I18nBot("tgbot.messages.hwidDisabled")
+	}
+
+	if oldClient != nil {
+		changes := []string{}
+		if oldClient.Email != client.Email {
+			changes = append(changes, t.I18nBot("tgbot.messages.emailChanged", "Old=="+oldClient.Email, "New=="+client.Email))
+		}
+		if oldClient.Enable != client.Enable {
+			changes = append(changes, t.I18nBot("tgbot.messages.enabledChanged", "Old=="+fmt.Sprintf("%v", oldClient.Enable), "New=="+fmt.Sprintf("%v", client.Enable)))
+		}
+		if oldClient.TotalGB != client.TotalGB {
+			changes = append(changes, t.I18nBot("tgbot.messages.trafficLimitChanged", "Old=="+t.formatTrafficLimitLocalized(oldClient.TotalGB), "New=="+t.formatTrafficLimitLocalized(client.TotalGB)))
+		}
+		if oldClient.UUID != client.UUID {
+			changes = append(changes, t.I18nBot("tgbot.messages.uuidChanged", "Old=="+oldClient.UUID, "New=="+client.UUID))
+		}
+		if oldClient.Password != client.Password {
+			// Don't show full password, just indicate it changed
+			changes = append(changes, t.I18nBot("tgbot.messages.passwordChanged"))
+		}
+		if oldClient.ExpiryTime != client.ExpiryTime {
+			changes = append(changes, t.I18nBot("tgbot.messages.expiryTimeChanged", "Old=="+t.formatExpiryTimeLocalized(oldClient.ExpiryTime), "New=="+t.formatExpiryTimeLocalized(client.ExpiryTime)))
+		}
+		if oldClient.Status != client.Status {
+			changes = append(changes, t.I18nBot("tgbot.messages.statusChanged", "Old=="+oldClient.Status, "New=="+client.Status))
+		}
+		
+		// Check traffic changes
+		oldTotalTraffic := oldClient.Up + oldClient.Down
+		if oldClient.Up != client.Up || oldClient.Down != client.Down {
+			changes = append(changes, t.I18nBot("tgbot.messages.trafficChanged",
+				"OldUpload=="+common.FormatTraffic(oldClient.Up),
+				"NewUpload=="+common.FormatTraffic(client.Up),
+				"OldDownload=="+common.FormatTraffic(oldClient.Down),
+				"NewDownload=="+common.FormatTraffic(client.Down),
+				"OldTotal=="+common.FormatTraffic(oldTotalTraffic),
+				"NewTotal=="+common.FormatTraffic(totalTraffic)))
+		}
+		
+		// Check HWID changes
+		if oldClient.HWIDEnabled != client.HWIDEnabled {
+			oldHwidText := t.I18nBot("tgbot.messages.hwidDisabled")
+			if oldClient.HWIDEnabled {
+				oldMaxHwidText := "∞"
+				if oldClient.MaxHWID > 0 {
+					oldMaxHwidText = fmt.Sprintf("%d", oldClient.MaxHWID)
+				}
+				oldHwidText = t.I18nBot("tgbot.messages.hwidEnabled", "Count==0", "Max=="+oldMaxHwidText)
+			}
+			newHwidText := t.I18nBot("tgbot.messages.hwidDisabled")
+			if client.HWIDEnabled {
+				newMaxHwidText := "∞"
+				if client.MaxHWID > 0 {
+					newMaxHwidText = fmt.Sprintf("%d", client.MaxHWID)
+				}
+				hwidCount := 0
+				if client.HWIDs != nil {
+					hwidCount = len(client.HWIDs)
+				}
+				newHwidText = t.I18nBot("tgbot.messages.hwidEnabled", "Count=="+fmt.Sprintf("%d", hwidCount), "Max=="+newMaxHwidText)
+			}
+			changes = append(changes, t.I18nBot("tgbot.messages.hwidChanged", "Old=="+oldHwidText, "New=="+newHwidText))
+		} else if client.HWIDEnabled && oldClient.MaxHWID != client.MaxHWID {
+			oldMaxHwidText := "∞"
+			if oldClient.MaxHWID > 0 {
+				oldMaxHwidText = fmt.Sprintf("%d", oldClient.MaxHWID)
+			}
+			newMaxHwidText := "∞"
+			if client.MaxHWID > 0 {
+				newMaxHwidText = fmt.Sprintf("%d", client.MaxHWID)
+			}
+			changes = append(changes, t.I18nBot("tgbot.messages.hwidLimitChanged", "Old=="+oldMaxHwidText, "New=="+newMaxHwidText))
+		}
+		
+		if len(changes) > 0 {
+			msg += "\n\n" + t.I18nBot("tgbot.messages.changes") + "\n" + strings.Join(changes, "\n")
+		}
+	}
+
+	if client.Comment != "" {
+		msg += t.I18nBot("tgbot.messages.comment", "Comment=="+client.Comment)
+	}
+
+	t.SendMsgToTgbotAdmins(msg)
+}
+
+// NotifyClientDeleted sends a notification when a client is deleted.
+func (t *Tgbot) NotifyClientDeleted(client *model.ClientEntity) {
+	if !t.IsRunning() {
+		return
+	}
+
+	msg := t.I18nBot("tgbot.messages.clientDeleted")
+	msg += t.I18nBot("tgbot.messages.email", "Email=="+client.Email)
+	msg += t.I18nBot("tgbot.messages.time", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
+
+	if client.Comment != "" {
+		msg += t.I18nBot("tgbot.messages.comment", "Comment=="+client.Comment)
+	}
+
+	t.SendMsgToTgbotAdmins(msg)
+}
+
+// NotifyClientDisabled sends a notification when a client is disabled.
+func (t *Tgbot) NotifyClientDisabled(client *model.ClientEntity) {
+	if !t.IsRunning() {
+		return
+	}
+
+	msg := t.I18nBot("tgbot.messages.clientDisabled")
+	msg += t.I18nBot("tgbot.messages.email", "Email=="+client.Email)
+	msg += t.I18nBot("tgbot.messages.status", "Status=="+client.Status)
+	msg += t.I18nBot("tgbot.messages.time", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
+
+	if client.Comment != "" {
+		msg += t.I18nBot("tgbot.messages.comment", "Comment=="+client.Comment)
+	}
+
+	t.SendMsgToTgbotAdmins(msg)
+}
+
+// NotifyClientFirstConnection sends a notification when a client connects for the first time.
+func (t *Tgbot) NotifyClientFirstConnection(client *model.ClientEntity) {
+	if !t.IsRunning() {
+		return
+	}
+
+	msg := t.I18nBot("tgbot.messages.clientFirstConnection")
+	msg += t.I18nBot("tgbot.messages.email", "Email=="+client.Email)
+	msg += t.I18nBot("tgbot.messages.time", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
+
+	if client.Comment != "" {
+		msg += t.I18nBot("tgbot.messages.comment", "Comment=="+client.Comment)
+	}
+
+	t.SendMsgToTgbotAdmins(msg)
+}
+
+// NotifyInboundCreated sends a notification when an inbound is created.
+func (t *Tgbot) NotifyInboundCreated(inbound *model.Inbound) {
+	if !t.IsRunning() {
+		return
+	}
+
+	msg := fmt.Sprintf("✅ <b>Инбаунд создан</b>\n\n"+
+		"<b>Название:</b> %s\n"+
+		"<b>Протокол:</b> %s\n"+
+		"<b>Порт:</b> %d\n"+
+		"<b>Включен:</b> %v\n"+
+		"<b>Время:</b> %s",
+		inbound.Remark,
+		inbound.Protocol,
+		inbound.Port,
+		inbound.Enable,
+		time.Now().Format("2006-01-02 15:04:05"))
+
+	if inbound.Listen != "" && inbound.Listen != "0.0.0.0" {
+		msg += fmt.Sprintf("\n<b>Listen:</b> %s", inbound.Listen)
+	}
+
+	t.SendMsgToTgbotAdmins(msg)
+}
+
+// NotifyInboundUpdated sends a notification when an inbound is updated.
+func (t *Tgbot) NotifyInboundUpdated(inbound *model.Inbound, oldInbound *model.Inbound) {
+	if !t.IsRunning() {
+		return
+	}
+
+	msg := fmt.Sprintf("🔄 <b>Инбаунд изменен</b>\n\n"+
+		"<b>Название:</b> %s\n"+
+		"<b>Протокол:</b> %s\n"+
+		"<b>Порт:</b> %d\n"+
+		"<b>Включен:</b> %v\n"+
+		"<b>Время:</b> %s",
+		inbound.Remark,
+		inbound.Protocol,
+		inbound.Port,
+		inbound.Enable,
+		time.Now().Format("2006-01-02 15:04:05"))
+
+	if oldInbound != nil {
+		changes := []string{}
+		if oldInbound.Remark != inbound.Remark {
+			changes = append(changes, fmt.Sprintf("Название: %s → %s", oldInbound.Remark, inbound.Remark))
+		}
+		if oldInbound.Port != inbound.Port {
+			changes = append(changes, fmt.Sprintf("Порт: %d → %d", oldInbound.Port, inbound.Port))
+		}
+		if oldInbound.Protocol != inbound.Protocol {
+			changes = append(changes, fmt.Sprintf("Протокол: %s → %s", oldInbound.Protocol, inbound.Protocol))
+		}
+		if oldInbound.Enable != inbound.Enable {
+			changes = append(changes, fmt.Sprintf("Включен: %v → %v", oldInbound.Enable, inbound.Enable))
+		}
+		if len(changes) > 0 {
+			msg += "\n\n<b>Изменения:</b>\n" + strings.Join(changes, "\n")
+		}
+	}
+
+	if inbound.Listen != "" && inbound.Listen != "0.0.0.0" {
+		msg += fmt.Sprintf("\n<b>Listen:</b> %s", inbound.Listen)
+	}
+
+	t.SendMsgToTgbotAdmins(msg)
+}
+
+// NotifyInboundDeleted sends a notification when an inbound is deleted.
+func (t *Tgbot) NotifyInboundDeleted(inbound *model.Inbound) {
+	if !t.IsRunning() {
+		return
+	}
+
+	msg := fmt.Sprintf("❌ <b>Инбаунд удален</b>\n\n"+
+		"<b>Название:</b> %s\n"+
+		"<b>Протокол:</b> %s\n"+
+		"<b>Порт:</b> %d\n"+
+		"<b>Время:</b> %s",
+		inbound.Remark,
+		inbound.Protocol,
+		inbound.Port,
+		time.Now().Format("2006-01-02 15:04:05"))
+
+	if inbound.Listen != "" && inbound.Listen != "0.0.0.0" {
+		msg += fmt.Sprintf("\n<b>Listen:</b> %s", inbound.Listen)
+	}
+
+	t.SendMsgToTgbotAdmins(msg)
+}
+
+// NotifyGroupChanged sends a notification when a group's clients are enabled/disabled.
+func (t *Tgbot) NotifyGroupChanged(groupName string, enable bool, clients []*model.ClientEntity) {
+	if !t.IsRunning() {
+		return
+	}
+
+	if len(clients) == 0 {
+		return
+	}
+
+	action := "отключена"
+	emoji := "⛔"
+	if enable {
+		action = "включена"
+		emoji = "✅"
+	}
+
+	msg := fmt.Sprintf("%s <b>Группа изменена</b>\n\n"+
+		"<b>Название:</b> %s\n"+
+		"<b>Действие:</b> %s\n"+
+		"<b>Количество клиентов:</b> %d\n"+
+		"<b>Время:</b> %s",
+		emoji, groupName, action, len(clients),
+		time.Now().Format("2006-01-02 15:04:05"))
+
+	// Add list of affected clients (limit to 10 to avoid too long messages)
+	clientList := ""
+	maxClients := 10
+	if len(clients) > maxClients {
+		for i := 0; i < maxClients; i++ {
+			if clients[i].Comment != "" {
+				clientList += fmt.Sprintf("• %s (%s)\n", clients[i].Email, clients[i].Comment)
+			} else {
+				clientList += fmt.Sprintf("• %s\n", clients[i].Email)
+			}
+		}
+		clientList += fmt.Sprintf("... и еще %d клиентов\n", len(clients)-maxClients)
+	} else {
+		for _, client := range clients {
+			if client.Comment != "" {
+				clientList += fmt.Sprintf("• %s (%s)\n", client.Email, client.Comment)
+			} else {
+				clientList += fmt.Sprintf("• %s\n", client.Email)
+			}
+		}
+	}
+
+	if clientList != "" {
+		msg += "\n\n<b>Клиенты:</b>\n" + clientList
+	}
+
+	t.SendMsgToTgbotAdmins(msg)
+}
+
+// Helper functions for formatting
+func formatTrafficLimit(totalGB float64) string {
+	if totalGB == 0 {
+		return "Безлимит"
+	}
+	// Format with 2 decimal places for small values, integer for large values
+	if totalGB < 1 {
+		return fmt.Sprintf("%.2f GB", totalGB)
+	}
+	if totalGB == float64(int64(totalGB)) {
+		return fmt.Sprintf("%d GB", int64(totalGB))
+	}
+	return fmt.Sprintf("%.2f GB", totalGB)
+}
+
+func formatExpiryTime(expiryTime int64) string {
+	if expiryTime == 0 {
+		return "Без срока"
+	}
+	t := time.Unix(expiryTime/1000, 0)
+	return t.Format("2006-01-02 15:04:05")
+}
+
+// formatTrafficLimitLocalized formats traffic limit with localization
+func (t *Tgbot) formatTrafficLimitLocalized(totalGB float64) string {
+	if totalGB == 0 {
+		return t.I18nBot("tgbot.messages.unlimitedTraffic")
+	}
+	// Format with 2 decimal places for small values, integer for large values
+	if totalGB < 1 {
+		return fmt.Sprintf("%.2f GB", totalGB)
+	}
+	if totalGB == float64(int64(totalGB)) {
+		return fmt.Sprintf("%d GB", int64(totalGB))
+	}
+	return fmt.Sprintf("%.2f GB", totalGB)
+}
+
+// formatExpiryTimeLocalized formats expiry time with localization
+func (t *Tgbot) formatExpiryTimeLocalized(expiryTime int64) string {
+	if expiryTime == 0 {
+		return t.I18nBot("tgbot.messages.noExpiry")
+	}
+	expTime := time.Unix(expiryTime/1000, 0)
+	return expTime.Format("2006-01-02 15:04:05")
 }
 
 // SendReport sends a periodic report to admin chats.
@@ -2580,8 +3368,14 @@ func (t *Tgbot) sendExhaustedToAdmins() {
 func (t *Tgbot) getServerUsage(chatId int64, messageID ...int) string {
 	info := t.prepareServerUsageInfo()
 
-	keyboard := tu.InlineKeyboard(tu.InlineKeyboardRow(
-		tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.refresh")).WithCallbackData(t.encodeQuery("usage_refresh"))))
+	keyboard := tu.InlineKeyboard(
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.refresh")).WithCallbackData(t.encodeQuery("usage_refresh")),
+		),
+		tu.InlineKeyboardRow(
+			tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("back_to_main")),
+		),
+	)
 
 	if len(messageID) > 0 {
 		t.editMessageTgBot(chatId, messageID[0], info, keyboard)
@@ -2740,14 +3534,20 @@ func (t *Tgbot) getInbounds() (*telego.InlineKeyboardMarkup, error) {
 		if inbound.Enable {
 			status = "✅"
 		}
+		// Format: Remark (ID: X, Port: Y) - Status
+		buttonText := fmt.Sprintf("%s (ID: %d, Port: %d) - %s", inbound.Remark, inbound.Id, inbound.Port, status)
 		callbackData := t.encodeQuery(fmt.Sprintf("%s %d", "get_clients", inbound.Id))
-		buttons = append(buttons, tu.InlineKeyboardButton(fmt.Sprintf("%v - %v", inbound.Remark, status)).WithCallbackData(callbackData))
+		buttons = append(buttons, tu.InlineKeyboardButton(buttonText).WithCallbackData(callbackData))
 	}
 
 	cols := 1
 	if len(buttons) >= 6 {
 		cols = 2
 	}
+
+	// Add back button to main menu
+	backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("back_to_main"))
+	buttons = append(buttons, backButton)
 
 	keyboard := tu.InlineKeyboardGrid(tu.InlineKeyboardCols(cols, buttons...))
 	return keyboard, nil
@@ -2772,14 +3572,20 @@ func (t *Tgbot) getInboundsFor(nextAction string) (*telego.InlineKeyboardMarkup,
 		if inbound.Enable {
 			status = "✅"
 		}
+		// Format: Remark (ID: X, Port: Y) - Status
+		buttonText := fmt.Sprintf("%s (ID: %d, Port: %d) - %s", inbound.Remark, inbound.Id, inbound.Port, status)
 		callbackData := t.encodeQuery(fmt.Sprintf("%s %d", nextAction, inbound.Id))
-		buttons = append(buttons, tu.InlineKeyboardButton(fmt.Sprintf("%v - %v", inbound.Remark, status)).WithCallbackData(callbackData))
+		buttons = append(buttons, tu.InlineKeyboardButton(buttonText).WithCallbackData(callbackData))
 	}
 
 	cols := 1
 	if len(buttons) >= 6 {
 		cols = 2
 	}
+
+	// Add back button to main menu
+	backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("back_to_main"))
+	buttons = append(buttons, backButton)
 
 	keyboard := tu.InlineKeyboardGrid(tu.InlineKeyboardCols(cols, buttons...))
 	return keyboard, nil
@@ -2801,7 +3607,12 @@ func (t *Tgbot) getInboundClientsFor(inboundID int, action string) (*telego.Inli
 	} else {
 		if len(clients) > 0 {
 			for _, client := range clients {
-				buttons = append(buttons, tu.InlineKeyboardButton(client.Email).WithCallbackData(t.encodeQuery(action+" "+client.Email)))
+				// Format: Email (Comment) if comment exists, otherwise just Email
+				buttonText := client.Email
+				if client.Comment != "" {
+					buttonText = fmt.Sprintf("%s (%s)", client.Email, client.Comment)
+				}
+				buttons = append(buttons, tu.InlineKeyboardButton(buttonText).WithCallbackData(t.encodeQuery(action+" "+client.Email)))
 			}
 
 		} else {
@@ -2815,6 +3626,11 @@ func (t *Tgbot) getInboundClientsFor(inboundID int, action string) (*telego.Inli
 	} else {
 		cols = 2
 	}
+	
+	// Add back button to inbounds list
+	backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("get_inbounds"))
+	buttons = append(buttons, backButton)
+	
 	keyboard := tu.InlineKeyboardGrid(tu.InlineKeyboardCols(cols, buttons...))
 
 	return keyboard, nil
@@ -2850,14 +3666,20 @@ func (t *Tgbot) getInboundsAddClient() (*telego.InlineKeyboardMarkup, error) {
 		if inbound.Enable {
 			status = "✅"
 		}
+		// Format: Remark (ID: X, Port: Y) - Status
+		buttonText := fmt.Sprintf("%s (ID: %d, Port: %d) - %s", inbound.Remark, inbound.Id, inbound.Port, status)
 		callbackData := t.encodeQuery(fmt.Sprintf("%s %d", "add_client_to", inbound.Id))
-		buttons = append(buttons, tu.InlineKeyboardButton(fmt.Sprintf("%v - %v", inbound.Remark, status)).WithCallbackData(callbackData))
+		buttons = append(buttons, tu.InlineKeyboardButton(buttonText).WithCallbackData(callbackData))
 	}
 
 	cols := 1
 	if len(buttons) >= 6 {
 		cols = 2
 	}
+
+	// Add back button to main menu
+	backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("back_to_main"))
+	buttons = append(buttons, backButton)
 
 	keyboard := tu.InlineKeyboardGrid(tu.InlineKeyboardCols(cols, buttons...))
 	return keyboard, nil
@@ -2879,7 +3701,12 @@ func (t *Tgbot) getInboundClients(id int) (*telego.InlineKeyboardMarkup, error) 
 	} else {
 		if len(clients) > 0 {
 			for _, client := range clients {
-				buttons = append(buttons, tu.InlineKeyboardButton(client.Email).WithCallbackData(t.encodeQuery("client_get_usage "+client.Email)))
+				// Format: Email (Comment) if comment exists, otherwise just Email
+				buttonText := client.Email
+				if client.Comment != "" {
+					buttonText = fmt.Sprintf("%s (%s)", client.Email, client.Comment)
+				}
+				buttons = append(buttons, tu.InlineKeyboardButton(buttonText).WithCallbackData(t.encodeQuery("get_client_info "+client.Email)))
 			}
 
 		} else {
@@ -2893,6 +3720,11 @@ func (t *Tgbot) getInboundClients(id int) (*telego.InlineKeyboardMarkup, error) 
 	} else {
 		cols = 2
 	}
+	
+	// Add back button to inbounds list
+	backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("get_inbounds"))
+	buttons = append(buttons, backButton)
+	
 	keyboard := tu.InlineKeyboardGrid(tu.InlineKeyboardCols(cols, buttons...))
 
 	return keyboard, nil
@@ -2948,11 +3780,9 @@ func (t *Tgbot) clientInfoMsg(
 	}
 
 	enabled := ""
-	isEnabled, err := t.inboundService.checkIsEnabledByEmail(traffic.Email)
-	if err != nil {
-		logger.Warning(err)
-		enabled = t.I18nBot("tgbot.wentWrong")
-	} else if isEnabled {
+	// Use traffic.Enable directly (already set from ClientEntity in new architecture)
+	// This avoids calling checkIsEnabledByEmail which may fail with new architecture
+	if traffic.Enable {
 		enabled = t.I18nBot("tgbot.messages.yes")
 	} else {
 		enabled = t.I18nBot("tgbot.messages.no")
@@ -3010,34 +3840,128 @@ func (t *Tgbot) clientInfoMsg(
 	return output
 }
 
-// getClientUsage retrieves and sends client usage information to the chat.
-func (t *Tgbot) getClientUsage(chatId int64, tgUserID int64, email ...string) {
-	traffics, err := t.inboundService.GetClientTrafficTgBot(tgUserID)
+// getClientTrafficTgBotNew gets clients by Telegram ID using new architecture
+func (t *Tgbot) getClientTrafficTgBotNew(tgUserID int64) ([]*xray.ClientTraffic, error) {
+	db := database.GetDB()
+	
+	// Find clients by TgID in ClientEntity (new architecture)
+	var clientEntities []model.ClientEntity
+	err := db.Where("tg_id = ?", tgUserID).Find(&clientEntities).Error
 	if err != nil {
-		logger.Warning(err)
-		msg := t.I18nBot("tgbot.wentWrong")
-		t.SendMsgToTgbot(chatId, msg)
-		return
+		return nil, err
+	}
+	
+	if len(clientEntities) == 0 {
+		return []*xray.ClientTraffic{}, nil
+	}
+	
+	// Convert ClientEntity to ClientTraffic
+	traffics := make([]*xray.ClientTraffic, len(clientEntities))
+	for i, entity := range clientEntities {
+		totalBytes := int64(entity.TotalGB * 1024 * 1024 * 1024)
+		traffics[i] = &xray.ClientTraffic{
+			Id:         0, // Not used in new architecture
+			InboundId:  0, // Will be set if needed
+			Enable:     entity.Enable,
+			Email:      entity.Email,
+			UUID:       entity.UUID,
+			SubId:      entity.SubID,
+			Up:         entity.Up,
+			Down:       entity.Down,
+			AllTime:    entity.AllTime,
+			ExpiryTime: entity.ExpiryTime,
+			Total:      totalBytes,
+			Reset:      entity.Reset,
+			LastOnline: entity.LastOnline,
+		}
+	}
+	
+	return traffics, nil
+}
+
+// getClientUsage retrieves and sends client usage information to the chat.
+// emailOrMessageID can be: email (string) or messageID (int/int64)
+func (t *Tgbot) getClientUsage(chatId int64, tgUserID int64, emailOrMessageID ...interface{}) {
+	// Parse variadic arguments: can be email (string) or messageID (int)
+	var email string
+	var messageID int
+	hasEmail := false
+	hasMessageID := false
+	
+	for _, arg := range emailOrMessageID {
+		switch v := arg.(type) {
+		case string:
+			email = v
+			hasEmail = true
+		case int:
+			messageID = v
+			hasMessageID = true
+		case int64:
+			messageID = int(v)
+			hasMessageID = true
+		}
+	}
+	
+	// Try new architecture first
+	traffics, err := t.getClientTrafficTgBotNew(tgUserID)
+	if err != nil || len(traffics) == 0 {
+		// Fallback to old method
+		traffics, err = t.inboundService.GetClientTrafficTgBot(tgUserID)
+		if err != nil {
+			logger.Warning(err)
+			msg := t.I18nBot("tgbot.wentWrong")
+			if hasMessageID {
+				err := t.editMessageTgBot(chatId, messageID, msg, nil)
+				if err != nil {
+					t.SendMsgToTgbot(chatId, msg)
+				}
+			} else {
+				t.SendMsgToTgbot(chatId, msg)
+			}
+			return
+		}
 	}
 
 	if len(traffics) == 0 {
-		t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.answers.askToAddUserId", "TgUserID=="+strconv.FormatInt(tgUserID, 10)))
+		msg := t.I18nBot("tgbot.answers.askToAddUserId", "TgUserID=="+strconv.FormatInt(tgUserID, 10))
+		if hasMessageID {
+			err := t.editMessageTgBot(chatId, messageID, msg, nil)
+			if err != nil {
+				t.SendMsgToTgbot(chatId, msg)
+			}
+		} else {
+			t.SendMsgToTgbot(chatId, msg)
+		}
 		return
 	}
 
 	output := ""
 
 	if len(traffics) > 0 {
-		if len(email) > 0 {
+		if hasEmail {
 			for _, traffic := range traffics {
-				if traffic.Email == email[0] {
+				if traffic.Email == email {
 					output := t.clientInfoMsg(traffic, true, true, true, true, true, true)
-					t.SendMsgToTgbot(chatId, output)
+					if hasMessageID {
+						err := t.editMessageTgBot(chatId, messageID, output, nil)
+						if err != nil {
+							t.SendMsgToTgbot(chatId, output)
+						}
+					} else {
+						t.SendMsgToTgbot(chatId, output)
+					}
 					return
 				}
 			}
 			msg := t.I18nBot("tgbot.noResult")
-			t.SendMsgToTgbot(chatId, msg)
+			if hasMessageID {
+				err := t.editMessageTgBot(chatId, messageID, msg, nil)
+				if err != nil {
+					t.SendMsgToTgbot(chatId, msg)
+				}
+			} else {
+				t.SendMsgToTgbot(chatId, msg)
+			}
 			return
 		} else {
 			for _, traffic := range traffics {
@@ -3048,31 +3972,208 @@ func (t *Tgbot) getClientUsage(chatId int64, tgUserID int64, email ...string) {
 	}
 
 	output += t.I18nBot("tgbot.messages.refreshedOn", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
-	t.SendMsgToTgbot(chatId, output)
+	if hasMessageID {
+		err := t.editMessageTgBot(chatId, messageID, output, nil)
+		if err != nil {
+			t.SendMsgToTgbot(chatId, output)
+		}
+	} else {
+		t.SendMsgToTgbot(chatId, output)
+	}
 	output = t.I18nBot("tgbot.commands.pleaseChoose")
 	t.SendAnswer(chatId, output, false)
 }
 
-// searchClientIps searches and sends client IP addresses for the given email.
-func (t *Tgbot) searchClientIps(chatId int64, email string, messageID ...int) {
-	ips, err := t.inboundService.GetInboundClientIps(email)
-	if err != nil || len(ips) == 0 {
-		ips = t.I18nBot("tgbot.noIpRecord")
+// getClientByEmailWithUserId retrieves a client by email and determines userId through ClientInboundMapping.
+// Returns client entity, userId, and error.
+func (t *Tgbot) getClientByEmailWithUserId(email string) (*model.ClientEntity, int, error) {
+	clientService := ClientService{}
+	db := database.GetDB()
+	
+	// First, try to find client by email directly (without userId)
+	// We need to find userId through ClientInboundMapping
+	var clientEntity model.ClientEntity
+	err := db.Where("LOWER(email) = ?", strings.ToLower(email)).First(&clientEntity).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	
+	// Get userId from inbound mapping
+	var mapping model.ClientInboundMapping
+	err = db.Where("client_id = ?", clientEntity.Id).First(&mapping).Error
+	if err != nil {
+		// If no mapping found, try to get userId from client entity directly
+		if clientEntity.UserId > 0 {
+			// Reload client with full data using ClientService
+			client, err := clientService.GetClientByEmail(clientEntity.UserId, email)
+			if err != nil {
+				return nil, 0, err
+			}
+			return client, clientEntity.UserId, nil
+		}
+		return nil, 0, gorm.ErrRecordNotFound
+	}
+	
+	// Get inbound to get userId
+	inbound, err := t.inboundService.GetInbound(mapping.InboundId)
+	if err != nil {
+		return nil, 0, err
+	}
+	
+	// Reload client with full data using ClientService
+	client, err := clientService.GetClientByEmail(inbound.UserId, email)
+	if err != nil {
+		return nil, 0, err
+	}
+	
+	return client, inbound.UserId, nil
+}
+
+// searchClientDevices searches and sends client devices (HWID) for the given email.
+func (t *Tgbot) searchClientDevices(chatId int64, email string, messageID ...int) {
+	// Use ClientService to find client by email (new architecture)
+	clientEntity, _, err := t.getClientByEmailWithUserId(email)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			msg := t.I18nBot("tgbot.noResult")
+			if len(messageID) > 0 {
+				t.editMessageTgBot(chatId, messageID[0], msg)
+			} else {
+				t.SendMsgToTgbot(chatId, msg)
+			}
+			return
+		}
+		logger.Warning(err)
+		msg := t.I18nBot("tgbot.wentWrong")
+		if len(messageID) > 0 {
+			t.editMessageTgBot(chatId, messageID[0], msg)
+		} else {
+			t.SendMsgToTgbot(chatId, msg)
+		}
+		return
+	}
+
+	// Get HWIDs for this client
+	hwidService := ClientHWIDService{}
+	hwids, err := hwidService.GetHWIDsForClient(clientEntity.Id)
+	if err != nil {
+		logger.Warningf("Failed to get HWIDs for client %d: %v", clientEntity.Id, err)
 	}
 
 	output := ""
 	output += t.I18nBot("tgbot.messages.email", "Email=="+email)
-	output += t.I18nBot("tgbot.messages.ips", "IPs=="+ips)
+	
+	// Show HWID status
+	if clientEntity.HWIDEnabled {
+		maxHwidText := "∞"
+		if clientEntity.MaxHWID > 0 {
+			maxHwidText = fmt.Sprintf("%d", clientEntity.MaxHWID)
+		}
+		hwidCount := 0
+		if hwids != nil {
+			hwidCount = len(hwids)
+		}
+		output += t.I18nBot("tgbot.messages.hwidEnabled", "Count=="+fmt.Sprintf("%d", hwidCount), "Max=="+maxHwidText)
+	} else {
+		output += t.I18nBot("tgbot.messages.hwidDisabled")
+	}
+	
+	output += "\r\n\r\n"
+	
+	if len(hwids) == 0 {
+		output += t.I18nBot("tgbot.messages.noDevices")
+	} else {
+		output += t.I18nBot("tgbot.messages.devicesList") + ":\r\n\r\n"
+		for i, hwid := range hwids {
+			status := "❌"
+			if hwid.IsActive {
+				status = "✅"
+			}
+			
+			deviceInfo := fmt.Sprintf("%d. %s ", i+1, status)
+			if hwid.DeviceModel != "" {
+				deviceInfo += hwid.DeviceModel
+			} else if hwid.DeviceOS != "" {
+				deviceInfo += hwid.DeviceOS
+			} else {
+				deviceInfo += fmt.Sprintf("Device %d", i+1)
+			}
+			
+			if hwid.OSVersion != "" {
+				deviceInfo += " (" + hwid.OSVersion + ")"
+			}
+			
+			deviceInfo += "\r\n"
+			
+			// Show HWID (shortened)
+			if len(hwid.HWID) > 16 {
+				deviceInfo += "   HWID: " + hwid.HWID[:16] + "...\r\n"
+			} else {
+				deviceInfo += "   HWID: " + hwid.HWID + "\r\n"
+			}
+			
+			// Show first seen IP if available
+			if hwid.FirstSeenIP != "" {
+				deviceInfo += "   IP: " + hwid.FirstSeenIP + "\r\n"
+			}
+			
+			// Show last seen time
+			if hwid.LastSeenAt > 0 {
+				lastSeen := time.Unix(hwid.LastSeenAt, 0).Format("2006-01-02 15:04:05")
+				deviceInfo += "   " + t.I18nBot("tgbot.messages.lastSeen") + ": " + lastSeen + "\r\n"
+			}
+			
+			deviceInfo += "\r\n"
+			output += deviceInfo
+		}
+	}
+	
 	output += t.I18nBot("tgbot.messages.refreshedOn", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
 
-	inlineKeyboard := tu.InlineKeyboard(
-		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.refresh")).WithCallbackData(t.encodeQuery("ips_refresh "+email)),
-		),
-		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.clearIPs")).WithCallbackData(t.encodeQuery("clear_ips "+email)),
-		),
-	)
+	// Get inbound ID for back button
+	var mapping model.ClientInboundMapping
+	db := database.GetDB()
+	db.Where("client_id = ?", clientEntity.Id).First(&mapping)
+	
+	// Create keyboard with device buttons
+	var keyboardRows [][]telego.InlineKeyboardButton
+	if len(hwids) > 0 {
+		// Add buttons for each device (max 5 to avoid too many buttons)
+		maxDevices := 5
+		if len(hwids) < maxDevices {
+			maxDevices = len(hwids)
+		}
+		for i := 0; i < maxDevices; i++ {
+			deviceLabel := fmt.Sprintf("%d. ", i+1)
+			if hwids[i].DeviceModel != "" {
+				deviceLabel += hwids[i].DeviceModel
+			} else if hwids[i].DeviceOS != "" {
+				deviceLabel += hwids[i].DeviceOS
+			} else {
+				deviceLabel += fmt.Sprintf("Device %d", i+1)
+			}
+			// Truncate label if too long
+			if len(deviceLabel) > 30 {
+				deviceLabel = deviceLabel[:27] + "..."
+			}
+			keyboardRows = append(keyboardRows, tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton(deviceLabel).WithCallbackData(t.encodeQuery(fmt.Sprintf("remove_device %s %d", email, hwids[i].Id))),
+			))
+		}
+	}
+	
+	// Add refresh button
+	keyboardRows = append(keyboardRows, tu.InlineKeyboardRow(
+		tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.refresh")).WithCallbackData(t.encodeQuery("devices_refresh "+email)),
+	))
+	
+	// Add back button
+	if mapping.InboundId > 0 {
+		backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("get_client_info "+email))
+		keyboardRows = append(keyboardRows, tu.InlineKeyboardRow(backButton))
+	}
+	
+	inlineKeyboard := tu.InlineKeyboard(keyboardRows...)
 
 	if len(messageID) > 0 {
 		t.editMessageTgBot(chatId, messageID[0], output, inlineKeyboard)
@@ -3083,21 +4184,31 @@ func (t *Tgbot) searchClientIps(chatId int64, email string, messageID ...int) {
 
 // clientTelegramUserInfo retrieves and sends Telegram user info for the client.
 func (t *Tgbot) clientTelegramUserInfo(chatId int64, email string, messageID ...int) {
-	traffic, client, err := t.inboundService.GetClientByEmail(email)
+	// Use ClientService to find client by email (new architecture)
+	clientEntity, _, err := t.getClientByEmailWithUserId(email)
 	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			msg := t.I18nBot("tgbot.noResult")
+			if len(messageID) > 0 {
+				t.editMessageTgBot(chatId, messageID[0], msg)
+			} else {
+				t.SendMsgToTgbot(chatId, msg)
+			}
+			return
+		}
 		logger.Warning(err)
 		msg := t.I18nBot("tgbot.wentWrong")
-		t.SendMsgToTgbot(chatId, msg)
+		if len(messageID) > 0 {
+			t.editMessageTgBot(chatId, messageID[0], msg)
+		} else {
+			t.SendMsgToTgbot(chatId, msg)
+		}
 		return
 	}
-	if client == nil {
-		msg := t.I18nBot("tgbot.noResult")
-		t.SendMsgToTgbot(chatId, msg)
-		return
-	}
+	
 	tgId := "None"
-	if client.TgID != 0 {
-		tgId = strconv.FormatInt(client.TgID, 10)
+	if clientEntity.TgID != 0 {
+		tgId = strconv.FormatInt(clientEntity.TgID, 10)
 	}
 
 	output := ""
@@ -3105,6 +4216,11 @@ func (t *Tgbot) clientTelegramUserInfo(chatId int64, email string, messageID ...
 	output += t.I18nBot("tgbot.messages.TGUser", "TelegramID=="+tgId)
 	output += t.I18nBot("tgbot.messages.refreshedOn", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
 
+	// Get inbound ID for back button - find which inbound this client belongs to
+	var mapping model.ClientInboundMapping
+	db := database.GetDB()
+	db.Where("client_id = ?", clientEntity.Id).First(&mapping)
+	
 	inlineKeyboard := tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.refresh")).WithCallbackData(t.encodeQuery("tgid_refresh "+email)),
@@ -3113,13 +4229,30 @@ func (t *Tgbot) clientTelegramUserInfo(chatId int64, email string, messageID ...
 			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.removeTGUser")).WithCallbackData(t.encodeQuery("tgid_remove "+email)),
 		),
 	)
+	
+	// Add back button to client info if we know the inbound ID
+	if mapping.InboundId > 0 {
+		backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("get_client_info "+email))
+		inlineKeyboard = tu.InlineKeyboard(
+			tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.refresh")).WithCallbackData(t.encodeQuery("tgid_refresh "+email)),
+			),
+			tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.removeTGUser")).WithCallbackData(t.encodeQuery("tgid_remove "+email)),
+			),
+			tu.InlineKeyboardRow(
+				backButton,
+			),
+		)
+	}
 
 	if len(messageID) > 0 {
 		t.editMessageTgBot(chatId, messageID[0], output, inlineKeyboard)
 	} else {
 		t.SendMsgToTgbot(chatId, output, inlineKeyboard)
+		// Use client ID instead of traffic ID for RequestID
 		requestUser := telego.KeyboardButtonRequestUsers{
-			RequestID: int32(traffic.Id),
+			RequestID: int32(clientEntity.Id),
 			UserIsBot: new(bool),
 		}
 		keyboard := tu.Keyboard(
@@ -3136,21 +4269,53 @@ func (t *Tgbot) clientTelegramUserInfo(chatId int64, email string, messageID ...
 
 // searchClient searches for a client by email and sends the information.
 func (t *Tgbot) searchClient(chatId int64, email string, messageID ...int) {
-	traffic, err := t.inboundService.GetClientTrafficByEmail(email)
+	// Use ClientService to find client by email (new architecture)
+	clientEntity, _, err := t.getClientByEmailWithUserId(email)
 	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			msg := t.I18nBot("tgbot.noResult")
+			if len(messageID) > 0 {
+				t.editMessageTgBot(chatId, messageID[0], msg)
+			} else {
+				t.SendMsgToTgbot(chatId, msg)
+			}
+			return
+		}
 		logger.Warning(err)
 		msg := t.I18nBot("tgbot.wentWrong")
-		t.SendMsgToTgbot(chatId, msg)
+		if len(messageID) > 0 {
+			t.editMessageTgBot(chatId, messageID[0], msg)
+		} else {
+			t.SendMsgToTgbot(chatId, msg)
+		}
 		return
 	}
-	if traffic == nil {
-		msg := t.I18nBot("tgbot.noResult")
-		t.SendMsgToTgbot(chatId, msg)
-		return
+
+	// Create ClientTraffic from ClientEntity for compatibility with clientInfoMsg
+	totalBytes := int64(clientEntity.TotalGB * 1024 * 1024 * 1024)
+	traffic := &xray.ClientTraffic{
+		Id:         0, // Not used in new architecture
+		InboundId:  0, // Will be set if needed
+		Enable:     clientEntity.Enable,
+		Email:      clientEntity.Email,
+		UUID:       clientEntity.UUID,
+		SubId:      clientEntity.SubID,
+		Up:         clientEntity.Up,
+		Down:       clientEntity.Down,
+		AllTime:    clientEntity.AllTime,
+		ExpiryTime: clientEntity.ExpiryTime,
+		Total:      totalBytes,
+		Reset:      clientEntity.Reset,
+		LastOnline: clientEntity.LastOnline,
 	}
 
 	output := t.clientInfoMsg(traffic, true, true, true, true, true, true)
 
+	// Get inbound ID for back button - find which inbound this client belongs to
+	var mapping model.ClientInboundMapping
+	db := database.GetDB()
+	db.Where("client_id = ?", clientEntity.Id).First(&mapping)
+	
 	inlineKeyboard := tu.InlineKeyboard(
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.refresh")).WithCallbackData(t.encodeQuery("client_refresh "+email)),
@@ -3163,8 +4328,7 @@ func (t *Tgbot) searchClient(chatId int64, email string, messageID ...int) {
 			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.resetExpire")).WithCallbackData(t.encodeQuery("reset_exp "+email)),
 		),
 		tu.InlineKeyboardRow(
-			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.ipLog")).WithCallbackData(t.encodeQuery("ip_log "+email)),
-			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.ipLimit")).WithCallbackData(t.encodeQuery("ip_limit "+email)),
+			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.deviceList")).WithCallbackData(t.encodeQuery("device_list "+email)),
 		),
 		tu.InlineKeyboardRow(
 			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.setTGUser")).WithCallbackData(t.encodeQuery("tg_user "+email)),
@@ -3173,6 +4337,36 @@ func (t *Tgbot) searchClient(chatId int64, email string, messageID ...int) {
 			tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.toggle")).WithCallbackData(t.encodeQuery("toggle_enable "+email)),
 		),
 	)
+	
+	// Add back button if we know the inbound ID
+	if mapping.InboundId > 0 {
+		backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery(fmt.Sprintf("get_clients %d", mapping.InboundId)))
+		inlineKeyboard = tu.InlineKeyboard(
+			tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.refresh")).WithCallbackData(t.encodeQuery("client_refresh "+email)),
+			),
+			tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.resetTraffic")).WithCallbackData(t.encodeQuery("reset_traffic "+email)),
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.limitTraffic")).WithCallbackData(t.encodeQuery("limit_traffic "+email)),
+			),
+			tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.resetExpire")).WithCallbackData(t.encodeQuery("reset_exp "+email)),
+			),
+			tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.deviceList")).WithCallbackData(t.encodeQuery("device_list "+email)),
+			),
+			tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.setTGUser")).WithCallbackData(t.encodeQuery("tg_user "+email)),
+			),
+			tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.toggle")).WithCallbackData(t.encodeQuery("toggle_enable "+email)),
+			),
+			tu.InlineKeyboardRow(
+				backButton,
+			),
+		)
+	}
+	
 	if len(messageID) > 0 {
 		t.editMessageTgBot(chatId, messageID[0], output, inlineKeyboard)
 	} else {
@@ -3203,7 +4397,7 @@ func (t *Tgbot) addClient(chatId int64, msg string, messageID ...int) {
 			),
 			tu.InlineKeyboardRow(
 				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.change_comment")).WithCallbackData("add_client_ch_default_comment"),
-				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.ipLimit")).WithCallbackData("add_client_ch_default_ip_limit"),
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.hwidLimit")).WithCallbackData("add_client_ch_default_hwid"),
 			),
 			tu.InlineKeyboardRow(
 				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.submitDisable")).WithCallbackData("add_client_submit_disable"),
@@ -3230,7 +4424,7 @@ func (t *Tgbot) addClient(chatId int64, msg string, messageID ...int) {
 			),
 			tu.InlineKeyboardRow(
 				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.change_comment")).WithCallbackData("add_client_ch_default_comment"),
-				tu.InlineKeyboardButton("ip limit").WithCallbackData("add_client_ch_default_ip_limit"),
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.hwidLimit")).WithCallbackData("add_client_ch_default_hwid"),
 			),
 			tu.InlineKeyboardRow(
 				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.submitDisable")).WithCallbackData("add_client_submit_disable"),
@@ -3257,7 +4451,7 @@ func (t *Tgbot) addClient(chatId int64, msg string, messageID ...int) {
 			),
 			tu.InlineKeyboardRow(
 				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.change_comment")).WithCallbackData("add_client_ch_default_comment"),
-				tu.InlineKeyboardButton("ip limit").WithCallbackData("add_client_ch_default_ip_limit"),
+				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.hwidLimit")).WithCallbackData("add_client_ch_default_hwid"),
 			),
 			tu.InlineKeyboardRow(
 				tu.InlineKeyboardButton(t.I18nBot("tgbot.buttons.submitDisable")).WithCallbackData("add_client_submit_disable"),
@@ -3316,7 +4510,7 @@ func (t *Tgbot) searchInbound(chatId int64, remark string) {
 }
 
 // getExhausted retrieves and sends information about exhausted clients.
-func (t *Tgbot) getExhausted(chatId int64) {
+func (t *Tgbot) getExhausted(chatId int64, messageID ...int) {
 	trDiff := int64(0)
 	exDiff := int64(0)
 	now := time.Now().Unix() * 1000
@@ -3404,11 +4598,34 @@ func (t *Tgbot) getExhausted(chatId int64) {
 			cols = 2
 		}
 		output += t.I18nBot("tgbot.messages.refreshedOn", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
+		// Add back button to main menu
+		backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("back_to_main"))
+		buttons = append(buttons, backButton)
 		keyboard := tu.InlineKeyboardGrid(tu.InlineKeyboardCols(cols, buttons...))
-		t.SendMsgToTgbot(chatId, output, keyboard)
+		if len(messageID) > 0 {
+			err := t.editMessageTgBot(chatId, messageID[0], output, keyboard)
+			if err != nil {
+				t.SendMsgToTgbot(chatId, output, keyboard)
+			}
+		} else {
+			t.SendMsgToTgbot(chatId, output, keyboard)
+		}
 	} else {
 		output += t.I18nBot("tgbot.messages.refreshedOn", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
-		t.SendMsgToTgbot(chatId, output)
+		// Add back button to main menu
+		backKeyboard := tu.InlineKeyboard(
+			tu.InlineKeyboardRow(
+				tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("back_to_main")),
+			),
+		)
+		if len(messageID) > 0 {
+			err := t.editMessageTgBot(chatId, messageID[0], output, backKeyboard)
+			if err != nil {
+				t.SendMsgToTgbot(chatId, output, backKeyboard)
+			}
+		} else {
+			t.SendMsgToTgbot(chatId, output, backKeyboard)
+		}
 	}
 }
 
@@ -3443,7 +4660,12 @@ func (t *Tgbot) notifyExhausted() {
 							if !int64Contains(chatIDsDone, chatID) && !checkAdmin(chatID) {
 								var disabledClients []xray.ClientTraffic
 								var exhaustedClients []xray.ClientTraffic
-								traffics, err := t.inboundService.GetClientTrafficTgBot(client.TgID)
+								// Try new architecture first
+								traffics, err := t.getClientTrafficTgBotNew(client.TgID)
+								if err != nil || len(traffics) == 0 {
+									// Fallback to old method
+									traffics, err = t.inboundService.GetClientTrafficTgBot(client.TgID)
+								}
 								if err == nil && len(traffics) > 0 {
 									output := t.I18nBot("tgbot.messages.exhaustedCount", "Type=="+t.I18nBot("tgbot.clients"))
 									for _, traffic := range traffics {
@@ -3521,6 +4743,10 @@ func (t *Tgbot) onlineClients(chatId int64, messageID ...int) {
 		}
 		keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, tu.InlineKeyboardCols(cols, buttons...)...)
 	}
+	
+	// Add back button to main menu
+	backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("back_to_main"))
+	keyboard.InlineKeyboard = append(keyboard.InlineKeyboard, tu.InlineKeyboardRow(backButton))
 
 	if len(messageID) > 0 {
 		t.editMessageTgBot(chatId, messageID[0], output, keyboard)
@@ -3534,90 +4760,109 @@ func (t *Tgbot) sendBackup(chatId int64) {
 	output := t.I18nBot("tgbot.messages.backupTime", "Time=="+time.Now().Format("2006-01-02 15:04:05"))
 	t.SendMsgToTgbot(chatId, output)
 
-	// Update by manually trigger a checkpoint operation
-	err := database.Checkpoint()
+	// Create a temporary file for the database backup
+	tempFile, err := os.CreateTemp("", "x-ui-db-backup-*.sql")
 	if err != nil {
-		logger.Error("Error in trigger a checkpoint operation: ", err)
+		logger.Error("Error creating temporary backup file: ", err)
+		return
 	}
+	tempPath := tempFile.Name()
+	defer func() {
+		tempFile.Close()
+		os.Remove(tempPath)
+	}()
 
-	file, err := os.Open(config.GetDBPath())
-	if err == nil {
-		document := tu.Document(
-			tu.ID(chatId),
-			tu.File(file),
-		)
-		_, err = bot.SendDocument(context.Background(), document)
-		if err != nil {
-			logger.Error("Error in uploading backup: ", err)
+	// Get database connection parameters
+	host := config.GetDBHost()
+	port := config.GetDBPort()
+	user := config.GetDBUser()
+	password := config.GetDBPassword()
+	dbname := config.GetDBName()
+
+	// Set PGPASSWORD environment variable for pg_dump
+	env := os.Environ()
+	env = append(env, fmt.Sprintf("PGPASSWORD=%s", password))
+
+	// Use pg_dump to create a backup with --clean and --if-exists for proper restore
+	cmd := exec.Command("pg_dump",
+		"-h", host,
+		"-p", strconv.Itoa(port),
+		"-U", user,
+		"-d", dbname,
+		"--format=plain",
+		"--no-owner",
+		"--no-privileges",
+		"--clean",
+		"--if-exists",
+	)
+	cmd.Env = env
+	cmd.Stdout = tempFile
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	err = cmd.Run()
+	if err != nil {
+		// pg_dump failed, try fallback method via ServerService
+		logger.Warningf("pg_dump not available for Telegram backup, falling back to GORM-based export: %v", err)
+		dbData, fallbackErr := t.serverService.GetDb()
+		if fallbackErr != nil {
+			logger.Errorf("Error in database backup (both pg_dump and fallback failed): %v", fallbackErr)
+			t.SendMsgToTgbot(chatId, t.I18nBot("tgbot.messages.backupError"))
+			return
+		}
+		// Write fallback data to temp file
+		if _, err = tempFile.Write(dbData); err != nil {
+			logger.Error("Error writing fallback backup data to file: ", err)
+			return
 		}
 	} else {
-		logger.Error("Error in opening db file for backup: ", err)
+		// pg_dump succeeded, data already in tempFile
 	}
 
-	file, err = os.Open(xray.GetConfigPath())
-	if err == nil {
-		document := tu.Document(
-			tu.ID(chatId),
-			tu.File(file),
-		)
-		_, err = bot.SendDocument(context.Background(), document)
-		if err != nil {
-			logger.Error("Error in uploading config.json: ", err)
-		}
-	} else {
-		logger.Error("Error in opening config.json file for backup: ", err)
-	}
-}
-
-// sendBanLogs sends the ban logs to the specified chat.
-func (t *Tgbot) sendBanLogs(chatId int64, dt bool) {
-	if dt {
-		output := t.I18nBot("tgbot.messages.datetime", "DateTime=="+time.Now().Format("2006-01-02 15:04:05"))
-		t.SendMsgToTgbot(chatId, output)
+	// Close the file before sending
+	if err = tempFile.Close(); err != nil {
+		logger.Error("Error closing temporary backup file: ", err)
+		return
 	}
 
-	file, err := os.Open(xray.GetIPLimitBannedPrevLogPath())
-	if err == nil {
-		// Check if the file is non-empty before attempting to upload
-		fileInfo, _ := file.Stat()
-		if fileInfo.Size() > 0 {
+	// Read the file content and send it
+	fileBytes, err := os.ReadFile(tempPath)
+	if err != nil {
+		logger.Error("Error reading backup file: ", err)
+		return
+	}
+
+	document := tu.Document(
+		tu.ID(chatId),
+		tu.FileFromBytes(fileBytes, "x-ui-db-backup.sql"),
+	)
+	_, err = bot.SendDocument(context.Background(), document)
+	if err != nil {
+		logger.Error("Error in uploading backup: ", err)
+	}
+
+	// Check if multi-node mode is enabled before trying to open config.json
+	multiMode, err := t.settingService.GetMultiNodeMode()
+	if err == nil && !multiMode {
+		file, err := os.Open(xray.GetConfigPath())
+		if err == nil {
 			document := tu.Document(
 				tu.ID(chatId),
 				tu.File(file),
 			)
 			_, err = bot.SendDocument(context.Background(), document)
 			if err != nil {
-				logger.Error("Error in uploading IPLimitBannedPrevLog: ", err)
+				logger.Error("Error in uploading config.json: ", err)
 			}
 		} else {
-			logger.Warning("IPLimitBannedPrevLog file is empty, not uploading.")
+			logger.Error("Error in opening config.json file for backup: ", err)
 		}
-		file.Close()
-	} else {
-		logger.Error("Error in opening IPLimitBannedPrevLog file for backup: ", err)
-	}
-
-	file, err = os.Open(xray.GetIPLimitBannedLogPath())
-	if err == nil {
-		// Check if the file is non-empty before attempting to upload
-		fileInfo, _ := file.Stat()
-		if fileInfo.Size() > 0 {
-			document := tu.Document(
-				tu.ID(chatId),
-				tu.File(file),
-			)
-			_, err = bot.SendDocument(context.Background(), document)
-			if err != nil {
-				logger.Error("Error in uploading IPLimitBannedLog: ", err)
-			}
-		} else {
-			logger.Warning("IPLimitBannedLog file is empty, not uploading.")
-		}
-		file.Close()
-	} else {
-		logger.Error("Error in opening IPLimitBannedLog file for backup: ", err)
+	} else if multiMode {
+		logger.Debug("Skipping config.json backup in multi-node mode")
 	}
 }
+
 
 // sendCallbackAnswerTgBot answers a callback query with a message.
 func (t *Tgbot) sendCallbackAnswerTgBot(id string, message string) {
@@ -3643,7 +4888,8 @@ func (t *Tgbot) editMessageCallbackTgBot(chatId int64, messageID int, inlineKeyb
 }
 
 // editMessageTgBot edits the text and reply markup of a message.
-func (t *Tgbot) editMessageTgBot(chatId int64, messageID int, text string, inlineKeyboard ...*telego.InlineKeyboardMarkup) {
+// Returns error if edit fails (e.g., message doesn't exist).
+func (t *Tgbot) editMessageTgBot(chatId int64, messageID int, text string, inlineKeyboard ...*telego.InlineKeyboardMarkup) error {
 	params := telego.EditMessageTextParams{
 		ChatID:    tu.ID(chatId),
 		MessageID: messageID,
@@ -3653,9 +4899,17 @@ func (t *Tgbot) editMessageTgBot(chatId int64, messageID int, text string, inlin
 	if len(inlineKeyboard) > 0 {
 		params.ReplyMarkup = inlineKeyboard[0]
 	}
-	if _, err := bot.EditMessageText(context.Background(), &params); err != nil {
-		logger.Warning(err)
+	_, err := bot.EditMessageText(context.Background(), &params)
+	if err != nil {
+		// Check if error is "message is not modified" - this is OK, means content is the same
+		if strings.Contains(err.Error(), "message is not modified") || strings.Contains(err.Error(), "message not modified") {
+			logger.Debugf("Message %d not modified (content unchanged), this is OK", messageID)
+			return nil
+		}
+		logger.Debugf("Failed to edit message %d: %v", messageID, err)
+		return err
 	}
+	return nil
 }
 
 // SendMsgToTgbotDeleteAfter sends a message and deletes it after a specified delay.
@@ -3696,6 +4950,54 @@ func (t *Tgbot) deleteMessageTgBot(chatId int64, messageID int) {
 	} else {
 		logger.Info("Message deleted successfully")
 	}
+}
+
+// createBackAndDeleteKeyboard creates an inline keyboard with "Back" and "Delete" buttons.
+// If messageID is 0, the delete button will be disabled (for messages not yet sent).
+func (t *Tgbot) createBackAndDeleteKeyboard(chatId int64, messageID int) *telego.InlineKeyboardMarkup {
+	var buttons []telego.InlineKeyboardButton
+	
+	// Add back button
+	backButton := tu.InlineKeyboardButton("◀️ " + t.I18nBot("tgbot.buttons.back")).WithCallbackData(t.encodeQuery("back_to_main"))
+	buttons = append(buttons, backButton)
+	
+	// Add delete button if messageID is provided
+	if messageID > 0 {
+		deleteCallbackData := t.encodeQuery(fmt.Sprintf("delete_message %d", messageID))
+		deleteButton := tu.InlineKeyboardButton("🗑️ " + t.I18nBot("tgbot.buttons.delete")).WithCallbackData(deleteCallbackData)
+		buttons = append(buttons, deleteButton)
+	}
+	
+	return tu.InlineKeyboard(tu.InlineKeyboardRow(buttons...))
+}
+
+// sendMessageWithKeyboard sends a message with keyboard and returns the sent message.
+func (t *Tgbot) sendMessageWithKeyboard(chatId int64, msg string, replyMarkup telego.ReplyMarkup) (*telego.Message, error) {
+	if !isRunning {
+		return nil, errors.New("bot is not running")
+	}
+
+	if msg == "" {
+		logger.Info("[tgbot] message is empty!")
+		return nil, errors.New("message is empty")
+	}
+
+	params := telego.SendMessageParams{
+		ChatID:    tu.ID(chatId),
+		Text:      msg,
+		ParseMode: "HTML",
+	}
+	if replyMarkup != nil {
+		params.ReplyMarkup = replyMarkup
+	}
+	
+	sentMsg, err := bot.SendMessage(context.Background(), &params)
+	if err != nil {
+		logger.Warning("Error sending telegram message:", err)
+		return nil, err
+	}
+	
+	return sentMsg, nil
 }
 
 // isSingleWord checks if the text contains only a single word.

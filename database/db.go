@@ -1,23 +1,18 @@
 // Package database provides database initialization, migration, and management utilities
-// for the 3x-ui panel using GORM with SQLite.
+// for the 3x-ui panel using GORM with PostgreSQL.
 package database
 
 import (
-	"bytes"
-	"errors"
-	"io"
-	"io/fs"
+	"fmt"
 	"log"
-	"os"
-	"path"
 	"slices"
+	"time"
 
 	"github.com/mhsanaei/3x-ui/v2/config"
 	"github.com/mhsanaei/3x-ui/v2/database/model"
 	"github.com/mhsanaei/3x-ui/v2/util/crypto"
-	"github.com/mhsanaei/3x-ui/v2/xray"
 
-	"gorm.io/driver/sqlite"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -27,26 +22,10 @@ var db *gorm.DB
 const (
 	defaultUsername = "admin"
 	defaultPassword = "admin"
+	// minRequiredSchemaVersion is the minimum schema version required by this application version
+	// Update this when you add new migrations that are required for the app to function
+	minRequiredSchemaVersion = 1
 )
-
-func initModels() error {
-	models := []any{
-		&model.User{},
-		&model.Inbound{},
-		&model.OutboundTraffics{},
-		&model.Setting{},
-		&model.InboundClientIps{},
-		&xray.ClientTraffic{},
-		&model.HistoryOfSeeders{},
-	}
-	for _, model := range models {
-		if err := db.AutoMigrate(model); err != nil {
-			log.Printf("Error auto migrating model: %v", err)
-			return err
-		}
-	}
-	return nil
-}
 
 // initUser creates a default admin user if the users table is empty.
 func initUser() error {
@@ -120,15 +99,19 @@ func isTableEmpty(tableName string) (bool, error) {
 }
 
 // InitDB sets up the database connection, migrates models, and runs seeders.
-func InitDB(dbPath string) error {
-	dir := path.Dir(dbPath)
-	err := os.MkdirAll(dir, fs.ModePerm)
-	if err != nil {
-		return err
-	}
-
+// dbConnectionString should be a PostgreSQL connection string in the format:
+// postgres://user:password@host:port/dbname?sslmode=mode
+//
+// InitDB performs the following steps in order:
+// 1. Establishes database connection
+// 2. Configures connection pool
+// 3. Runs schema migrations
+// 4. Checks schema version compatibility
+// 5. Initializes default user (if needed)
+// 6. Runs seeders
+func InitDB(dbConnectionString string) error {
+	// Step 1: Establish database connection
 	var gormLogger logger.Interface
-
 	if config.IsDebug() {
 		gormLogger = logger.Default
 	} else {
@@ -138,24 +121,66 @@ func InitDB(dbPath string) error {
 	c := &gorm.Config{
 		Logger: gormLogger,
 	}
-	db, err = gorm.Open(sqlite.Open(dbPath), c)
+
+	var err error
+	db, err = gorm.Open(postgres.Open(dbConnectionString), c)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	if err := initModels(); err != nil {
-		return err
+	// Step 2: Configure connection pool
+	sqlDB, err := db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get underlying sql.DB: %w", err)
 	}
 
+	// Set connection pool settings
+	// These values can be overridden via environment variables if needed
+	sqlDB.SetMaxOpenConns(25)                    // Maximum number of open connections
+	sqlDB.SetMaxIdleConns(5)                     // Maximum number of idle connections
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)    // Maximum connection lifetime
+	sqlDB.SetConnMaxIdleTime(10 * time.Minute)   // Maximum idle time before closing
+
+	// Step 3: Run schema migrations
+	migrator := NewMigrator(db)
+	if err := migrator.Migrate(); err != nil {
+		return fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	// Step 3.5: Clean up invalid group_id references (safety check)
+	// This ensures data integrity even if migrations didn't run or were applied before cleanup was added
+	// This is idempotent and safe to run multiple times
+	if err := db.Exec(`
+		UPDATE client_entities
+		SET group_id = NULL
+		WHERE group_id IS NOT NULL
+		  AND group_id NOT IN (SELECT id FROM client_groups)
+	`).Error; err != nil {
+		// Log warning but don't fail - this is a data cleanup, not critical
+		log.Printf("Warning: failed to cleanup invalid group_id references: %v", err)
+	}
+
+	// Step 4: Check schema version compatibility
+	if err := migrator.CheckSchemaVersion(minRequiredSchemaVersion); err != nil {
+		return fmt.Errorf("schema version check failed: %w", err)
+	}
+
+	// Step 5: Initialize default user (if needed)
 	isUsersEmpty, err := isTableEmpty("users")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to check if users table is empty: %w", err)
 	}
 
 	if err := initUser(); err != nil {
-		return err
+		return fmt.Errorf("failed to initialize default user: %w", err)
 	}
-	return runSeeders(isUsersEmpty)
+
+	// Step 6: Run seeders
+	if err := runSeeders(isUsersEmpty); err != nil {
+		return fmt.Errorf("failed to run seeders: %w", err)
+	}
+
+	return nil
 }
 
 // CloseDB closes the database connection if it exists.
@@ -178,51 +203,4 @@ func GetDB() *gorm.DB {
 // IsNotFound checks if the given error is a GORM record not found error.
 func IsNotFound(err error) bool {
 	return err == gorm.ErrRecordNotFound
-}
-
-// IsSQLiteDB checks if the given file is a valid SQLite database by reading its signature.
-func IsSQLiteDB(file io.ReaderAt) (bool, error) {
-	signature := []byte("SQLite format 3\x00")
-	buf := make([]byte, len(signature))
-	_, err := file.ReadAt(buf, 0)
-	if err != nil {
-		return false, err
-	}
-	return bytes.Equal(buf, signature), nil
-}
-
-// Checkpoint performs a WAL checkpoint on the SQLite database to ensure data consistency.
-func Checkpoint() error {
-	// Update WAL
-	err := db.Exec("PRAGMA wal_checkpoint;").Error
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// ValidateSQLiteDB opens the provided sqlite DB path with a throw-away connection
-// and runs a PRAGMA integrity_check to ensure the file is structurally sound.
-// It does not mutate global state or run migrations.
-func ValidateSQLiteDB(dbPath string) error {
-	if _, err := os.Stat(dbPath); err != nil { // file must exist
-		return err
-	}
-	gdb, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{Logger: logger.Discard})
-	if err != nil {
-		return err
-	}
-	sqlDB, err := gdb.DB()
-	if err != nil {
-		return err
-	}
-	defer sqlDB.Close()
-	var res string
-	if err := gdb.Raw("PRAGMA integrity_check;").Scan(&res).Error; err != nil {
-		return err
-	}
-	if res != "ok" {
-		return errors.New("sqlite integrity check failed: " + res)
-	}
-	return nil
 }

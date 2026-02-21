@@ -1,0 +1,215 @@
+{{define "settings/panel/migration"}}
+<a-card>
+    <a-alert type="info" :style="{ marginBottom: '20px' }" show-icon>
+        <template slot="message">
+            {{ i18n "pages.settings.migration.info" }}
+        </template>
+        <template slot="description">
+            {{ i18n "pages.settings.migration.infoDesc" }}
+        </template>
+    </a-alert>
+
+    <a-divider>{{ i18n "pages.settings.migration.uploadFile" }}</a-divider>
+
+    <div :style="{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px', marginBottom: '20px', flexWrap: 'wrap' }">
+        <a-upload
+            :file-list="[]"
+            :show-upload-list="false"
+            :before-upload="beforeUpload"
+            accept=".db">
+            <a-button type="primary">
+                <a-icon type="upload"></a-icon>
+                {{ i18n "pages.settings.migration.selectFile" }}
+            </a-button>
+        </a-upload>
+
+        <a-button 
+            type="primary" 
+            :disabled="!migrationFile || migrationPreviewing || migrationExecuting"
+            :loading="migrationPreviewing"
+            @click="previewMigration">
+            {{ i18n "pages.settings.migration.preview" }}
+        </a-button>
+
+        <a-button 
+            type="danger" 
+            :disabled="!migrationFile || !migrationPreview || migrationPreviewing || migrationExecuting"
+            :loading="migrationExecuting"
+            @click="executeMigration">
+            {{ i18n "pages.settings.migration.execute" }}
+        </a-button>
+    </div>
+
+    <div v-if="migrationFile" :style="{ marginTop: '-10px', marginBottom: '10px' }">
+        <a-tag color="blue" closable @close="handleRemove">
+            <a-icon type="file"></a-icon>
+            [[ migrationFile.name ]]
+        </a-tag>
+    </div>
+
+    <div v-if="migrationPreview && migrationPreview.panelSettings" :style="{ marginTop: '20px' }">
+        <a-alert type="warning" show-icon>
+            <template slot="message">{{ i18n "pages.settings.migration.panelRestartWarning" }}</template>
+        </a-alert>
+    </div>
+
+    <div v-if="migrationPreview" :style="{ marginTop: '30px' }">
+        <a-divider>{{ i18n "pages.settings.migration.previewTitle" }}</a-divider>
+        <a-descriptions :column="2" bordered>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.preview.users" }}'>
+                [[ migrationPreview.usersCount ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.preview.settings" }}'>
+                [[ migrationPreview.settingsCount ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.preview.inbounds" }}'>
+                [[ migrationPreview.inboundsCount ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.preview.clients" }}'>
+                [[ migrationPreview.clientsCount ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.preview.clientTraffics" }}'>
+                [[ migrationPreview.clientTrafficsCount ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.preview.inboundClientIps" }}'>
+                [[ migrationPreview.inboundClientIpsCount ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.preview.outboundTraffics" }}'>
+                [[ migrationPreview.outboundTrafficsCount ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.preview.historyOfSeeders" }}'>
+                [[ migrationPreview.historyOfSeedersCount ]]
+            </a-descriptions-item>
+        </a-descriptions>
+
+        <div v-if="migrationPreview.panelSettings" :style="{ marginTop: '20px' }">
+            <a-divider>{{ i18n "pages.settings.migration.preview.panelSettings" }}</a-divider>
+            <a-alert type="warning" show-icon :style="{ marginBottom: '10px' }">
+                <template slot="message">{{ i18n "pages.settings.migration.preview.panelSettingsWarning" }}</template>
+            </a-alert>
+            <a-descriptions :column="2" bordered>
+                <a-descriptions-item v-if="migrationPreview.panelSettings.webPort" label='{{ i18n "pages.settings.panelPort" }}'>
+                    [[ migrationPreview.panelSettings.webPort ]]
+                </a-descriptions-item>
+                <a-descriptions-item v-if="migrationPreview.panelSettings.webBasePath" label='{{ i18n "pages.settings.panelUrlPath" }}'>
+                    [[ migrationPreview.panelSettings.webBasePath ]]
+                </a-descriptions-item>
+                <a-descriptions-item v-if="migrationPreview.panelSettings.webListen" label='{{ i18n "pages.settings.panelListeningIP" }}'>
+                    [[ migrationPreview.panelSettings.webListen ]]
+                </a-descriptions-item>
+                <a-descriptions-item v-if="migrationPreview.panelSettings.webDomain" label='{{ i18n "pages.settings.panelListeningDomain" }}'>
+                    [[ migrationPreview.panelSettings.webDomain ]]
+                </a-descriptions-item>
+                <a-descriptions-item v-if="migrationPreview.panelSettings.webCertFile" label='{{ i18n "pages.settings.publicKeyPath" }}'>
+                    [[ migrationPreview.panelSettings.webCertFile ]]
+                </a-descriptions-item>
+                <a-descriptions-item v-if="migrationPreview.panelSettings.webKeyFile" label='{{ i18n "pages.settings.privateKeyPath" }}'>
+                    [[ migrationPreview.panelSettings.webKeyFile ]]
+                </a-descriptions-item>
+            </a-descriptions>
+        </div>
+
+        <div v-if="migrationPreview.errors && migrationPreview.errors.length > 0" :style="{ marginTop: '20px' }">
+            <a-alert type="warning" show-icon>
+                <template slot="message">{{ i18n "pages.settings.migration.preview.warnings" }}</template>
+                <template slot="description">
+                    <ul>
+                        <li v-for="error in migrationPreview.errors">[[ error ]]</li>
+                    </ul>
+                </template>
+            </a-alert>
+        </div>
+    </div>
+
+    <div v-if="migrationResult" :style="{ marginTop: '30px' }">
+        <a-divider>{{ i18n "pages.settings.migration.resultTitle" }}</a-divider>
+        
+        <a-alert 
+            :type="migrationResult.success ? 'success' : 'error'" 
+            show-icon
+            :style="{ marginBottom: '20px' }">
+            <template slot="message">
+                <span v-if="migrationResult.success">{{ i18n "pages.settings.migration.success" }}</span>
+                <span v-else>{{ i18n "pages.settings.migration.error" }}</span>
+            </template>
+        </a-alert>
+
+        <a-descriptions :column="2" bordered>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.result.usersMigrated" }}'>
+                [[ migrationResult.usersMigrated ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.result.settingsMigrated" }}'>
+                [[ migrationResult.settingsMigrated ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.result.inboundsMigrated" }}'>
+                [[ migrationResult.inboundsMigrated ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.result.clientsMigrated" }}'>
+                [[ migrationResult.clientsMigrated ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.result.clientTrafficsMigrated" }}'>
+                [[ migrationResult.clientTrafficsMigrated ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.result.inboundClientIpsMigrated" }}'>
+                [[ migrationResult.inboundClientIpsMigrated ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.result.outboundTrafficsMigrated" }}'>
+                [[ migrationResult.outboundTrafficsMigrated ]]
+            </a-descriptions-item>
+            <a-descriptions-item label='{{ i18n "pages.settings.migration.result.historyOfSeedersMigrated" }}'>
+                [[ migrationResult.historyOfSeedersMigrated ]]
+            </a-descriptions-item>
+        </a-descriptions>
+
+        <div v-if="migrationResult.panelSettingsApplied" :style="{ marginTop: '20px' }">
+            <a-divider>{{ i18n "pages.settings.migration.result.panelSettingsApplied" }}</a-divider>
+            <a-descriptions :column="2" bordered>
+                <a-descriptions-item v-if="migrationResult.panelSettingsApplied.webPort" label='{{ i18n "pages.settings.panelPort" }}'>
+                    [[ migrationResult.panelSettingsApplied.webPort ]]
+                </a-descriptions-item>
+                <a-descriptions-item v-if="migrationResult.panelSettingsApplied.webBasePath" label='{{ i18n "pages.settings.panelUrlPath" }}'>
+                    [[ migrationResult.panelSettingsApplied.webBasePath ]]
+                </a-descriptions-item>
+                <a-descriptions-item v-if="migrationResult.panelSettingsApplied.webListen" label='{{ i18n "pages.settings.panelListeningIP" }}'>
+                    [[ migrationResult.panelSettingsApplied.webListen ]]
+                </a-descriptions-item>
+                <a-descriptions-item v-if="migrationResult.panelSettingsApplied.webDomain" label='{{ i18n "pages.settings.panelListeningDomain" }}'>
+                    [[ migrationResult.panelSettingsApplied.webDomain ]]
+                </a-descriptions-item>
+                <a-descriptions-item v-if="migrationResult.panelSettingsApplied.webCertFile" label='{{ i18n "pages.settings.publicKeyPath" }}'>
+                    [[ migrationResult.panelSettingsApplied.webCertFile ]]
+                </a-descriptions-item>
+                <a-descriptions-item v-if="migrationResult.panelSettingsApplied.webKeyFile" label='{{ i18n "pages.settings.privateKeyPath" }}'>
+                    [[ migrationResult.panelSettingsApplied.webKeyFile ]]
+                </a-descriptions-item>
+            </a-descriptions>
+            <a-alert type="info" show-icon :style="{ marginTop: '10px' }">
+                <template slot="message">{{ i18n "pages.settings.migration.result.panelRestartInfo" }}</template>
+            </a-alert>
+        </div>
+
+        <div v-if="migrationResult.warnings && migrationResult.warnings.length > 0" :style="{ marginTop: '20px' }">
+            <a-alert type="warning" show-icon>
+                <template slot="message">{{ i18n "pages.settings.migration.result.warnings" }}</template>
+                <template slot="description">
+                    <ul>
+                        <li v-for="warning in migrationResult.warnings">[[ warning ]]</li>
+                    </ul>
+                </template>
+            </a-alert>
+        </div>
+
+        <div v-if="migrationResult.errors && migrationResult.errors.length > 0" :style="{ marginTop: '20px' }">
+            <a-alert type="error" show-icon>
+                <template slot="message">{{ i18n "pages.settings.migration.result.errors" }}</template>
+                <template slot="description">
+                    <ul>
+                        <li v-for="error in migrationResult.errors">[[ error ]]</li>
+                    </ul>
+                </template>
+            </a-alert>
+        </div>
+    </div>
+</a-card>
+{{end}}
+

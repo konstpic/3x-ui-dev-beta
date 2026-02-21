@@ -89,6 +89,27 @@
                     </template>
                     {{ template "settings/panel/subscription/json" . }}
                   </a-tab-pane>
+                  <a-tab-pane key="6" :style="{ paddingTop: '20px' }">
+                    <template #tab>
+                      <a-icon type="file-text"></a-icon>
+                      <span>{{ i18n "pages.settings.subscriptionHeaders.title" }}</span>
+                    </template>
+                    {{ template "settings/panel/subscription/headers" . }}
+                  </a-tab-pane>
+                  <a-tab-pane key="7" :style="{ paddingTop: '20px' }">
+                    <template #tab>
+                      <a-icon type="bg-colors"></a-icon>
+                      <span>Customize Subscription Page</span>
+                    </template>
+                    {{ template "settings/panel/subscription/customize" . }}
+                  </a-tab-pane>
+                  <a-tab-pane key="8" :style="{ paddingTop: '20px' }">
+                    <template #tab>
+                      <a-icon type="database"></a-icon>
+                      <span>{{ i18n "pages.settings.migration.title" }}</span>
+                    </template>
+                    {{ template "settings/panel/migration" . }}
+                  </a-tab-pane>
                 </a-tabs>
               </a-col>
             </a-row>
@@ -124,10 +145,11 @@
       entryPort: null,
       entryProtocol: null,
       entryIsIP: false,
+      subHeaders: {}, // Parsed subscription headers object
       user: {},
       lang: LanguageManager.getLanguage(),
       inboundOptions: [],
-      remarkModels: { i: 'Inbound', e: 'Email', o: 'Other' },
+      remarkModels: { i: 'Inbound', e: 'Email', o: 'Other', n: 'Node Name', p: 'Node IP', r: 'Port' },
       remarkSeparators: [' ', '-', '_', '@', ':', '~', '|', ',', '.', '/'],
       datepickerList: [{ name: 'Gregorian (Standard)', value: 'gregorian' }, { name: 'Jalalian (شمسی)', value: 'jalalian' }],
       remarkSample: '',
@@ -231,7 +253,52 @@
         sample = []
         this.remarkModel.forEach(r => sample.push(this.remarkModels[r]));
         this.remarkSample = sample.length == 0 ? '' : sample.join(this.remarkSeparator);
-      }
+      },
+      onMultiNodeModeChange(enabled) {
+        // Use app reference to ensure correct context
+        const vm = app || this;
+        
+        // Ensure allSetting is initialized
+        if (!vm || !vm.allSetting) {
+          console.error('allSetting is not initialized', vm);
+          return;
+        }
+        
+        // Update the value immediately
+        vm.allSetting.multiNodeMode = enabled;
+        
+        if (enabled) {
+          vm.$confirm({
+            title: '{{ i18n "pages.settings.enableMultiNodeMode" }}',
+            content: '{{ i18n "pages.settings.enableMultiNodeModeConfirm" }}',
+            class: themeSwitcher.currentTheme,
+            okText: '{{ i18n "sure" }}',
+            cancelText: '{{ i18n "cancel" }}',
+            onOk: () => {
+              // Value already set, just update save button state
+              vm.saveBtnDisable = vm.oldAllSetting.equals(vm.allSetting);
+            },
+            onCancel: () => {
+              // Revert the value if cancelled
+              vm.allSetting.multiNodeMode = false;
+              vm.saveBtnDisable = vm.oldAllSetting.equals(vm.allSetting);
+            }
+          });
+        } else {
+          // Directly update save button state if disabling
+          vm.saveBtnDisable = vm.oldAllSetting.equals(vm.allSetting);
+        }
+      },
+      goToNodes() {
+        window.location.href = basePath + 'panel/nodes';
+      },
+      // Migration data
+      migrationFile: null,
+      migrationFileList: [],
+      migrationPreview: null,
+      migrationPreviewing: false,
+      migrationExecuting: false,
+      migrationResult: null
     },
     methods: {
       loading(spinning = true) {
@@ -262,8 +329,10 @@
 
         return parts.length === 2 ? groups < 8 : groups === 8;
       },
-      async getAllSetting() {
-        const msg = await HttpUtil.post("/panel/setting/all");
+      async getAllSetting(forceRefresh = false) {
+        // Add cache-busting parameter if force refresh is requested
+        const url = forceRefresh ? `/panel/setting/all?_t=${Date.now()}` : "/panel/setting/all";
+        const msg = await HttpUtil.post(url);
 
         if (msg.success) {
           if (!this.loadingStates.fetched) {
@@ -272,6 +341,20 @@
 
           this.oldAllSetting = new AllSetting(msg.obj);
           this.allSetting = new AllSetting(msg.obj);
+          
+          // Initialize subHeaders object from JSON string
+          try {
+            const headersJSON = this.allSetting.subHeaders || "{}";
+            this.subHeaders = JSON.parse(headersJSON);
+            // Ensure oldAllSetting also has the same subHeaders for proper comparison
+            this.oldAllSetting.subHeaders = headersJSON;
+          } catch (e) {
+            console.warn("Failed to parse subHeaders on load:", e);
+            this.subHeaders = {};
+            this.oldAllSetting.subHeaders = "{}";
+            this.allSetting.subHeaders = "{}";
+          }
+          
           app.changeRemarkSample();
           this.saveBtnDisable = true;
         }
@@ -289,10 +372,25 @@
       },
       async updateAllSetting() {
         this.loading(true);
+        // Sync subHeaders object back to JSON string before saving
+        try {
+          this.allSetting.subHeaders = JSON.stringify(this.subHeaders || {});
+        } catch (e) {
+          console.error("Failed to stringify subHeaders before save:", e);
+        }
         const msg = await HttpUtil.post("/panel/setting/update", this.allSetting);
         this.loading(false);
         if (msg.success) {
-          await this.getAllSetting();
+          Vue.prototype.$message.success('{{ i18n "pages.settings.toasts.modifySettings" }}');
+          // Wait a bit for cache to be cleared on server side, then reload with cache-busting
+          await new Promise(resolve => setTimeout(resolve, 200));
+          await this.getAllSetting(true);
+          // Force Vue to update the view by using $forceUpdate if needed
+          this.$nextTick(() => {
+            this.$forceUpdate();
+          });
+        } else {
+          Vue.prototype.$message.error(msg.msg || '{{ i18n "pages.settings.toasts.getSettings" }}');
         }
       },
       async updateUser() {
@@ -435,6 +533,170 @@
         const updatedNoises = [...this.noisesArray];
         updatedNoises[index] = { ...updatedNoises[index], applyTo: value };
         this.noisesArray = updatedNoises;
+      },
+      // Migration methods
+      beforeUpload(file) {
+        // Only allow .db files
+        const isDB = file.name.toLowerCase().endsWith('.db');
+        if (!isDB) {
+          Vue.prototype.$message.error('{{ i18n "pages.settings.migration.error.invalidFile" }}');
+          return false;
+        }
+        
+        // Check file size (100MB max)
+        const isLt100M = file.size / 1024 / 1024 < 100;
+        if (!isLt100M) {
+          Vue.prototype.$message.error('{{ i18n "pages.settings.migration.error.fileTooLarge" }}');
+          return false;
+        }
+        
+        this.migrationFile = file;
+        this.migrationFileList = [file];
+        this.migrationPreview = null;
+        this.migrationResult = null;
+        return false; // Prevent auto upload
+      },
+      handleRemove() {
+        this.migrationFile = null;
+        this.migrationFileList = [];
+        this.migrationPreview = null;
+        this.migrationResult = null;
+      },
+      async previewMigration() {
+        if (!this.migrationFile) {
+          Vue.prototype.$message.error('{{ i18n "pages.settings.migration.error.noFile" }}');
+          return;
+        }
+        
+        this.migrationPreviewing = true;
+        this.migrationPreview = null;
+        
+        try {
+          const formData = new FormData();
+          formData.append('file', this.migrationFile);
+          
+          const msg = await HttpUtil.post('/panel/setting/migration/preview', formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            }
+          });
+          
+          if (msg.success) {
+            this.migrationPreview = msg.obj;
+            Vue.prototype.$message.success('{{ i18n "pages.settings.migration.preview.success" }}');
+          } else {
+            Vue.prototype.$message.error(msg.msg || '{{ i18n "pages.settings.migration.error.preview" }}');
+          }
+        } catch (error) {
+          Vue.prototype.$message.error('{{ i18n "pages.settings.migration.error.preview" }}');
+          console.error('Preview migration error:', error);
+        } finally {
+          this.migrationPreviewing = false;
+        }
+      },
+      async executeMigration() {
+        if (!this.migrationFile) {
+          Vue.prototype.$message.error('{{ i18n "pages.settings.migration.error.noFile" }}');
+          return;
+        }
+        
+        if (!this.migrationPreview) {
+          Vue.prototype.$message.warning('{{ i18n "pages.settings.migration.error.noPreview" }}');
+          return;
+        }
+        
+        await new Promise(resolve => {
+          this.$confirm({
+            title: '{{ i18n "pages.settings.migration.executeConfirm.title" }}',
+            content: '{{ i18n "pages.settings.migration.executeConfirm.content" }}',
+            class: themeSwitcher.currentTheme,
+            okText: '{{ i18n "sure" }}',
+            cancelText: '{{ i18n "cancel" }}',
+            onOk: () => resolve(),
+          });
+        });
+        
+        this.migrationExecuting = true;
+        this.migrationResult = null;
+        
+        try {
+          const formData = new FormData();
+          formData.append('file', this.migrationFile);
+          
+          const msg = await HttpUtil.post('/panel/setting/migration/execute', formData, {
+            headers: {
+              'Content-Type': 'multipart/form-data',
+            }
+          });
+          
+          if (msg.success && msg.obj) {
+            this.migrationResult = msg.obj;
+            if (msg.obj.success) {
+              Vue.prototype.$message.success('{{ i18n "pages.settings.migration.success" }}');
+            } else {
+              Vue.prototype.$message.error(msg.msg || '{{ i18n "pages.settings.migration.error.execute" }}');
+            }
+          } else {
+            this.migrationResult = { success: false, errors: [msg.msg || '{{ i18n "pages.settings.migration.error.execute" }}'] };
+            Vue.prototype.$message.error(msg.msg || '{{ i18n "pages.settings.migration.error.execute" }}');
+          }
+        } catch (error) {
+          Vue.prototype.$message.error('{{ i18n "pages.settings.migration.error.execute" }}');
+          console.error('Execute migration error:', error);
+          this.migrationResult = { success: false, errors: [error.message || '{{ i18n "pages.settings.migration.error.execute" }}'] };
+        } finally {
+          this.migrationExecuting = false;
+        }
+      },
+      async downloadGrafanaDashboard() {
+        try {
+          const response = await fetch(basePath + 'panel/setting/grafana/dashboard');
+          if (!response.ok) {
+            throw new Error('Failed to download dashboard');
+          }
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = '3x-ui-grafana-dashboard.json';
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+          Vue.prototype.$message.success('{{ i18n "pages.settings.toasts.downloadDashboardSuccess" }}');
+        } catch (error) {
+          Vue.prototype.$message.error('{{ i18n "pages.settings.toasts.downloadDashboardError" }}: ' + (error.message || 'Unknown error'));
+          console.error('Download dashboard error:', error);
+        }
+      },
+      copyMetricsEndpoint() {
+        const baseUrl = window.location.origin + basePath;
+        const metricsUrl = baseUrl + 'panel/metrics';
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(metricsUrl).then(() => {
+            Vue.prototype.$message.success('Metrics endpoint URL copied to clipboard: ' + metricsUrl);
+          }).catch(err => {
+            console.error('Failed to copy to clipboard:', err);
+            this.fallbackCopyToClipboard(metricsUrl);
+          });
+        } else {
+          this.fallbackCopyToClipboard(metricsUrl);
+        }
+      },
+      fallbackCopyToClipboard(text) {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+          document.execCommand('copy');
+          Vue.prototype.$message.success('Metrics endpoint URL copied to clipboard: ' + text);
+        } catch (err) {
+          Vue.prototype.$message.error('Failed to copy to clipboard. Please copy manually: ' + text);
+        }
+        document.body.removeChild(textArea);
       },
     },
     computed: {
@@ -619,6 +881,46 @@
           }
           return alerts
         }
+      },
+      // Subscription headers computed property - syncs between JSON string and object
+      subHeadersObject: {
+        get: function () {
+          try {
+            const headersJSON = this.allSetting.subHeaders || "{}";
+            return JSON.parse(headersJSON);
+          } catch (e) {
+            console.warn("Failed to parse subHeaders JSON:", e);
+            return {};
+          }
+        },
+        set: function (value) {
+          try {
+            this.allSetting.subHeaders = JSON.stringify(value || {});
+            // Update local subHeaders object for reactivity
+            this.subHeaders = value || {};
+          } catch (e) {
+            console.error("Failed to stringify subHeaders:", e);
+          }
+        }
+      }
+    },
+    watch: {
+      // Watch subHeaders object and sync to allSetting.subHeaders for save button activation
+      subHeaders: {
+        handler: function (newVal, oldVal) {
+          // Deep watch to detect nested changes
+          try {
+            const newJSON = JSON.stringify(newVal || {});
+            const oldJSON = this.allSetting.subHeaders || "{}";
+            if (newJSON !== oldJSON) {
+              this.allSetting.subHeaders = newJSON;
+            }
+          } catch (e) {
+            console.error("Failed to sync subHeaders:", e);
+          }
+        },
+        deep: true,
+        immediate: false
       }
     },
     async mounted() {
@@ -628,8 +930,18 @@
       this.entryIsIP = this._isIp(this.entryHost);
       await this.getAllSetting();
       await this.loadInboundTags();
+      
       while (true) {
         await PromiseUtil.sleep(1000);
+        // Sync subHeaders before comparison
+        try {
+          const currentSubHeadersJSON = JSON.stringify(this.subHeaders || {});
+          if (this.allSetting.subHeaders !== currentSubHeadersJSON) {
+            this.allSetting.subHeaders = currentSubHeadersJSON;
+          }
+        } catch (e) {
+          console.error("Failed to sync subHeaders in check loop:", e);
+        }
         this.saveBtnDisable = this.oldAllSetting.equals(this.allSetting);
       }
     }

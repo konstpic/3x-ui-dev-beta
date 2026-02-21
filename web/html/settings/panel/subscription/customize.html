@@ -1,0 +1,35 @@
+{{define "settings/panel/subscription/customize"}}
+<a-collapse default-active-key="1">
+    <a-collapse-panel key="1" header='{{ i18n "pages.settings.subCustomize.theme" }}'>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subCustomize.themeTitle" }}</template>
+            <template #description>{{ i18n "pages.settings.subCustomize.themeDesc" }}</template>
+            <template #control>
+                <a-select v-model="allSetting.subPageTheme" :style="{ width: '100%' }" placeholder='{{ i18n "pages.settings.subCustomize.selectTheme" }}'>
+                    <a-select-option value="">{{ i18n "pages.settings.subCustomize.default" }}</a-select-option>
+                    <a-select-option value="rainbow">{{ i18n "pages.settings.subCustomize.rainbow" }}</a-select-option>
+                    <a-select-option value="coffee">{{ i18n "pages.settings.subCustomize.coffee" }}</a-select-option>
+                    <a-select-option value="banana">{{ i18n "pages.settings.subCustomize.banana" }}</a-select-option>
+                    <a-select-option value="sunset">{{ i18n "pages.settings.subCustomize.sunset" }}</a-select-option>
+                </a-select>
+            </template>
+        </a-setting-list-item>
+    </a-collapse-panel>
+    <a-collapse-panel key="2" header='{{ i18n "pages.settings.subCustomize.branding" }}'>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subCustomize.logoUrl" }}</template>
+            <template #description>{{ i18n "pages.settings.subCustomize.logoUrlDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="allSetting.subPageLogoUrl" placeholder='{{ i18n "pages.settings.subCustomize.logoUrlPlaceholder" }}'></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subCustomize.brandText" }}</template>
+            <template #description>{{ i18n "pages.settings.subCustomize.brandTextDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="allSetting.subPageBrandText" placeholder='{{ i18n "pages.settings.subCustomize.brandTextPlaceholder" }}'></a-input>
+            </template>
+        </a-setting-list-item>
+    </a-collapse-panel>
+</a-collapse>
+{{end}}

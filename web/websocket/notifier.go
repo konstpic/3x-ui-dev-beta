@@ -80,3 +80,19 @@ func BroadcastXrayState(state string, errorMsg string) {
 		hub.Broadcast(MessageTypeXrayState, stateUpdate)
 	}
 }
+
+// BroadcastNodes broadcasts nodes list update to all connected clients
+func BroadcastNodes(nodes any) {
+	hub := GetHub()
+	if hub != nil {
+		hub.Broadcast(MessageTypeNodes, nodes)
+	}
+}
+
+// BroadcastClients broadcasts clients list update to all connected clients
+func BroadcastClients(clients any) {
+	hub := GetHub()
+	if hub != nil {
+		hub.Broadcast(MessageTypeClients, clients)
+	}
+}

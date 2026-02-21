@@ -60,22 +60,32 @@ func (lw *LogWriter) Write(m []byte) (n int, err error) {
 				continue
 			}
 
+			// Determine log level for xray
+			var logLevel string
 			if strings.Contains(msgBodyLower, "failed") {
+				logLevel = "ERROR"
 				logger.Error("XRAY: " + msgBody)
 			} else {
 				switch level {
 				case "Debug":
+					logLevel = "DEBUG"
 					logger.Debug("XRAY: " + msgBody)
 				case "Info":
+					logLevel = "INFO"
 					logger.Info("XRAY: " + msgBody)
 				case "Warning":
+					logLevel = "WARNING"
 					logger.Warning("XRAY: " + msgBody)
 				case "Error":
+					logLevel = "ERROR"
 					logger.Error("XRAY: " + msgBody)
 				default:
+					logLevel = "DEBUG"
 					logger.Debug("XRAY: " + msg)
 				}
 			}
+			// Also send directly to Loki with xray component
+			logger.PushLogToLokiWithComponent(logLevel, msgBody, "xray", "")
 			lw.lastLine = ""
 		} else if msg != "" {
 			msgLower := strings.ToLower(msg)
@@ -87,11 +97,16 @@ func (lw *LogWriter) Write(m []byte) (n int, err error) {
 				continue
 			}
 
+			var logLevel string
 			if strings.Contains(msgLower, "failed") {
+				logLevel = "ERROR"
 				logger.Error("XRAY: " + msg)
 			} else {
+				logLevel = "DEBUG"
 				logger.Debug("XRAY: " + msg)
 			}
+			// Also send directly to Loki with xray component
+			logger.PushLogToLokiWithComponent(logLevel, msg, "xray", "")
 			lw.lastLine = msg
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v2/database"
 	"github.com/mhsanaei/3x-ui/v2/database/model"
 	"github.com/mhsanaei/3x-ui/v2/logger"
+	"github.com/mhsanaei/3x-ui/v2/web/service"
 	"github.com/mhsanaei/3x-ui/v2/xray"
 )
 
@@ -33,6 +34,14 @@ func NewCheckClientIpJob() *CheckClientIpJob {
 }
 
 func (j *CheckClientIpJob) Run() {
+	// Check if multi-node mode is enabled
+	settingService := service.SettingService{}
+	multiMode, err := settingService.GetMultiNodeMode()
+	if err == nil && multiMode {
+		// In multi-node mode, IP checking is handled by nodes
+		return
+	}
+
 	if j.lastClear == 0 {
 		j.lastClear = time.Now().Unix()
 	}
@@ -87,31 +96,8 @@ func (j *CheckClientIpJob) clearAccessLog() {
 }
 
 func (j *CheckClientIpJob) hasLimitIp() bool {
-	db := database.GetDB()
-	var inbounds []*model.Inbound
-
-	err := db.Model(model.Inbound{}).Find(&inbounds).Error
-	if err != nil {
-		return false
-	}
-
-	for _, inbound := range inbounds {
-		if inbound.Settings == "" {
-			continue
-		}
-
-		settings := map[string][]model.Client{}
-		json.Unmarshal([]byte(inbound.Settings), &settings)
-		clients := settings["clients"]
-
-		for _, client := range clients {
-			limitIp := client.LimitIP
-			if limitIp > 0 {
-				return true
-			}
-		}
-	}
-
+	// IP limit removed - using HWID only
+	// This method always returns false as IP limiting is no longer supported
 	return false
 }
 
@@ -275,20 +261,12 @@ func (j *CheckClientIpJob) updateInboundClientIps(inboundClientIps *model.Inboun
 	log.SetOutput(logIpFile)
 	log.SetFlags(log.LstdFlags)
 
+	// IP limit removed - using HWID only
+	// No need to check limitIp anymore
 	for _, client := range clients {
 		if client.Email == clientEmail {
-			limitIp := client.LimitIP
-
-			if limitIp > 0 && inbound.Enable {
-				shouldCleanLog = true
-
-				if limitIp < len(ips) {
-					j.disAllowedIps = append(j.disAllowedIps, ips[limitIp:]...)
-					for i := limitIp; i < len(ips); i++ {
-						log.Printf("[LIMIT_IP] Email = %s || SRC = %s", clientEmail, ips[i])
-					}
-				}
-			}
+			// IP limit functionality removed
+			// HWID-based device limiting is used instead
 		}
 	}
 

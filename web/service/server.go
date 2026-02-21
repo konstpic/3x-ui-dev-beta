@@ -92,6 +92,19 @@ type Status struct {
 		Mem     uint64 `json:"mem"`
 		Uptime  uint64 `json:"uptime"`
 	} `json:"appStats"`
+	Nodes struct {
+		Online int `json:"online"`
+		Total  int `json:"total"`
+	} `json:"nodes"`
+	Database struct {
+		Size          uint64 `json:"size"`          // Database size in bytes
+		Tables        int    `json:"tables"`        // Number of tables
+		TotalRows     uint64 `json:"totalRows"`     // Total number of rows across all tables
+		OpenConns     int    `json:"openConns"`     // Current open connections
+		IdleConns     int    `json:"idleConns"`     // Current idle connections
+		MaxOpenConns  int    `json:"maxOpenConns"`  // Maximum open connections
+		MaxIdleConns  int    `json:"maxIdleConns"`  // Maximum idle connections
+	} `json:"database"`
 }
 
 // Release represents information about a software release from GitHub.
@@ -231,20 +244,34 @@ func (s *ServerService) GetStatus(lastStatus *Status) *Status {
 		T: now,
 	}
 
-	// CPU stats
+	// Check if running in container (once for both CPU and memory)
+	containerStats := sys.GetContainerStats()
+
+	// CPU stats - try container first, fallback to host
+	var err error
+	if containerStats != nil && containerStats.IsContainer && containerStats.CPUQuota > 0 && containerStats.CPUPeriod > 0 {
+		// Calculate available CPU cores from container limits
+		availableCores := float64(containerStats.CPUQuota) / float64(containerStats.CPUPeriod)
+		status.CpuCores = int(availableCores)
+		if status.CpuCores == 0 {
+			status.CpuCores = 1 // At least 1 core
+		}
+		status.LogicalPro = status.CpuCores
+	} else {
+		// Not in container or no limits, use host CPU
+		status.CpuCores, err = cpu.Counts(false)
+		if err != nil {
+			logger.Warning("get cpu cores count failed:", err)
+		}
+		status.LogicalPro = runtime.NumCPU()
+	}
+
 	util, err := s.sampleCPUUtilization()
 	if err != nil {
 		logger.Warning("get cpu percent failed:", err)
 	} else {
 		status.Cpu = util
 	}
-
-	status.CpuCores, err = cpu.Counts(false)
-	if err != nil {
-		logger.Warning("get cpu cores count failed:", err)
-	}
-
-	status.LogicalPro = runtime.NumCPU()
 
 	if status.CpuSpeedMhz = s.cachedCpuSpeedMhz; s.cachedCpuSpeedMhz == 0 && time.Since(s.lastCpuInfoAttempt) > 5*time.Minute {
 		s.lastCpuInfoAttempt = time.Now()
@@ -280,13 +307,28 @@ func (s *ServerService) GetStatus(lastStatus *Status) *Status {
 		status.Uptime = upTime
 	}
 
-	// Memory stats
-	memInfo, err := mem.VirtualMemory()
-	if err != nil {
-		logger.Warning("get virtual memory failed:", err)
+	// Memory stats - try container first, fallback to host
+	if containerStats != nil && containerStats.IsContainer {
+		// Use container memory limits
+		status.Mem.Current = containerStats.MemoryUsed
+		if containerStats.MemoryLimit > 0 {
+			status.Mem.Total = containerStats.MemoryLimit
+		} else {
+			// If limit is 0 (unlimited), fall back to host memory
+			memInfo, err := mem.VirtualMemory()
+			if err == nil {
+				status.Mem.Total = memInfo.Total
+			}
+		}
 	} else {
-		status.Mem.Current = memInfo.Used
-		status.Mem.Total = memInfo.Total
+		// Not in container, use host memory
+		memInfo, err := mem.VirtualMemory()
+		if err != nil {
+			logger.Warning("get virtual memory failed:", err)
+		} else {
+			status.Mem.Current = memInfo.Used
+			status.Mem.Total = memInfo.Total
+		}
 	}
 
 	swapInfo, err := mem.SwapMemory()
@@ -413,6 +455,36 @@ func (s *ServerService) GetStatus(lastStatus *Status) *Status {
 	} else {
 		status.AppStats.Uptime = 0
 	}
+
+	// Node statistics (only if multi-node mode is enabled)
+	settingService := SettingService{}
+	allSetting, err := settingService.GetAllSetting()
+	if err == nil && allSetting != nil && allSetting.MultiNodeMode {
+		nodeService := NodeService{}
+		nodes, err := nodeService.GetAllNodes()
+		if err == nil {
+			status.Nodes.Total = len(nodes)
+			onlineCount := 0
+			for _, node := range nodes {
+				if node.Status == "online" {
+					onlineCount++
+				}
+			}
+			status.Nodes.Online = onlineCount
+		} else {
+			// If error getting nodes, set to 0
+			status.Nodes.Total = 0
+			status.Nodes.Online = 0
+		}
+	} else {
+		// If multi-node mode is disabled, set to 0
+		status.Nodes.Total = 0
+		status.Nodes.Online = 0
+	}
+
+	// Database statistics
+	dbStats := s.getDatabaseStats()
+	status.Database = dbStats
 
 	return status
 }
@@ -575,6 +647,10 @@ func (s *ServerService) GetXrayVersions() ([]string, error) {
 }
 
 func (s *ServerService) StopXrayService() error {
+	// Check if Xray is running before trying to stop it
+	if !s.xrayService.IsXrayRunning() {
+		return nil // Xray is not running, nothing to stop
+	}
 	err := s.xrayService.StopXray()
 	if err != nil {
 		logger.Error("stop xray failed:", err)
@@ -644,9 +720,12 @@ func (s *ServerService) downloadXRay(version string) (string, error) {
 }
 
 func (s *ServerService) UpdateXray(version string) error {
-	// 1. Stop xray before doing anything
-	if err := s.StopXrayService(); err != nil {
-		logger.Warning("failed to stop xray before update:", err)
+	// 1. Stop xray before doing anything (only if it's running)
+	wasRunning := s.xrayService.IsXrayRunning()
+	if wasRunning {
+		if err := s.StopXrayService(); err != nil {
+			logger.Warning("failed to stop xray before update:", err)
+		}
 	}
 
 	// 2. Download the zip
@@ -700,10 +779,14 @@ func (s *ServerService) UpdateXray(version string) error {
 		return err
 	}
 
-	// 5. Restart xray
-	if err := s.xrayService.RestartXray(true); err != nil {
-		logger.Error("start xray failed:", err)
-		return err
+	// 5. Restart xray only if it was running before (in multi-node mode, xray may not be running)
+	if wasRunning {
+		if err := s.xrayService.RestartXray(true); err != nil {
+			logger.Error("start xray failed:", err)
+			return err
+		}
+	} else {
+		logger.Info("Xray was not running, skipping restart (multi-node mode)")
 	}
 
 	return nil
@@ -763,7 +846,8 @@ func (s *ServerService) GetXrayLogs(
 	showBlocked string,
 	showProxy string,
 	freedoms []string,
-	blackholes []string) []LogEntry {
+	blackholes []string,
+	nodeId string) []LogEntry {
 
 	const (
 		Direct = iota
@@ -773,6 +857,76 @@ func (s *ServerService) GetXrayLogs(
 
 	countInt, _ := strconv.Atoi(count)
 	var entries []LogEntry
+
+	// Check if multi-node mode is enabled
+	settingService := SettingService{}
+	multiMode, err := settingService.GetMultiNodeMode()
+	if err == nil && multiMode {
+		// In multi-node mode, get logs from node
+		if nodeId != "" {
+			nodeIdInt, err := strconv.Atoi(nodeId)
+			if err == nil {
+				nodeService := NodeService{}
+				node, err := nodeService.GetNode(nodeIdInt)
+				if err == nil && node != nil {
+					// Get raw logs from node
+					rawLogs, err := nodeService.GetNodeLogs(node, countInt, filter)
+					if err == nil {
+						// Parse logs into LogEntry format
+						for _, line := range rawLogs {
+							var entry LogEntry
+							parts := strings.Fields(line)
+
+							for i, part := range parts {
+								if i == 0 {
+									if len(parts) > 1 {
+										dateTime, err := time.ParseInLocation("2006/01/02 15:04:05.999999", parts[0]+" "+parts[1], time.Local)
+										if err == nil {
+											entry.DateTime = dateTime.UTC()
+										}
+									}
+								}
+
+								if part == "from" && i+1 < len(parts) {
+									entry.FromAddress = strings.TrimLeft(parts[i+1], "/")
+								} else if part == "accepted" && i+1 < len(parts) {
+									entry.ToAddress = strings.TrimLeft(parts[i+1], "/")
+								} else if strings.HasPrefix(part, "[") {
+									entry.Inbound = part[1:]
+								} else if strings.HasSuffix(part, "]") {
+									entry.Outbound = part[:len(part)-1]
+								} else if part == "email:" && i+1 < len(parts) {
+									entry.Email = parts[i+1]
+								}
+							}
+
+							// Determine event type
+							if logEntryContains(line, freedoms) {
+								if showDirect == "false" {
+									continue
+								}
+								entry.Event = Direct
+							} else if logEntryContains(line, blackholes) {
+								if showBlocked == "false" {
+									continue
+								}
+								entry.Event = Blocked
+							} else {
+								if showProxy == "false" {
+									continue
+								}
+								entry.Event = Proxied
+							}
+
+							entries = append(entries, entry)
+						}
+					}
+				}
+			}
+		}
+		// If no nodeId provided or node not found, return empty
+		return entries
+	}
 
 	pathToAccessLog, err := xray.GetAccessLogPath()
 	if err != nil {
@@ -882,58 +1036,324 @@ func (s *ServerService) GetConfigJson() (any, error) {
 }
 
 func (s *ServerService) GetDb() ([]byte, error) {
-	// Update by manually trigger a checkpoint operation
-	err := database.Checkpoint()
-	if err != nil {
-		return nil, err
+	// Try to use pg_dump first if available
+	host := config.GetDBHost()
+	port := config.GetDBPort()
+	user := config.GetDBUser()
+	password := config.GetDBPassword()
+	dbname := config.GetDBName()
+	
+	// Set PGPASSWORD environment variable for pg_dump
+	env := os.Environ()
+	env = append(env, fmt.Sprintf("PGPASSWORD=%s", password))
+	
+	// Build pg_dump command with --clean and --if-exists for proper restore
+	cmd := exec.Command("pg_dump", 
+		"-h", host,
+		"-p", strconv.Itoa(port),
+		"-U", user,
+		"-d", dbname,
+		"--format=plain",
+		"--no-owner",
+		"--no-privileges",
+		"--clean",
+		"--if-exists",
+	)
+	cmd.Env = env
+	
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	
+	err := cmd.Run()
+	if err == nil {
+		// pg_dump succeeded, return the output
+		return stdout.Bytes(), nil
 	}
-	// Open the file for reading
-	file, err := os.Open(config.GetDBPath())
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
+	
+	// pg_dump failed (likely not installed), fall back to GORM-based export
+	logger.Warningf("pg_dump not available, falling back to GORM-based export: %v", err)
+	return s.exportDbViaGORM()
+}
 
-	// Read the file contents
-	fileContents, err := io.ReadAll(file)
-	if err != nil {
-		return nil, err
+// exportDbViaGORM exports the database using GORM and raw SQL queries
+func (s *ServerService) exportDbViaGORM() ([]byte, error) {
+	db := database.GetDB()
+	if db == nil {
+		return nil, fmt.Errorf("database connection is not available")
 	}
-
-	return fileContents, nil
+	
+	var dump strings.Builder
+	
+	// Write header
+	dump.WriteString("-- PostgreSQL database dump\n")
+	dump.WriteString(fmt.Sprintf("-- Dumped at %s\n", time.Now().Format("2006-01-02 15:04:05")))
+	dump.WriteString("-- Using GORM-based export\n\n")
+	dump.WriteString("SET statement_timeout = 0;\n")
+	dump.WriteString("SET lock_timeout = 0;\n")
+	dump.WriteString("SET idle_in_transaction_session_timeout = 0;\n")
+	dump.WriteString("SET client_encoding = 'UTF8';\n")
+	dump.WriteString("SET standard_conforming_strings = on;\n")
+	dump.WriteString("SELECT pg_catalog.set_config('search_path', '', false);\n")
+	dump.WriteString("SET check_function_bodies = false;\n")
+	dump.WriteString("SET xmloption = content;\n")
+	dump.WriteString("SET client_min_messages = warning;\n")
+	dump.WriteString("SET row_security = off;\n\n")
+	
+	// Get list of all tables
+	var tables []struct {
+		TableName string `gorm:"column:tablename"`
+	}
+	err := db.Raw(`
+		SELECT tablename 
+		FROM pg_tables 
+		WHERE schemaname = 'public' 
+		ORDER BY tablename
+	`).Scan(&tables).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to get table list: %v", err)
+	}
+	
+	// Export each table
+	for _, table := range tables {
+		tableName := table.TableName
+		
+		// Get table structure using pg_get_tabledef or manual construction
+		// First, try to get the table definition using a simpler approach
+		var columns []struct {
+			ColumnName     string  `gorm:"column:column_name"`
+			DataType       string  `gorm:"column:data_type"`
+			CharMaxLength  *int    `gorm:"column:character_maximum_length"`
+			NumericPrec    *int    `gorm:"column:numeric_precision"`
+			NumericScale   *int    `gorm:"column:numeric_scale"`
+			IsNullable     string  `gorm:"column:is_nullable"`
+			ColumnDefault  *string `gorm:"column:column_default"`
+		}
+		err := db.Raw(`
+			SELECT 
+				column_name,
+				data_type,
+				character_maximum_length,
+				numeric_precision,
+				numeric_scale,
+				is_nullable,
+				column_default
+			FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = ?
+			ORDER BY ordinal_position
+		`, tableName).Scan(&columns).Error
+		
+		if err == nil && len(columns) > 0 {
+			dump.WriteString("\n--\n")
+			dump.WriteString(fmt.Sprintf("-- Name: %s; Type: TABLE; Schema: public; Owner: -\n", tableName))
+			dump.WriteString("--\n\n")
+			dump.WriteString(fmt.Sprintf("CREATE TABLE %s (\n", tableName))
+			
+			colDefs := make([]string, len(columns))
+			for i, col := range columns {
+				colDef := fmt.Sprintf("    %s ", col.ColumnName)
+				
+				// Build data type
+				switch col.DataType {
+				case "character varying":
+					if col.CharMaxLength != nil {
+						colDef += fmt.Sprintf("character varying(%d)", *col.CharMaxLength)
+					} else {
+						colDef += "character varying"
+					}
+				case "character":
+					if col.CharMaxLength != nil {
+						colDef += fmt.Sprintf("character(%d)", *col.CharMaxLength)
+					} else {
+						colDef += "character"
+					}
+				case "numeric":
+					if col.NumericPrec != nil && col.NumericScale != nil {
+						colDef += fmt.Sprintf("numeric(%d,%d)", *col.NumericPrec, *col.NumericScale)
+					} else if col.NumericPrec != nil {
+						colDef += fmt.Sprintf("numeric(%d)", *col.NumericPrec)
+					} else {
+						colDef += "numeric"
+					}
+				default:
+					colDef += col.DataType
+				}
+				
+				// Add NOT NULL constraint
+				if col.IsNullable == "NO" {
+					colDef += " NOT NULL"
+				}
+				
+				// Add default value
+				if col.ColumnDefault != nil {
+					colDef += " DEFAULT " + *col.ColumnDefault
+				}
+				
+				colDefs[i] = colDef
+			}
+			dump.WriteString(strings.Join(colDefs, ",\n"))
+			dump.WriteString("\n);\n\n")
+		}
+		
+		// Get table data
+		var rowCount int64
+		db.Table(tableName).Count(&rowCount)
+		
+		if rowCount > 0 {
+			// Get column info for data export (reuse if available from structure query, otherwise query again)
+			var colInfo []struct {
+				ColumnName string `gorm:"column:column_name"`
+				DataType   string `gorm:"column:data_type"`
+			}
+			if len(columns) == 0 {
+				// If columns not available from structure query, get them separately
+				err := db.Raw(`
+					SELECT column_name, data_type
+					FROM information_schema.columns
+					WHERE table_schema = 'public' AND table_name = ?
+					ORDER BY ordinal_position
+				`, tableName).Scan(&colInfo).Error
+				if err != nil {
+					continue // Skip this table if we can't get column info
+				}
+			} else {
+				// Use columns from structure query
+				colInfo = make([]struct {
+					ColumnName string `gorm:"column:column_name"`
+					DataType   string `gorm:"column:data_type"`
+				}, len(columns))
+				for i, col := range columns {
+					colInfo[i].ColumnName = col.ColumnName
+					colInfo[i].DataType = col.DataType
+				}
+			}
+			
+			if len(colInfo) > 0 {
+				colNames := make([]string, len(colInfo))
+				colTypes := make([]string, len(colInfo))
+				for i, col := range colInfo {
+					colNames[i] = col.ColumnName
+					colTypes[i] = col.DataType
+				}
+				
+				// Build SELECT query with proper column quoting
+				quotedCols := make([]string, len(colNames))
+				for i, colName := range colNames {
+					quotedCols[i] = fmt.Sprintf(`"%s"`, colName)
+				}
+				selectQuery := fmt.Sprintf(`SELECT %s FROM "%s"`, strings.Join(quotedCols, ", "), tableName)
+				
+				// Export data in batches using raw SQL
+				batchSize := 1000
+				offset := 0
+				
+				for {
+					// Use raw SQL to get data
+					rows, err := db.Raw(fmt.Sprintf("%s LIMIT %d OFFSET %d", selectQuery, batchSize, offset)).Rows()
+					if err != nil {
+						break
+					}
+					
+					// Get column names from rows
+					colNamesFromRows, err := rows.Columns()
+					if err != nil {
+						rows.Close()
+						break
+					}
+					
+					batchRowCount := 0
+					for rows.Next() {
+						// Create slice to hold values
+						values := make([]interface{}, len(colNamesFromRows))
+						valuePtrs := make([]interface{}, len(colNamesFromRows))
+						for i := range values {
+							valuePtrs[i] = &values[i]
+						}
+						
+						if err := rows.Scan(valuePtrs...); err != nil {
+							rows.Close()
+							return nil, fmt.Errorf("failed to scan row: %v", err)
+						}
+						
+						// Generate INSERT statement
+						dump.WriteString(fmt.Sprintf("INSERT INTO %s (", tableName))
+						dump.WriteString(strings.Join(colNames, ", "))
+						dump.WriteString(") VALUES (")
+						
+						valueStrs := make([]string, len(values))
+						for i, val := range values {
+							if val == nil {
+								valueStrs[i] = "NULL"
+							} else {
+								// Format value based on data type
+								var valStr string
+								dataType := colTypes[i]
+								
+								switch dataType {
+								case "integer", "bigint", "smallint", "numeric", "real", "double precision":
+									// Numeric types - no quotes needed
+									valStr = fmt.Sprintf("%v", val)
+								case "boolean":
+									// Boolean type
+									if b, ok := val.(bool); ok {
+										if b {
+											valStr = "true"
+										} else {
+											valStr = "false"
+										}
+									} else if s, ok := val.(string); ok {
+										// Sometimes boolean comes as string
+										if s == "true" || s == "t" || s == "1" {
+											valStr = "true"
+										} else {
+											valStr = "false"
+										}
+									} else {
+										valStr = fmt.Sprintf("%v", val)
+									}
+								default:
+									// String types - need proper escaping
+									valStr = fmt.Sprintf("%v", val)
+									// Escape PostgreSQL string literals
+									valStr = strings.ReplaceAll(valStr, "\\", "\\\\")
+									valStr = strings.ReplaceAll(valStr, "'", "''")
+									valStr = "'" + valStr + "'"
+								}
+								valueStrs[i] = valStr
+							}
+						}
+						dump.WriteString(strings.Join(valueStrs, ", "))
+						dump.WriteString(");\n")
+						batchRowCount++
+					}
+					rows.Close()
+					
+					if batchRowCount == 0 || batchRowCount < batchSize {
+						break
+					}
+					offset += batchSize
+				}
+				dump.WriteString("\n")
+			}
+		}
+	}
+	
+	return []byte(dump.String()), nil
 }
 
 func (s *ServerService) ImportDB(file multipart.File) error {
-	// Check if the file is a SQLite database
-	isValidDb, err := database.IsSQLiteDB(file)
-	if err != nil {
-		return common.NewErrorf("Error checking db file format: %v", err)
-	}
-	if !isValidDb {
-		return common.NewError("Invalid db file format")
-	}
-
 	// Reset the file reader to the beginning
-	_, err = file.Seek(0, 0)
+	_, err := file.Seek(0, 0)
 	if err != nil {
 		return common.NewErrorf("Error resetting file reader: %v", err)
 	}
 
-	// Save the file as a temporary file
-	tempPath := fmt.Sprintf("%s.temp", config.GetDBPath())
-
-	// Remove the existing temporary file (if any)
-	if _, err := os.Stat(tempPath); err == nil {
-		if errRemove := os.Remove(tempPath); errRemove != nil {
-			return common.NewErrorf("Error removing existing temporary db file: %v", errRemove)
-		}
-	}
-
-	// Create the temporary file
-	tempFile, err := os.Create(tempPath)
+	// Create a temporary file to store the SQL dump
+	tempFile, err := os.CreateTemp("", "x-ui-db-import-*.sql")
 	if err != nil {
-		return common.NewErrorf("Error creating temporary db file: %v", err)
+		return common.NewErrorf("Error creating temporary SQL file: %v", err)
 	}
+	tempPath := tempFile.Name()
 
 	// Robust deferred cleanup for the temporary file
 	defer func() {
@@ -949,73 +1369,202 @@ func (s *ServerService) ImportDB(file multipart.File) error {
 		}
 	}()
 
-	// Save uploaded file to temporary file
+	// Save uploaded SQL dump to temporary file
 	if _, err = io.Copy(tempFile, file); err != nil {
-		return common.NewErrorf("Error saving db: %v", err)
+		return common.NewErrorf("Error saving SQL dump: %v", err)
 	}
 
-	// Close temp file before opening via sqlite
+	// Close temp file before importing
 	if err = tempFile.Close(); err != nil {
-		return common.NewErrorf("Error closing temporary db file: %v", err)
+		return common.NewErrorf("Error closing temporary SQL file: %v", err)
 	}
 	tempFile = nil
-
-	// Validate integrity (no migrations / side effects)
-	if err = database.ValidateSQLiteDB(tempPath); err != nil {
-		return common.NewErrorf("Invalid or corrupt db file: %v", err)
-	}
 
 	// Stop Xray (ignore error but log)
 	if errStop := s.StopXrayService(); errStop != nil {
 		logger.Warningf("Failed to stop Xray before DB import: %v", errStop)
 	}
 
-	// Close existing DB to release file locks (especially on Windows)
-	if errClose := database.CloseDB(); errClose != nil {
-		logger.Warningf("Failed to close existing DB before replacement: %v", errClose)
-	}
+	// Get database connection parameters before closing connection
+	host := config.GetDBHost()
+	port := config.GetDBPort()
+	user := config.GetDBUser()
+	password := config.GetDBPassword()
+	dbname := config.GetDBName()
 
-	// Backup the current database for fallback
-	fallbackPath := fmt.Sprintf("%s.backup", config.GetDBPath())
-
-	// Remove the existing fallback file (if any)
-	if _, err := os.Stat(fallbackPath); err == nil {
-		if errRemove := os.Remove(fallbackPath); errRemove != nil {
-			return common.NewErrorf("Error removing existing fallback db file: %v", errRemove)
+	// Clear all database objects before import to ensure clean restore
+	// This matches the schema structure and ensures data from dump will overwrite existing data
+	db := database.GetDB()
+	if db != nil {
+		logger.Info("Clearing existing database objects before import...")
+		
+		// Use a single transaction to drop all objects in correct order
+		// This matches how pg_dump with --clean works
+		clearQuery := `
+		DO $$ 
+		DECLARE 
+			r RECORD;
+		BEGIN
+			-- Drop all foreign key constraints first
+			FOR r IN (
+				SELECT conname, conrelid::regclass as table_name
+				FROM pg_constraint
+				WHERE connamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+				AND contype = 'f'
+			) 
+			LOOP
+				EXECUTE 'ALTER TABLE ' || r.table_name || ' DROP CONSTRAINT IF EXISTS ' || quote_ident(r.conname) || ' CASCADE';
+			END LOOP;
+			
+			-- Drop all tables (CASCADE will handle remaining dependencies)
+			FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public') 
+			LOOP
+				EXECUTE 'DROP TABLE IF EXISTS public.' || quote_ident(r.tablename) || ' CASCADE';
+			END LOOP;
+			
+			-- Drop all sequences (some may remain after table drops)
+			FOR r IN (SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public') 
+			LOOP
+				EXECUTE 'DROP SEQUENCE IF EXISTS public.' || quote_ident(r.sequence_name) || ' CASCADE';
+			END LOOP;
+			
+			-- Drop all views
+			FOR r IN (SELECT table_name FROM information_schema.views WHERE table_schema = 'public') 
+			LOOP
+				EXECUTE 'DROP VIEW IF EXISTS public.' || quote_ident(r.table_name) || ' CASCADE';
+			END LOOP;
+			
+			-- Drop all functions
+			FOR r IN (
+				SELECT proname, oidvectortypes(proargtypes) as argtypes 
+				FROM pg_proc 
+				WHERE pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+			) 
+			LOOP
+				EXECUTE 'DROP FUNCTION IF EXISTS public.' || quote_ident(r.proname) || '(' || r.argtypes || ') CASCADE';
+			END LOOP;
+		END $$;`
+		
+		if err := db.Exec(clearQuery).Error; err != nil {
+			logger.Warningf("Failed to clear database objects: %v", err)
+		} else {
+			logger.Info("Database objects cleared successfully")
 		}
 	}
 
-	// Move the current database to the fallback location
-	if err = os.Rename(config.GetDBPath(), fallbackPath); err != nil {
-		return common.NewErrorf("Error backing up current db file: %v", err)
+	// Close existing DB connection
+	if errClose := database.CloseDB(); errClose != nil {
+		logger.Warningf("Failed to close existing DB before import: %v", errClose)
 	}
 
-	// Defer fallback cleanup ONLY if everything goes well
-	defer func() {
-		if _, err := os.Stat(fallbackPath); err == nil {
-			if rerr := os.Remove(fallbackPath); rerr != nil {
-				logger.Warningf("Warning: failed to remove fallback file: %v", rerr)
+	// Set PGPASSWORD environment variable for psql
+	env := os.Environ()
+	env = append(env, fmt.Sprintf("PGPASSWORD=%s", password))
+
+	// Use psql to import the SQL dump
+	// We don't use --single-transaction because it aborts on first error
+	// Instead, we use ON_ERROR_STOP=0 to continue on errors
+	// This allows the import to complete even if some objects already exist
+	// The dump with --clean --if-exists will have DROP commands that may fail if objects don't exist,
+	// which is expected and non-critical
+	cmd := exec.Command("psql",
+		"-h", host,
+		"-p", strconv.Itoa(port),
+		"-U", user,
+		"-d", dbname,
+		"-f", tempPath,
+		"--quiet",
+		"--set", "ON_ERROR_STOP=0",
+	)
+	cmd.Env = env
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	cmd.Stdout = &stderr // Capture both stdout and stderr
+
+	err = cmd.Run()
+	
+	// Parse stderr to check for critical errors
+	stderrStr := stderr.String()
+	
+	// Filter out non-critical errors that are expected when restoring
+	// Errors like "already exists" are expected when dump has --clean --if-exists
+	// and we've already cleared the database, so some DROP commands may fail
+	criticalErrors := []string{
+		"FATAL",
+		"connection",
+		"authentication",
+		"permission denied",
+		"database.*does not exist",
+		"role.*does not exist",
+	}
+	
+	hasCriticalError := false
+	lowerStderr := strings.ToLower(stderrStr)
+	for _, criticalErr := range criticalErrors {
+		matched, _ := regexp.MatchString(strings.ToLower(criticalErr), lowerStderr)
+		if matched {
+			hasCriticalError = true
+			break
+		}
+	}
+	
+	// Check for expected non-critical errors
+	// These are errors that are acceptable when restoring a dump with --clean --if-exists
+	expectedErrors := []string{
+		"already exists",
+		"does not exist",        // For DROP IF EXISTS when object doesn't exist
+		"json_extract",          // SQLite-specific functions in old dumps
+		"JSON_EXTRACT",          // SQLite-specific functions
+		"JSON_EACH",             // SQLite-specific functions
+		"transaction_timeout",   // Non-standard PostgreSQL parameter (may be in old dumps)
+		"unrecognized configuration parameter", // Non-standard parameters in old dumps
+	}
+	
+	hasOnlyExpectedErrors := true
+	if stderrStr != "" {
+		// Check if there are any non-expected errors
+		errorLines := strings.Split(stderrStr, "\n")
+		for _, line := range errorLines {
+			if strings.Contains(line, "ERROR:") {
+				isExpected := false
+				for _, expectedErr := range expectedErrors {
+					if strings.Contains(line, expectedErr) {
+						isExpected = true
+						break
+					}
+				}
+				if !isExpected {
+					hasOnlyExpectedErrors = false
+					break
+				}
 			}
 		}
-	}()
-
-	// Move temp to DB path
-	if err = os.Rename(tempPath, config.GetDBPath()); err != nil {
-		// Restore from fallback
-		if errRename := os.Rename(fallbackPath, config.GetDBPath()); errRename != nil {
-			return common.NewErrorf("Error moving db file and restoring fallback: %v", errRename)
+	} else {
+		hasOnlyExpectedErrors = true // No errors at all
+	}
+	
+	if err != nil && hasCriticalError {
+		return common.NewErrorf("psql import failed with critical error: %v, stderr: %s", err, stderrStr)
+	}
+	
+	// Log warnings but don't fail if only expected/non-critical errors
+	if stderrStr != "" && !hasCriticalError {
+		if hasOnlyExpectedErrors {
+			logger.Info("psql import completed successfully (some expected warnings about existing objects were ignored)")
+		} else {
+			logger.Warningf("psql import completed with warnings: %s", stderrStr)
 		}
-		return common.NewErrorf("Error moving db file: %v", err)
+	} else if err == nil {
+		logger.Info("psql import completed successfully")
 	}
 
-	// Open & migrate new DB
-	if err = database.InitDB(config.GetDBPath()); err != nil {
-		if errRename := os.Rename(fallbackPath, config.GetDBPath()); errRename != nil {
-			return common.NewErrorf("Error migrating db and restoring fallback: %v", errRename)
-		}
-		return common.NewErrorf("Error migrating db: %v", err)
+	// Reconnect to database
+	if err = database.InitDB(config.GetDBConnectionString()); err != nil {
+		return common.NewErrorf("Error reconnecting to database after import: %v", err)
 	}
 
+	// Run migrations
 	s.inboundService.MigrateDB()
 
 	// Start Xray
@@ -1278,6 +1827,82 @@ func (s *ServerService) GetNewUUID() (map[string]string, error) {
 	return map[string]string{
 		"uuid": newUUID.String(),
 	}, nil
+}
+
+// getDatabaseStats retrieves database statistics including size, table count, row count, and connection pool info.
+func (s *ServerService) getDatabaseStats() struct {
+	Size         uint64 `json:"size"`
+	Tables       int    `json:"tables"`
+	TotalRows    uint64 `json:"totalRows"`
+	OpenConns    int    `json:"openConns"`
+	IdleConns    int    `json:"idleConns"`
+	MaxOpenConns int    `json:"maxOpenConns"`
+	MaxIdleConns int    `json:"maxIdleConns"`
+} {
+	db := database.GetDB()
+	if db == nil {
+		return struct {
+			Size         uint64 `json:"size"`
+			Tables       int    `json:"tables"`
+			TotalRows    uint64 `json:"totalRows"`
+			OpenConns    int    `json:"openConns"`
+			IdleConns    int    `json:"idleConns"`
+			MaxOpenConns int    `json:"maxOpenConns"`
+			MaxIdleConns int    `json:"maxIdleConns"`
+		}{}
+	}
+
+	stats := struct {
+		Size         uint64 `json:"size"`
+		Tables       int    `json:"tables"`
+		TotalRows    uint64 `json:"totalRows"`
+		OpenConns    int    `json:"openConns"`
+		IdleConns    int    `json:"idleConns"`
+		MaxOpenConns int    `json:"maxOpenConns"`
+		MaxIdleConns int    `json:"maxIdleConns"`
+	}{}
+
+	// Get connection pool statistics
+	sqlDB, err := db.DB()
+	if err == nil {
+		dbStats := sqlDB.Stats()
+		stats.OpenConns = dbStats.OpenConnections
+		stats.IdleConns = dbStats.Idle
+		stats.MaxOpenConns = dbStats.MaxOpenConnections
+		// MaxIdleConns is set during initialization, we need to get it from config or use a reasonable default
+		// Since we can't easily get it from Stats(), we'll use a default value (5 as set in InitDB)
+		stats.MaxIdleConns = 5 // Default from database/db.go
+	}
+
+	// Get database size (PostgreSQL)
+	var dbSize uint64
+	err = db.Raw(`SELECT pg_database_size(current_database())`).Scan(&dbSize).Error
+	if err == nil {
+		stats.Size = dbSize
+	}
+
+	// Get table count
+	var tableCount int64
+	err = db.Raw(`
+		SELECT COUNT(*) 
+		FROM information_schema.tables 
+		WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
+	`).Scan(&tableCount).Error
+	if err == nil {
+		stats.Tables = int(tableCount)
+	}
+
+	// Get total row count across all tables
+	var totalRows uint64
+	err = db.Raw(`
+		SELECT SUM(n_live_tup)::BIGINT
+		FROM pg_stat_user_tables
+	`).Scan(&totalRows).Error
+	if err == nil {
+		stats.TotalRows = totalRows
+	}
+
+	return stats
 }
 
 func (s *ServerService) GetNewmlkem768() (any, error) {

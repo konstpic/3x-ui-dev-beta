@@ -10,6 +10,7 @@ type XUIController struct {
 
 	settingController     *SettingController
 	xraySettingController *XraySettingController
+	nodeController        *NodeController
 }
 
 // NewXUIController creates a new XUIController and initializes its routes.
@@ -26,11 +27,31 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 
 	g.GET("/", a.index)
 	g.GET("/inbounds", a.inbounds)
+	g.GET("/outbounds", a.outbounds)
 	g.GET("/settings", a.settings)
 	g.GET("/xray", a.xraySettings)
+	g.GET("/xray-core-config-profiles", a.xrayCoreConfigProfiles)
+	g.GET("/nodes", a.nodes)
+	g.GET("/clients", a.clients)
+	g.GET("/groups", a.groups)
+	g.GET("/hosts", a.hosts)
+	g.GET("/api-docs", a.apiDocs)
 
 	a.settingController = NewSettingController(g)
 	a.xraySettingController = NewXraySettingController(g)
+	a.nodeController = NewNodeController(g.Group("/node"))
+	
+	// Register client and host controllers directly under /panel (not /panel/api)
+	NewClientController(g.Group("/client"))
+	NewHostController(g.Group("/host"))
+	NewClientHWIDController(g.Group("/client")) // Register HWID controller under /panel/client/hwid
+	NewClientGroupController(g.Group("/group"))  // Register group controller under /panel/group
+	
+	// Register outbound controller
+	NewOutboundController(g.Group("/outbound"))
+	
+	// Register Xray core config profile controller
+	NewXrayCoreConfigProfileController(g.Group("/xray-core-config-profile"))
 }
 
 // index renders the main panel index page.
@@ -51,4 +72,39 @@ func (a *XUIController) settings(c *gin.Context) {
 // xraySettings renders the Xray settings page.
 func (a *XUIController) xraySettings(c *gin.Context) {
 	html(c, "xray.html", "pages.xray.title", nil)
+}
+
+// nodes renders the nodes management page (multi-node mode).
+func (a *XUIController) nodes(c *gin.Context) {
+	html(c, "nodes.html", "pages.nodes.title", nil)
+}
+
+// clients renders the clients management page.
+func (a *XUIController) clients(c *gin.Context) {
+	html(c, "clients.html", "pages.clients.title", nil)
+}
+
+// groups renders the groups management page.
+func (a *XUIController) groups(c *gin.Context) {
+	html(c, "groups.html", "pages.groups.title", nil)
+}
+
+// hosts renders the hosts management page (multi-node mode).
+func (a *XUIController) hosts(c *gin.Context) {
+	html(c, "hosts.html", "pages.hosts.title", nil)
+}
+
+// outbounds renders the outbounds management page (multi-node mode).
+func (a *XUIController) outbounds(c *gin.Context) {
+	html(c, "outbounds.html", "pages.outbounds.title", nil)
+}
+
+// xrayCoreConfigProfiles renders the Xray core config profiles management page (multi-node mode).
+func (a *XUIController) xrayCoreConfigProfiles(c *gin.Context) {
+	html(c, "xray_core_config_profiles.html", "pages.xrayCoreConfigProfiles.title", nil)
+}
+
+// apiDocs renders the API documentation page.
+func (a *XUIController) apiDocs(c *gin.Context) {
+	html(c, "api-docs.html", "menu.apiDocs", nil)
 }

@@ -5,6 +5,37 @@
   const textarea = document.getElementById('subscription-links');
   const rawLinks = (textarea?.value || '').split('\n').filter(Boolean);
 
+  // Try to read encrypted URLs from JSON script tag first
+  let encryptedUrls = { happEncryptedUrl: null, v2raytunEncryptedUrl: null };
+  try {
+    const jsonScript = document.getElementById('subscription-encrypted-urls');
+    if (jsonScript && jsonScript.textContent) {
+      let jsonText = jsonScript.textContent.trim();
+      console.info('[Subscription] JSON script tag content (raw):', jsonText);
+      
+      // Remove surrounding quotes if JSON is escaped as a string
+      if (jsonText.startsWith('"') && jsonText.endsWith('"')) {
+        // JSON is escaped as a string, need to unescape it
+        try {
+          jsonText = JSON.parse(jsonText); // Parse the escaped string to get the actual JSON string
+          console.info('[Subscription] Unescaped JSON string:', jsonText);
+        } catch (e) {
+          console.warn('[Subscription] Failed to unescape JSON string:', e);
+        }
+      }
+      
+      // Now parse the actual JSON
+      encryptedUrls = JSON.parse(jsonText);
+      console.info('[Subscription] Parsed encrypted URLs:', encryptedUrls);
+      console.info('[Subscription] happEncryptedUrl:', encryptedUrls.happEncryptedUrl);
+      console.info('[Subscription] v2raytunEncryptedUrl:', encryptedUrls.v2raytunEncryptedUrl);
+    } else {
+      console.warn('[Subscription] JSON script tag not found or empty');
+    }
+  } catch (e) {
+    console.warn('[Subscription] Failed to parse encrypted URLs from JSON:', e);
+  }
+
   const data = {
     sId: el.getAttribute('data-sid') || '',
     subUrl: el.getAttribute('data-sub-url') || '',
@@ -20,6 +51,29 @@
     uploadByte: parseInt(el.getAttribute('data-uploadbyte') || '0', 10) || 0,
     totalByte: parseInt(el.getAttribute('data-totalbyte') || '0', 10) || 0,
     datepicker: el.getAttribute('data-datepicker') || 'gregorian',
+    hideConfigLinks: el.getAttribute('data-hideconfiglinks') === 'true',
+    showOnlyHappV2RayTun: el.getAttribute('data-showonlyhappv2raytun') === 'true',
+    happEncryptedUrl: (() => {
+      // Prefer JSON value, but check if it's not null/empty
+      if (encryptedUrls.happEncryptedUrl && encryptedUrls.happEncryptedUrl.trim() !== '') {
+        return encryptedUrls.happEncryptedUrl;
+      }
+      // Fallback to data attribute
+      const val = el.getAttribute('data-happ-encrypted-url') || '';
+      return (val && val !== '#ZgotmplZ' && val.trim() !== '') ? val : '';
+    })(),
+    v2raytunEncryptedUrl: (() => {
+      // Prefer JSON value, but check if it's not null/empty
+      if (encryptedUrls.v2raytunEncryptedUrl && encryptedUrls.v2raytunEncryptedUrl.trim() !== '') {
+        return encryptedUrls.v2raytunEncryptedUrl;
+      }
+      // Fallback to data attribute
+      const val = el.getAttribute('data-v2raytun-encrypted-url') || '';
+      return (val && val !== '#ZgotmplZ' && val.trim() !== '') ? val : '';
+    })(),
+    theme: el.getAttribute('data-theme') || '',
+    logoUrl: el.getAttribute('data-logo-url') || '',
+    brandText: el.getAttribute('data-brand-text') || '',
   };
 
   // Normalize lastOnline to milliseconds if it looks like seconds
@@ -39,6 +93,7 @@
   }
 
   function copy(text) {
+    console.info('[Subscription] Copying to clipboard:', text);
     ClipboardManager.copyText(text).then(ok => {
       const messageType = ok ? 'success' : 'error';
       Vue.prototype.$message[messageType](ok ? 'Copied' : 'Copy failed');
@@ -46,12 +101,16 @@
   }
 
   function open(url) {
+    console.info('[Subscription] Opening URL:', url);
     window.location.href = url;
   }
 
-  function drawQR(value) {
+  function drawQR(value, elementId = 'qrcode') {
     try {
-      new QRious({ element: document.getElementById('qrcode'), value, size: 220 });
+      const element = document.getElementById(elementId);
+      if (element) {
+        new QRious({ element: element, value, size: 220 });
+      }
     } catch (e) {
       console.warn(e);
     }
@@ -93,12 +152,45 @@
       links: rawLinks,
       lang: '',
       viewportWidth: (typeof window !== 'undefined' ? window.innerWidth : 1024),
+      hideConfigLinks: data.hideConfigLinks,
+      showOnlyHappV2RayTun: data.showOnlyHappV2RayTun || false,
+      theme: data.theme || '',
+      logoUrl: data.logoUrl || '',
+      brandText: data.brandText || '',
     },
     async mounted() {
       this.lang = LanguageManager.getLanguage();
       const tpl = document.getElementById('subscription-data');
       const sj = tpl ? tpl.getAttribute('data-subjson-url') : '';
       if (sj) this.app.subJsonUrl = sj;
+      
+      // Apply theme class to root element if theme is set
+      if (this.theme) {
+        const rootEl = document.getElementById('app');
+        if (rootEl) {
+          rootEl.classList.add('subscription-theme-' + this.theme);
+        }
+      }
+      
+      // Log subscription URLs
+      console.info('[Subscription] Loaded subscription data:');
+      console.info('  - Plain subscription URL:', this.app.subUrl);
+      console.info('  - Happ encrypted URL:', this.app.happEncryptedUrl || '(not available)');
+      console.info('  - V2RayTun encrypted URL:', this.app.v2raytunEncryptedUrl || '(not available)');
+      console.info('  - hideConfigLinks:', this.hideConfigLinks, '(type:', typeof this.hideConfigLinks + ')');
+      console.info('  - showDualEncryptedQR:', this.showDualEncryptedQR);
+      console.info('  - Theme:', this.theme || '(default)');
+      console.info('  - Logo URL:', this.logoUrl || '(not set)');
+      console.info('  - Brand Text:', this.brandText || '(not set)');
+      
+      // Draw QR codes based on mode
+      if (this.showDualEncryptedQR) {
+        // Draw dual QR codes for Happ and V2RayTun
+        drawQR(this.app.happEncryptedUrl, 'qrcode-happ');
+        drawQR(this.app.v2raytunEncryptedUrl, 'qrcode-v2raytun');
+        console.info('[Subscription] Drawing dual encrypted QR codes for Happ and V2RayTun');
+      } else {
+        // Draw default QR code(s)
       drawQR(this.app.subUrl);
       try {
         const elJson = document.getElementById('qrcode-subjson');
@@ -106,6 +198,7 @@
           new QRious({ element: elJson, value: this.app.subJsonUrl, size: 220 });
         }
       } catch (e) { /* ignore */ }
+      }
       this._onResize = () => { this.viewportWidth = window.innerWidth; };
       window.addEventListener('resize', this._onResize);
     },
@@ -125,6 +218,14 @@
         const trafficOk = !this.app.totalByte || (this.app.uploadByte + this.app.downloadByte) <= this.app.totalByte;
         return expiryOk && trafficOk;
       },
+      showDualEncryptedQR() {
+        // Show dual QR codes when encryption is enabled and showOnlyHappV2RayTun is true
+        return this.showOnlyHappV2RayTun && 
+               this.app.happEncryptedUrl && 
+               this.app.happEncryptedUrl.trim() !== '' &&
+               this.app.v2raytunEncryptedUrl && 
+               this.app.v2raytunEncryptedUrl.trim() !== '';
+      },
       shadowrocketUrl() {
         const rawUrl = this.app.subUrl + '?flag=shadowrocket';
         const base64Url = btoa(rawUrl);
@@ -138,13 +239,26 @@
         return `streisand://import/${encodeURIComponent(this.app.subUrl)}`;
       },
       v2raytunUrl() {
+        // Use encrypted URL if available, otherwise use plain subscription URL
+        if (this.app.v2raytunEncryptedUrl) {
+          console.info('[Subscription] V2RayTun: Using encrypted URL:', this.app.v2raytunEncryptedUrl);
+          return this.app.v2raytunEncryptedUrl;
+        }
+        console.info('[Subscription] V2RayTun: Using plain subscription URL:', this.app.subUrl);
         return this.app.subUrl;
       },
       npvtunUrl() {
         return this.app.subUrl;
       },
       happUrl() {
-        return `happ://add/${encodeURIComponent(this.app.subUrl)}`;
+        // Use encrypted URL if available, otherwise use plain subscription URL
+        if (this.app.happEncryptedUrl) {
+          console.info('[Subscription] Happ: Using encrypted URL:', this.app.happEncryptedUrl);
+          return this.app.happEncryptedUrl;
+        }
+        const plainUrl = `happ://add/${encodeURIComponent(this.app.subUrl)}`;
+        console.info('[Subscription] Happ: Using plain URL:', plainUrl);
+        return plainUrl;
       }
     },
     methods: {

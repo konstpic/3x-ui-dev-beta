@@ -1,0 +1,505 @@
+{{define "modals/clientEntityModal"}}
+<a-modal id="client-entity-modal" v-model="clientEntityModal.visible" :title="clientEntityModal.title" @ok="clientEntityModal.ok"
+         :confirm-loading="clientEntityModal.confirmLoading" :closable="true" :mask-closable="false"
+         :class="themeSwitcher.currentTheme"
+         :ok-text="clientEntityModal.okText" cancel-text='{{ i18n "close" }}' :width="600">
+    <a-form layout="vertical" v-if="client">
+        <a-form-item label='{{ i18n "pages.clients.email" }}' :required="true">
+            <a-input v-model.trim="client.email"></a-input>
+        </a-form-item>
+        <a-form-item label='UUID/ID'>
+            <a-input v-model.trim="client.uuid">
+                <a-icon slot="suffix" type="sync" @click="client.uuid = RandomUtil.randomUUID()" style="cursor: pointer;"></a-icon>
+            </a-input>
+        </a-form-item>
+        <a-form-item label='{{ i18n "password" }}'>
+            <a-input v-model.trim="client.password">
+                <a-icon slot="suffix" type="sync" @click="client.password = RandomUtil.randomSeq(10)" style="cursor: pointer;"></a-icon>
+            </a-input>
+        </a-form-item>
+        <a-form-item label='{{ i18n "security" }}'>
+            <a-select v-model="client.security" :dropdown-class-name="themeSwitcher.currentTheme">
+                <a-select-option value="">{{ i18n "none" }}</a-select-option>
+                <a-select-option v-for="key in USERS_SECURITY" :key="key" :value="key">[[ key ]]</a-select-option>
+            </a-select>
+        </a-form-item>
+        <a-form-item label='Flow'>
+            <a-select v-model="client.flow" :dropdown-class-name="themeSwitcher.currentTheme">
+                <a-select-option value="">{{ i18n "none" }}</a-select-option>
+                <a-select-option v-for="key in TLS_FLOW_CONTROL" :key="key" :value="key">[[ key ]]</a-select-option>
+            </a-select>
+        </a-form-item>
+        <a-form-item label='Subscription ID'>
+            <a-input v-model.trim="client.subId">
+                <a-icon slot="suffix" type="sync" @click="client.subId = RandomUtil.randomLowerAndNum(16)" style="cursor: pointer;"></a-icon>
+            </a-input>
+        </a-form-item>
+        <a-form-item label='{{ i18n "comment" }}'>
+            <a-input v-model="client.comment" :max-length="100"></a-input>
+            <div :style="{ textAlign: 'right', fontSize: '12px', color: (client.comment || '').length > 90 ? '#ff4d4f' : '#999' }">
+              [[ (client.comment || '').length ]]/100
+            </div>
+        </a-form-item>
+        <a-form-item label='{{ i18n "pages.inbounds.totalFlow" }} (GB)'>
+            <a-input-number v-model.number="client.totalGB" :min="0" :step="0.01" :precision="2" :style="{ width: '100%' }"></a-input-number>
+        </a-form-item>
+        <a-form-item label='{{ i18n "pages.inbounds.expireDate" }}'>
+            <a-date-picker :show-time="{ format: 'HH:mm:ss' }" format="YYYY-MM-DD HH:mm:ss"
+                :dropdown-class-name="themeSwitcher.currentTheme" v-model="client._expiryTime" :style="{ width: '100%' }"></a-date-picker>
+        </a-form-item>
+        <a-form-item label='Telegram ChatID'>
+            <a-input-number v-model.number="client.tgId" :min="0" :style="{ width: '100%' }"></a-input-number>
+        </a-form-item>
+        <a-form-item label='{{ i18n "pages.clients.inbounds" }}'>
+            <a-select v-model="client.inboundIds" mode="multiple" :dropdown-class-name="themeSwitcher.currentTheme">
+                <a-select-option v-for="inbound in app.allInbounds" :key="inbound.id" :value="inbound.id">
+                    [[ inbound.remark || `Port ${inbound.port}` ]] (ID: [[ inbound.id ]])
+                </a-select-option>
+            </a-select>
+        </a-form-item>
+        <a-form-item label='{{ i18n "pages.clients.group" }}'>
+            <a-select v-model="client.groupId" :dropdown-class-name="themeSwitcher.currentTheme">
+                <a-select-option :value="null">{{ i18n "none" }}</a-select-option>
+                <a-select-option v-for="group in app.groups" :key="group.id" :value="group.id">
+                    [[ group.name ]]
+                </a-select-option>
+            </a-select>
+        </a-form-item>
+        <a-divider>{{ i18n "hwidSettings" }}</a-divider>
+        <a-alert
+            message='{{ i18n "hwidBetaWarningTitle" }}'
+            description='{{ i18n "hwidBetaWarningDesc" }}'
+            type="warning"
+            show-icon
+            :closable="false"
+            style="margin-bottom: 16px;">
+        </a-alert>
+        <a-form-item label='{{ i18n "hwidEnabled" }}'>
+            <a-switch v-model="client.hwidEnabled"></a-switch>
+        </a-form-item>
+        <a-form-item label='{{ i18n "maxHwid" }}' v-if="client.hwidEnabled">
+            <a-input-number v-model.number="client.maxHwid" :min="0" :style="{ width: '100%' }">
+                <template slot="addonAfter">
+                    <a-tooltip>
+                        <template slot="title">0 = {{ i18n "unlimited" }}</template>
+                        <a-icon type="question-circle"></a-icon>
+                    </a-tooltip>
+                </template>
+            </a-input-number>
+        </a-form-item>
+        <a-form-item v-if="client.hwidEnabled && clientEntityModal.isEdit">
+            <a-table 
+                :columns="hwidColumns" 
+                :data-source="client.hwids" 
+                :pagination="false"
+                size="small"
+                :style="{ marginTop: '10px' }">
+                <template slot="deviceInfo" slot-scope="text, record">
+                    <div>
+                        <div><strong>[[ record.deviceModel || record.deviceName || record.deviceOs || 'Unknown Device' ]]</strong></div>
+                        <small style="color: #999;">HWID: [[ record.hwid ]]</small>
+                    </div>
+                </template>
+                <template slot="status" slot-scope="text, record">
+                    <a-tag v-if="record.isActive" color="green">{{ i18n "active" }}</a-tag>
+                    <a-tag v-else>{{ i18n "inactive" }}</a-tag>
+                </template>
+                <template slot="firstSeen" slot-scope="text, record">
+                    [[ clientEntityModal.formatTimestamp(record.firstSeenAt || record.firstSeen) ]]
+                </template>
+                <template slot="lastSeen" slot-scope="text, record">
+                    [[ clientEntityModal.formatTimestamp(record.lastSeenAt || record.lastSeen) ]]
+                </template>
+                <template slot="ipAddress" slot-scope="text, record">
+                    <span v-if="record.ipAddress">[[ record.ipAddress ]]</span>
+                    <span v-else style="color: #999;">-</span>
+                </template>
+                <template slot="userAgent" slot-scope="text, record">
+                    <a-tooltip v-if="record.userAgent" :title="record.userAgent">
+                        <span style="max-width: 150px; display: inline-block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">[[ record.userAgent ]]</span>
+                    </a-tooltip>
+                    <span v-else style="color: #999;">-</span>
+                </template>
+                <template slot="actions" slot-scope="text, record">
+                    <a-button type="danger" size="small" @click="clientEntityModal.removeHwid(record.id)">{{ i18n "delete" }}</a-button>
+                </template>
+            </a-table>
+        </a-form-item>
+        <a-divider>{{ i18n "pages.settings.subscriptionHeaders.announce" }}</a-divider>
+        <a-form-item label='{{ i18n "pages.settings.subscriptionHeaders.announce" }}'>
+            <a-textarea v-model="client.announce" :max-length="200" :rows="3" placeholder='{{ i18n "pages.settings.subscriptionHeaders.announceDesc" }}'></a-textarea>
+        </a-form-item>
+        <a-form-item label='{{ i18n "pages.inbounds.enable" }}'>
+            <a-switch v-model="client.enable"></a-switch>
+        </a-form-item>
+    </a-form>
+</a-modal>
+<script>
+    const clientEntityModal = window.clientEntityModal = {
+        visible: false,
+        confirmLoading: false,
+        title: '',
+        okText: '{{ i18n "sure" }}',
+        isEdit: false,
+        client: null,
+        confirm: null,
+        ok() {
+            if (clientEntityModal.confirm && clientEntityModal.client) {
+                const client = clientEntityModal.client;
+                if (typeof ObjectUtil !== 'undefined' && ObjectUtil.execute) {
+                    ObjectUtil.execute(clientEntityModal.confirm, client);
+                } else {
+                    clientEntityModal.confirm(client);
+                }
+            }
+        },
+        async show({ title = '', okText = '{{ i18n "sure" }}', client = null, confirm = () => {}, isEdit = false }) {
+            this.title = title;
+            this.okText = okText;
+            this.isEdit = isEdit;
+            this.confirm = confirm;
+            
+            // Always load groups when opening modal to ensure list is up-to-date
+            if (typeof app !== 'undefined') {
+                try {
+                    const msg = await HttpUtil.get('/panel/group/list');
+                    if (msg && msg.success && msg.obj) {
+                        app.groups = msg.obj;
+                    } else if (!app.groups) {
+                        app.groups = [];
+                    }
+                } catch (e) {
+                    console.error("Failed to load groups:", e);
+                    if (!app.groups) {
+                        app.groups = [];
+                    }
+                }
+            }
+            
+            if (client) {
+                // Edit mode - use provided client data
+                this.client = {
+                    id: client.id,
+                    email: client.email || '',
+                    uuid: client.uuid || '',
+                    password: client.password || '',
+                    security: client.security || 'auto',
+                    flow: client.flow || '',
+                    subId: client.subId || '',
+                    comment: client.comment || '',
+                    totalGB: client.totalGB || 0,
+                    expiryTime: client.expiryTime || 0,
+                    _expiryTime: client.expiryTime > 0 ? (moment ? moment(client.expiryTime) : new Date(client.expiryTime)) : null,
+                    tgId: client.tgId || 0,
+                    inboundIds: client.inboundIds ? [...client.inboundIds] : [],
+                    enable: client.enable !== undefined ? client.enable : true,
+                    hwidEnabled: client.hwidEnabled !== undefined ? client.hwidEnabled : false,
+                    maxHwid: client.maxHwid !== undefined ? client.maxHwid : 1,
+                    hwids: client.hwids ? [...client.hwids] : [],
+                    groupId: client.groupId !== undefined ? client.groupId : null,
+                    announce: client.announce || ''
+                };
+                
+                // If in edit mode, load HWIDs from API
+                if (isEdit && client.id) {
+                    this.loadClientHWIDs(client.id);
+                }
+            } else {
+                // Add mode - create new client
+                this.client = {
+                    email: '',
+                    uuid: RandomUtil.randomUUID(),
+                    password: RandomUtil.randomSeq(10),
+                    security: 'auto',
+                    flow: '',
+                    subId: RandomUtil.randomLowerAndNum(16),
+                    comment: '',
+                    totalGB: 0,
+                    expiryTime: 0,
+                    _expiryTime: null,
+                    tgId: 0,
+                    inboundIds: [],
+                    enable: true,
+                    hwidEnabled: false,
+                    maxHwid: 1,
+                    groupId: null,
+                    announce: ''
+                };
+            }
+            
+            // Ensure groupId is set correctly (can be null or number)
+            if (this.client && this.client.groupId === undefined) {
+                this.client.groupId = client && client.groupId !== undefined ? client.groupId : null;
+            }
+            
+            this.visible = true;
+        },
+        close() {
+            this.visible = false;
+            this.loading(false);
+        },
+        loading(loading = true) {
+            this.confirmLoading = loading;
+        },
+        async loadClientHWIDs(clientId) {
+            try {
+                const msg = await HttpUtil.get(`/panel/client/hwid/list/${clientId}`);
+                if (msg && msg.success && msg.obj) {
+                    if (this.client) {
+                        this.client.hwids = msg.obj || [];
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to load client HWIDs:", e);
+                if (this.client) {
+                    this.client.hwids = [];
+                }
+            }
+        },
+        formatTimestamp(timestamp) {
+            if (!timestamp) return '-';
+            // Convert seconds to milliseconds if timestamp is in seconds (less than year 2100 in seconds)
+            // Timestamp in seconds: 1768489162 (year 2026)
+            // Timestamp in milliseconds: 1768489162000 (year 2026)
+            // If timestamp is less than 10^10, it's in seconds, need to multiply by 1000
+            const timestampMs = timestamp < 10000000000 ? timestamp * 1000 : timestamp;
+            if (typeof IntlUtil !== 'undefined' && IntlUtil.formatDate) {
+                return IntlUtil.formatDate(timestampMs);
+            }
+            return new Date(timestampMs).toLocaleString();
+        },
+        async removeHwid(hwidId) {
+            const vueInstance = (typeof window.clientEntityModalApp !== 'undefined' && window.clientEntityModalApp.$confirm) 
+                ? window.clientEntityModalApp 
+                : (typeof app !== 'undefined' && app.$confirm ? app : null);
+            
+            if (vueInstance && vueInstance.$confirm) {
+                vueInstance.$confirm({
+                    title: '{{ i18n "pages.clients.confirmDeleteHwid" }}',
+                    okText: '{{ i18n "sure" }}',
+                    cancelText: '{{ i18n "cancel" }}',
+                    onOk: async () => {
+                        await this.performRemoveHwid(hwidId);
+                    }
+                });
+            } else {
+                // Fallback to standard confirm if $confirm is not available
+                if (!confirm('{{ i18n "pages.clients.confirmDeleteHwid" }}')) {
+                    return;
+                }
+                await this.performRemoveHwid(hwidId);
+            }
+        },
+        async performRemoveHwid(hwidId) {
+            try {
+                const msg = await HttpUtil.post(`/panel/client/hwid/del/${hwidId}`);
+                if (msg.success) {
+                    if (typeof app !== 'undefined') {
+                        app.$message.success('{{ i18n "pages.clients.hwidDeleteSuccess" }}');
+                    }
+                    // Reload client HWIDs
+                    if (this.client && this.client.id) {
+                        await this.loadClientHWIDs(this.client.id);
+                    }
+                } else {
+                    if (typeof app !== 'undefined') {
+                        app.$message.error(msg.msg || '{{ i18n "somethingWentWrong" }}');
+                    }
+                }
+            } catch (e) {
+                console.error("Failed to delete HWID:", e);
+                if (typeof app !== 'undefined') {
+                    app.$message.error('{{ i18n "somethingWentWrong" }}');
+                }
+            }
+        },
+        filterInboundOption(input, option) {
+            const inboundId = option.componentOptions.propsData.value;
+            const inbound = typeof app !== 'undefined' && app.allInbounds 
+                ? app.allInbounds.find(ib => ib.id === inboundId) 
+                : null;
+            if (!inbound) return false;
+            const searchText = input.toLowerCase();
+            const remark = (inbound.remark || '').toLowerCase();
+            const port = String(inbound.port || '');
+            const id = String(inbound.id || '');
+            return remark.indexOf(searchText) >= 0 || 
+                   port.indexOf(searchText) >= 0 || 
+                   id.indexOf(searchText) >= 0;
+        },
+        filterGroupOption(input, option) {
+            const groupId = option.componentOptions.propsData.value;
+            if (groupId === null) {
+                // "None" option - show if input is empty or matches "none"
+                return !input || input.toLowerCase().indexOf('none') >= 0;
+            }
+            const group = typeof app !== 'undefined' && app.groups 
+                ? app.groups.find(g => g.id === groupId) 
+                : null;
+            if (!group) return false;
+            const searchText = input.toLowerCase();
+            const name = (group.name || '').toLowerCase();
+            return name.indexOf(searchText) >= 0;
+        }
+    };
+
+    const clientEntityModalApp = window.clientEntityModalApp = new Vue({
+        delimiters: ['[[', ']]'],
+        el: '#client-entity-modal',
+        data: {
+            clientEntityModal: clientEntityModal,
+        },
+        methods: {
+        },
+        computed: {
+            client() {
+                return this.clientEntityModal.client;
+            },
+            themeSwitcher() {
+                return typeof themeSwitcher !== 'undefined' ? themeSwitcher : { currentTheme: 'light' };
+            },
+            app() {
+                const appInstance = typeof app !== 'undefined' ? app : null;
+                if (appInstance) {
+                    // Ensure groups array exists
+                    if (!appInstance.groups) {
+                        appInstance.groups = [];
+                    }
+                    // Ensure allInbounds array exists
+                    if (!appInstance.allInbounds) {
+                        appInstance.allInbounds = [];
+                    }
+                }
+                return appInstance;
+            },
+            USERS_SECURITY() {
+                return typeof USERS_SECURITY !== 'undefined' ? USERS_SECURITY : {};
+            },
+            TLS_FLOW_CONTROL() {
+                return typeof TLS_FLOW_CONTROL !== 'undefined' ? TLS_FLOW_CONTROL : {};
+            },
+            hwidColumns() {
+                return [
+                    {
+                        title: '{{ i18n "pages.clients.deviceInfo" }}',
+                        align: 'left',
+                        width: 200,
+                        scopedSlots: { customRender: 'deviceInfo' }
+                    },
+                    {
+                        title: '{{ i18n "status" }}',
+                        align: 'center',
+                        width: 80,
+                        scopedSlots: { customRender: 'status' }
+                    },
+                    {
+                        title: '{{ i18n "pages.clients.firstSeen" }}',
+                        align: 'left',
+                        width: 150,
+                        scopedSlots: { customRender: 'firstSeen' }
+                    },
+                    {
+                        title: '{{ i18n "pages.clients.lastSeen" }}',
+                        align: 'left',
+                        width: 150,
+                        scopedSlots: { customRender: 'lastSeen' }
+                    },
+                    {
+                        title: 'IP Address',
+                        align: 'left',
+                        width: 120,
+                        scopedSlots: { customRender: 'ipAddress' }
+                    },
+                    {
+                        title: 'User Agent',
+                        align: 'left',
+                        width: 200,
+                        scopedSlots: { customRender: 'userAgent' }
+                    },
+                    {
+                        title: '{{ i18n "pages.clients.actions" }}',
+                        align: 'center',
+                        width: 80,
+                        scopedSlots: { customRender: 'actions' }
+                    }
+                ];
+            }
+        }
+    });
+</script>
+<style>
+    /* Fix for select arrow in client entity modal - prevent white square on hover */
+    #client-entity-modal .ant-select-arrow,
+    #client-entity-modal .ant-select-selection__arrow,
+    #client-entity-modal .ant-select-arrow *,
+    #client-entity-modal .ant-select-selection__arrow *,
+    #client-entity-modal .ant-select-arrow .anticon,
+    #client-entity-modal .ant-select-selection__arrow .anticon,
+    #client-entity-modal .ant-select-arrow .anticon-down,
+    #client-entity-modal .ant-select-selection__arrow .anticon-down {
+        color: rgba(0, 0, 0, 0.25) !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    #client-entity-modal .ant-select:hover .ant-select-arrow,
+    #client-entity-modal .ant-select:hover .ant-select-selection__arrow,
+    #client-entity-modal .ant-select:hover .ant-select-arrow *,
+    #client-entity-modal .ant-select:hover .ant-select-selection__arrow *,
+    #client-entity-modal .ant-select:hover .ant-select-arrow .anticon,
+    #client-entity-modal .ant-select:hover .ant-select-selection__arrow .anticon,
+    #client-entity-modal .ant-select:hover .ant-select-arrow .anticon-down,
+    #client-entity-modal .ant-select:hover .ant-select-selection__arrow .anticon-down,
+    #client-entity-modal .ant-select-focused .ant-select-arrow,
+    #client-entity-modal .ant-select-focused .ant-select-selection__arrow,
+    #client-entity-modal .ant-select-focused .ant-select-arrow *,
+    #client-entity-modal .ant-select-focused .ant-select-selection__arrow *,
+    #client-entity-modal .ant-select-open .ant-select-arrow,
+    #client-entity-modal .ant-select-open .ant-select-selection__arrow,
+    #client-entity-modal .ant-select-open .ant-select-arrow *,
+    #client-entity-modal .ant-select-open .ant-select-selection__arrow * {
+        color: rgba(0, 0, 0, 0.45) !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    #client-entity-modal.dark .ant-select-arrow,
+    #client-entity-modal.dark .ant-select-selection__arrow,
+    #client-entity-modal.dark .ant-select-arrow *,
+    #client-entity-modal.dark .ant-select-selection__arrow *,
+    #client-entity-modal.dark .ant-select-arrow .anticon,
+    #client-entity-modal.dark .ant-select-selection__arrow .anticon,
+    #client-entity-modal.dark .ant-select-arrow .anticon-down,
+    #client-entity-modal.dark .ant-select-selection__arrow .anticon-down {
+        color: rgba(255, 255, 255, 0.35) !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+    #client-entity-modal.dark .ant-select:hover .ant-select-arrow,
+    #client-entity-modal.dark .ant-select:hover .ant-select-selection__arrow,
+    #client-entity-modal.dark .ant-select:hover .ant-select-arrow *,
+    #client-entity-modal.dark .ant-select:hover .ant-select-selection__arrow *,
+    #client-entity-modal.dark .ant-select:hover .ant-select-arrow .anticon,
+    #client-entity-modal.dark .ant-select:hover .ant-select-selection__arrow .anticon,
+    #client-entity-modal.dark .ant-select:hover .ant-select-arrow .anticon-down,
+    #client-entity-modal.dark .ant-select:hover .ant-select-selection__arrow .anticon-down,
+    #client-entity-modal.dark .ant-select-focused .ant-select-arrow,
+    #client-entity-modal.dark .ant-select-focused .ant-select-selection__arrow,
+    #client-entity-modal.dark .ant-select-focused .ant-select-arrow *,
+    #client-entity-modal.dark .ant-select-focused .ant-select-selection__arrow *,
+    #client-entity-modal.dark .ant-select-open .ant-select-arrow,
+    #client-entity-modal.dark .ant-select-open .ant-select-selection__arrow,
+    #client-entity-modal.dark .ant-select-open .ant-select-arrow *,
+    #client-entity-modal.dark .ant-select-open .ant-select-selection__arrow * {
+        color: rgba(255, 255, 255, 0.65) !important;
+        background: transparent !important;
+        background-color: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }
+</style>
+{{end}}

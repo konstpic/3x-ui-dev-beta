@@ -1,0 +1,148 @@
+{{define "settings/panel/subscription/headers"}}
+<a-collapse default-active-key="1">
+    <a-collapse-panel key="1" header='{{ i18n "pages.settings.subscriptionHeaders.standard" }}'>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.profileTitle" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.profileTitleDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.profileTitle" :max-length="25" placeholder="My VPN"></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.subscriptionUserinfo" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.subscriptionUserinfoDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.subscriptionUserinfo" placeholder="upload=0; download=100000; total=2000000; expire=1749954800"></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.profileUpdateInterval" }}</template>
+            <template #description>Custom Profile-Update-Interval header value in hours. If set, this overrides the base subscription update interval (subUpdates). Used by clients to determine when to refresh subscriptions. Also used for automatic key rotation timing (converted to minutes).</template>
+            <template #control>
+                <a-input-number v-model="subHeaders.profileUpdateInterval" :min="1" :style="{ width: '100%' }" :placeholder="12"></a-input-number>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.supportUrl" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.supportUrlDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.supportUrl" placeholder="https://t.me/support"></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.profileWebPageUrl" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.profileWebPageUrlDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.profileWebPageUrl" placeholder="https://example.com"></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.announce" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.announceDesc" }}</template>
+            <template #control>
+                <a-textarea v-model="subHeaders.announce" :max-length="200" :rows="3" placeholder="Announcement text (max 200 chars)"></a-textarea>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.announceUrl" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.announceUrlDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.announceUrl" placeholder="https://t.me/announce"></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.routing" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.routingDesc" }}</template>
+            <template #control>
+                <a-textarea v-model="subHeaders.routing" :rows="3" placeholder="Base64 encoded routing config"></a-textarea>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.routingEnable" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.routingEnableDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.routingEnable" placeholder="0 or 1"></a-input>
+            </template>
+        </a-setting-list-item>
+    </a-collapse-panel>
+    <a-collapse-panel key="2" header='{{ i18n "pages.settings.subscriptionHeaders.happExtended" }}'>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.newUrl" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.newUrlDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.newUrl" placeholder="https://new-domain.com/sub/"></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.newDomain" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.newDomainDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.newDomain" placeholder="new-domain.com"></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.serverDescription" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.serverDescriptionDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.serverDescription" :max-length="30" placeholder="Server description (max 30 chars)"></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.subExpire" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.subExpireDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.subExpire" placeholder="true or 1"></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.subExpireButtonLink" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.subExpireButtonLinkDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.subExpireButtonLink" placeholder="https://t.me/renew"></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.subInfoText" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.subInfoTextDesc" }}</template>
+            <template #control>
+                <a-textarea v-model="subHeaders.subInfoText" :max-length="200" :rows="3" placeholder="Info text (max 200 chars)"></a-textarea>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.subInfoColor" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.subInfoColorDesc" }}</template>
+            <template #control>
+                <a-select v-model="subHeaders.subInfoColor" :style="{ width: '100%' }">
+                    <a-select-option value="">Default (blue)</a-select-option>
+                    <a-select-option value="red">Red</a-select-option>
+                    <a-select-option value="blue">Blue</a-select-option>
+                    <a-select-option value="green">Green</a-select-option>
+                </a-select>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.subInfoButtonText" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.subInfoButtonTextDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.subInfoButtonText" :max-length="25" placeholder="Button text"></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.subInfoButtonLink" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.subInfoButtonLinkDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.subInfoButtonLink" placeholder="https://t.me/info"></a-input>
+            </template>
+        </a-setting-list-item>
+    </a-collapse-panel>
+    <a-collapse-panel key="3" header='{{ i18n "pages.settings.subscriptionHeaders.v2raytun" }}'>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subscriptionHeaders.updateAlways" }}</template>
+            <template #description>{{ i18n "pages.settings.subscriptionHeaders.updateAlwaysDesc" }}</template>
+            <template #control>
+                <a-input type="text" v-model="subHeaders.updateAlways" placeholder="true"></a-input>
+            </template>
+        </a-setting-list-item>
+    </a-collapse-panel>
+</a-collapse>
+{{end}}

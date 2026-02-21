@@ -16,42 +16,10 @@
             </template>
         </a-setting-list-item>
         <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.subTitle"}}</template>
-            <template #description>{{ i18n "pages.settings.subTitleDesc"}}</template>
-            <template #control>
-                <a-input type="text" v-model="allSetting.subTitle"></a-input>
-            </template>
-        </a-setting-list-item>
-        <a-setting-list-item paddings="small">
             <template #title>{{ i18n "pages.settings.subListen"}}</template>
             <template #description>{{ i18n "pages.settings.subListenDesc"}}</template>
             <template #control>
                 <a-input type="text" v-model="allSetting.subListen"></a-input>
-            </template>
-        </a-setting-list-item>
-        <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.subDomain"}}</template>
-            <template #description>{{ i18n "pages.settings.subDomainDesc"}}</template>
-            <template #control>
-                <a-input type="text" v-model="allSetting.subDomain"></a-input>
-            </template>
-        </a-setting-list-item>
-        <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.subPort"}}</template>
-            <template #description>{{ i18n "pages.settings.subPortDesc"}}</template>
-            <template #control>
-                <a-input-number v-model="allSetting.subPort" :min="1" :min="65535"
-                    :style="{ width: '100%' }"></a-input-number>
-            </template>
-        </a-setting-list-item>
-        <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.subPath"}}</template>
-            <template #description>{{ i18n "pages.settings.subPathDesc"}}</template>
-            <template #control>
-                <a-input type="text" v-model="allSetting.subPath"
-                    @input="allSetting.subPath = ((typeof $event === 'string' ? $event : ($event && $event.target ? $event.target.value : '')) || '').replace(/[:*]/g, '')"
-                    @blur="allSetting.subPath = (p => { p = p || '/'; if (!p.startsWith('/')) p='/' + p; if (!p.endsWith('/')) p += '/'; return p.replace(/\/+/g,'/'); })(allSetting.subPath)"
-                    placeholder="/sub/"></a-input>
             </template>
         </a-setting-list-item>
         <a-setting-list-item paddings="small">
@@ -78,27 +46,66 @@
                 <a-switch v-model="allSetting.subShowInfo"></a-switch>
             </template>
         </a-setting-list-item>
-    </a-collapse-panel>
-    <a-collapse-panel key="3" header='{{ i18n "pages.settings.certs" }}'>
         <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.subCertPath"}}</template>
-            <template #description>{{ i18n "pages.settings.subCertPathDesc"}}</template>
+            <template #title>{{ i18n "pages.settings.subEncryptHappV2RayTun"}}</template>
+            <template #description>{{ i18n "pages.settings.subEncryptHappV2RayTunDesc"}}</template>
             <template #control>
-                <a-input type="text" v-model="allSetting.subCertFile"></a-input>
+                <a-switch v-model="allSetting.subEncryptHappV2RayTun"></a-switch>
             </template>
         </a-setting-list-item>
         <a-setting-list-item paddings="small">
-            <template #title>{{ i18n "pages.settings.subKeyPath"}}</template>
-            <template #description>{{ i18n "pages.settings.subKeyPathDesc"}}</template>
+            <template #title>{{ i18n "pages.settings.subOnlyHappV2RayTun"}}</template>
+            <template #description>{{ i18n "pages.settings.subOnlyHappV2RayTunDesc"}}</template>
             <template #control>
-                <a-input type="text" v-model="allSetting.subKeyFile"></a-input>
+                <a-switch v-model="allSetting.subOnlyHappV2RayTun"></a-switch>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subHideConfigLinks"}}</template>
+            <template #description>{{ i18n "pages.settings.subHideConfigLinksDesc"}}</template>
+            <template #control>
+                <a-switch v-model="allSetting.subHideConfigLinks"></a-switch>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subShowOnlyHappV2RayTun"}}</template>
+            <template #description>{{ i18n "pages.settings.subShowOnlyHappV2RayTunDesc"}}</template>
+            <template #control>
+                <a-switch v-model="allSetting.subShowOnlyHappV2RayTun"></a-switch>
+            </template>
+        </a-setting-list-item>
+        <!-- TODO: Переосмыслить механизм автоповорота ключей -->
+        <!-- <a-setting-list-item paddings="small">
+            <template #title>Auto Rotate Keys</template>
+            <template #description>Automatically rotate client keys (UUID/password) for all inbounds before subscription update interval. If subscription update is 1 hour, keys will be rotated at 59 minutes to allow propagation.</template>
+            <template #control>
+                <a-switch v-model="allSetting.subAutoRotateKeys"></a-switch>
+            </template>
+        </a-setting-list-item> -->
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subProviderID"}}</template>
+            <template #description>{{ i18n "pages.settings.subProviderIDDesc"}}</template>
+            <template #control>
+                <a-input type="text" v-model="allSetting.subProviderID" placeholder="UUID или идентификатор провайдера"></a-input>
+            </template>
+        </a-setting-list-item>
+        <a-setting-list-item paddings="small">
+            <template #title>{{ i18n "pages.settings.subProviderIDMethod"}}</template>
+            <template #description>{{ i18n "pages.settings.subProviderIDMethodDesc"}}</template>
+            <template #control>
+                <a-select v-model="allSetting.subProviderIDMethod" :style="{ width: '100%' }" :dropdown-class-name="themeSwitcher.currentTheme">
+                    <a-select-option value="url">{{ i18n "pages.settings.subProviderIDMethodUrl" }}</a-select-option>
+                    <a-select-option value="header">{{ i18n "pages.settings.subProviderIDMethodHeader" }}</a-select-option>
+                    <a-select-option value="body">{{ i18n "pages.settings.subProviderIDMethodBody" }}</a-select-option>
+                    <a-select-option value="none">{{ i18n "pages.settings.subProviderIDMethodNone" }}</a-select-option>
+                </a-select>
             </template>
         </a-setting-list-item>
     </a-collapse-panel>
     <a-collapse-panel key="4" header='{{ i18n "pages.settings.intervals"}}'>
         <a-setting-list-item paddings="small">
             <template #title>{{ i18n "pages.settings.subUpdates"}}</template>
-            <template #description>{{ i18n "pages.settings.subUpdatesDesc"}}</template>
+            <template #description>Base subscription update interval in minutes. This value is used by default for the Profile-Update-Interval header. If a custom ProfileUpdateInterval is set in subscription headers, it will override this value. Used for automatic key rotation timing.</template>
             <template #control>
                 <a-input-number :min="1" v-model="allSetting.subUpdates" :style="{ width: '100%' }"></a-input-number>
             </template>

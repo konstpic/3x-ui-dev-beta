@@ -5,26 +5,38 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/mhsanaei/3x-ui/v2/config"
 	"github.com/mhsanaei/3x-ui/v2/database"
 	"github.com/mhsanaei/3x-ui/v2/database/model"
 	"github.com/mhsanaei/3x-ui/v2/logger"
 	"github.com/mhsanaei/3x-ui/v2/util/common"
 	"github.com/mhsanaei/3x-ui/v2/util/random"
 	"github.com/mhsanaei/3x-ui/v2/util/reflect_util"
+	"github.com/mhsanaei/3x-ui/v2/web/cache"
 	"github.com/mhsanaei/3x-ui/v2/web/entity"
 	"github.com/mhsanaei/3x-ui/v2/xray"
+
+	"github.com/op/go-logging"
 )
 
 //go:embed config.json
-var xrayTemplateConfig string
+var defaultXrayTemplateConfig string
+
+//go:embed grafana-dashboard.json
+var grafanaDashboardJSON string
 
 var defaultValueMap = map[string]string{
-	"xrayTemplateConfig":          xrayTemplateConfig,
+	// Default Xray template configuration. At runtime, the real source of truth
+	// is always the "xrayTemplateConfig" record in the settings table; this
+	// value is only used as an initial/default template when there is no valid
+	// value in the database.
+	"xrayTemplateConfig":          defaultXrayTemplateConfig,
 	"webListen":                   "",
 	"webDomain":                   "",
 	"webPort":                     "2053",
@@ -69,6 +81,18 @@ var defaultValueMap = map[string]string{
 	"subJsonNoises":               "",
 	"subJsonMux":                  "",
 	"subJsonRules":                "",
+	"subEncryptHappV2RayTun":      "false",
+	"subOnlyHappV2RayTun":          "false",
+	"subShowOnlyHappV2RayTun":      "false",
+	"subHideConfigLinks":           "false",
+	"subAutoRotateKeys":            "false", // Automatically rotate client keys before subscription update interval
+	"subHeaders":                   "{}",   // JSON string for subscription headers
+	"subProviderID":                "",     // Provider ID for Happ extended headers
+	"subProviderIDMethod":          "url",  // Method to send Provider ID: "url" (query parameter), "header" (HTTP header), "none" (disabled)
+	"subPageTheme":                 "",     // Subscription page theme: "rainbow", "coffee", "banana", "sunset"
+	"subPageLogoUrl":               "",   // Logo URL for subscription page
+	"subPageBrandText":             "",   // Brand text for subscription page
+	"subPageBackgroundUrl":         "",   // Background image URL for subscription card
 	"datepicker":                  "gregorian",
 	"warp":                        "",
 	"externalTrafficInformEnable": "false",
@@ -94,15 +118,65 @@ var defaultValueMap = map[string]string{
 	"ldapDefaultTotalGB":    "0",
 	"ldapDefaultExpiryDays": "0",
 	"ldapDefaultLimitIP":    "0",
+	// Multi-node mode
+	"multiNodeMode": "false", // "true" for multi-mode, "false" for single-mode
+	// HWID tracking mode
+	"hwidMode": "client_header", // "off" = disabled, "client_header" = use x-hwid header (default), "legacy_fingerprint" = deprecated fingerprint-based (deprecated)
+	// Grafana integration
+	"grafanaLokiUrl":        "",
+	"grafanaVictoriaMetricsUrl": "",
+	"grafanaEnable":         "false",
 }
 
 // SettingService provides business logic for application settings management.
 // It handles configuration storage, retrieval, and validation for all system settings.
 type SettingService struct{}
 
+// EnsureXrayTemplateConfigValid ensures that xrayTemplateConfig in the database is valid.
+// If it's missing or invalid, it updates it from the default template.
+// This is critical when updating only the panel image without updating the database,
+// as the old config structure might be incompatible with the new code.
+// All configuration is now stored in database, not in embedded files.
+func (s *SettingService) EnsureXrayTemplateConfigValid() error {
+	db := database.GetDB()
+
+	current := &model.Setting{}
+	err := db.Model(&model.Setting{}).Where("key = ?", "xrayTemplateConfig").First(current).Error
+	if database.IsNotFound(err) {
+		// No record: initialize from default template
+		logger.Infof("xrayTemplateConfig not found in DB, initializing with default template")
+		return s.saveSetting("xrayTemplateConfig", defaultXrayTemplateConfig)
+	}
+	if err != nil {
+		return err
+	}
+
+	value := strings.TrimSpace(current.Value)
+	if value == "" || value == "{}" {
+		logger.Warning("xrayTemplateConfig in DB is empty or placeholder, resetting to default template")
+		return s.saveSetting("xrayTemplateConfig", defaultXrayTemplateConfig)
+	}
+
+	// Validate JSON by unmarshalling into xray.Config; if invalid, reset to default
+	cfg := &xray.Config{}
+	if err := json.Unmarshal([]byte(value), cfg); err != nil {
+		logger.Warningf("Invalid xrayTemplateConfig in DB, resetting to default template: %v", err)
+		return s.saveSetting("xrayTemplateConfig", defaultXrayTemplateConfig)
+	}
+
+	return nil
+}
+
+// ResetXrayTemplateConfigToDefault resets the xrayTemplateConfig setting to the
+// built-in default template. Intended to be called from admin UI / API.
+func (s *SettingService) ResetXrayTemplateConfigToDefault() error {
+	logger.Info("Resetting xrayTemplateConfig to default template")
+	return s.saveSetting("xrayTemplateConfig", defaultXrayTemplateConfig)
+}
+
 func (s *SettingService) GetDefaultJsonConfig() (any, error) {
 	var jsonData any
-	err := json.Unmarshal([]byte(xrayTemplateConfig), &jsonData)
+	err := json.Unmarshal([]byte(defaultXrayTemplateConfig), &jsonData)
 	if err != nil {
 		return nil, err
 	}
@@ -110,78 +184,85 @@ func (s *SettingService) GetDefaultJsonConfig() (any, error) {
 }
 
 func (s *SettingService) GetAllSetting() (*entity.AllSetting, error) {
-	db := database.GetDB()
-	settings := make([]*model.Setting, 0)
-	err := db.Model(model.Setting{}).Not("key = ?", "xrayTemplateConfig").Find(&settings).Error
-	if err != nil {
-		return nil, err
-	}
-	allSetting := &entity.AllSetting{}
-	t := reflect.TypeOf(allSetting).Elem()
-	v := reflect.ValueOf(allSetting).Elem()
-	fields := reflect_util.GetFields(t)
+	var allSetting *entity.AllSetting
+	
+	err := cache.GetOrSet(cache.KeySettingsAll, &allSetting, cache.TTLSettings, func() (interface{}, error) {
+		// Cache miss - fetch from database
+		db := database.GetDB()
+		settings := make([]*model.Setting, 0)
+		err := db.Model(model.Setting{}).Not("key = ?", "xrayTemplateConfig").Find(&settings).Error
+		if err != nil {
+			return nil, err
+		}
+		result := &entity.AllSetting{}
+		t := reflect.TypeOf(result).Elem()
+		v := reflect.ValueOf(result).Elem()
+		fields := reflect_util.GetFields(t)
 
-	setSetting := func(key, value string) (err error) {
-		defer func() {
-			panicErr := recover()
-			if panicErr != nil {
-				err = errors.New(fmt.Sprint(panicErr))
-			}
-		}()
+		setSetting := func(key, value string) (err error) {
+			defer func() {
+				panicErr := recover()
+				if panicErr != nil {
+					err = errors.New(fmt.Sprint(panicErr))
+				}
+			}()
 
-		var found bool
-		var field reflect.StructField
-		for _, f := range fields {
-			if f.Tag.Get("json") == key {
-				field = f
-				found = true
-				break
+			var found bool
+			var field reflect.StructField
+			for _, f := range fields {
+				if f.Tag.Get("json") == key {
+					field = f
+					found = true
+					break
+				}
 			}
+
+			if !found {
+				// Some settings are automatically generated, no need to return to the front end to modify the user
+				return nil
+			}
+
+			fieldV := v.FieldByName(field.Name)
+			switch t := fieldV.Interface().(type) {
+			case int:
+				n, err := strconv.ParseInt(value, 10, 64)
+				if err != nil {
+					return err
+				}
+				fieldV.SetInt(n)
+			case string:
+				fieldV.SetString(value)
+			case bool:
+				fieldV.SetBool(value == "true")
+			default:
+				return common.NewErrorf("unknown field %v type %v", key, t)
+			}
+			return
 		}
 
-		if !found {
-			// Some settings are automatically generated, no need to return to the front end to modify the user
-			return nil
-		}
-
-		fieldV := v.FieldByName(field.Name)
-		switch t := fieldV.Interface().(type) {
-		case int:
-			n, err := strconv.ParseInt(value, 10, 64)
+		keyMap := map[string]bool{}
+		for _, setting := range settings {
+			err := setSetting(setting.Key, setting.Value)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			fieldV.SetInt(n)
-		case string:
-			fieldV.SetString(value)
-		case bool:
-			fieldV.SetBool(value == "true")
-		default:
-			return common.NewErrorf("unknown field %v type %v", key, t)
+			keyMap[setting.Key] = true
 		}
-		return
-	}
 
-	keyMap := map[string]bool{}
-	for _, setting := range settings {
-		err := setSetting(setting.Key, setting.Value)
-		if err != nil {
-			return nil, err
+		for key, value := range defaultValueMap {
+			if keyMap[key] {
+				continue
+			}
+			err := setSetting(key, value)
+			if err != nil {
+				return nil, err
+			}
 		}
-		keyMap[setting.Key] = true
-	}
 
-	for key, value := range defaultValueMap {
-		if keyMap[key] {
-			continue
-		}
-		err := setSetting(key, value)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return allSetting, nil
+		return result, nil
+	})
+	
+	return allSetting, err
 }
 
 func (s *SettingService) ResetSettings() error {
@@ -195,29 +276,50 @@ func (s *SettingService) ResetSettings() error {
 }
 
 func (s *SettingService) getSetting(key string) (*model.Setting, error) {
-	db := database.GetDB()
-	setting := &model.Setting{}
-	err := db.Model(model.Setting{}).Where("key = ?", key).First(setting).Error
-	if err != nil {
-		return nil, err
-	}
-	return setting, nil
+	cacheKey := cache.KeySettingPrefix + key
+	var setting *model.Setting
+	
+	err := cache.GetOrSet(cacheKey, &setting, cache.TTLSetting, func() (interface{}, error) {
+		// Cache miss - fetch from database
+		db := database.GetDB()
+		result := &model.Setting{}
+		err := db.Model(model.Setting{}).Where("key = ?", key).First(result).Error
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
+	})
+	
+	return setting, err
 }
 
 func (s *SettingService) saveSetting(key string, value string) error {
 	setting, err := s.getSetting(key)
 	db := database.GetDB()
 	if database.IsNotFound(err) {
-		return db.Create(&model.Setting{
+		err = db.Create(&model.Setting{
 			Key:   key,
 			Value: value,
 		}).Error
 	} else if err != nil {
 		return err
+	} else {
+		setting.Key = key
+		setting.Value = value
+		err = db.Save(setting).Error
 	}
-	setting.Key = key
-	setting.Value = value
-	return db.Save(setting).Error
+	
+	if err == nil {
+		// Invalidate cache for this specific setting
+		cache.InvalidateSetting(key)
+		// Invalidate all settings cache only when a setting is actually changed
+		// This ensures consistency while avoiding unnecessary cache misses
+		cache.Delete(cache.KeySettingsAll)
+		// Also invalidate default settings cache (they depend on individual settings)
+		cache.DeletePattern("defaultSettings:*")
+	}
+	
+	return err
 }
 
 func (s *SettingService) getString(key string) (string, error) {
@@ -243,6 +345,14 @@ func (s *SettingService) getBool(key string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	// If the string is empty, treat it as missing and use default value
+	if str == "" {
+		defaultValue, ok := defaultValueMap[key]
+		if !ok {
+			return false, common.NewErrorf("key <%v> not in defaultValueMap", key)
+		}
+		return strconv.ParseBool(defaultValue)
+	}
 	return strconv.ParseBool(str)
 }
 
@@ -254,6 +364,14 @@ func (s *SettingService) getInt(key string) (int, error) {
 	str, err := s.getString(key)
 	if err != nil {
 		return 0, err
+	}
+	// If the string is empty, treat it as missing and use default value
+	if str == "" {
+		defaultValue, ok := defaultValueMap[key]
+		if !ok {
+			return 0, common.NewErrorf("key <%v> not in defaultValueMap", key)
+		}
+		return strconv.Atoi(defaultValue)
 	}
 	return strconv.Atoi(str)
 }
@@ -267,6 +385,10 @@ func (s *SettingService) GetXrayConfigTemplate() (string, error) {
 }
 
 func (s *SettingService) GetListen() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_WEB_LISTEN"); envValue != "" {
+		return envValue, nil
+	}
 	return s.getString("webListen")
 }
 
@@ -275,6 +397,10 @@ func (s *SettingService) SetListen(ip string) error {
 }
 
 func (s *SettingService) GetWebDomain() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_WEB_DOMAIN"); envValue != "" {
+		return envValue, nil
+	}
 	return s.getString("webDomain")
 }
 
@@ -359,6 +485,14 @@ func (s *SettingService) SetTwoFactorToken(value string) error {
 }
 
 func (s *SettingService) GetPort() (int, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_WEB_PORT"); envValue != "" {
+		port, err := strconv.Atoi(envValue)
+		if err != nil {
+			return 0, common.NewErrorf("invalid XUI_WEB_PORT value: %v", envValue)
+		}
+		return port, nil
+	}
 	return s.getInt("webPort")
 }
 
@@ -371,6 +505,10 @@ func (s *SettingService) SetCertFile(webCertFile string) error {
 }
 
 func (s *SettingService) GetCertFile() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_WEB_CERT_FILE"); envValue != "" {
+		return envValue, nil
+	}
 	return s.getString("webCertFile")
 }
 
@@ -379,6 +517,10 @@ func (s *SettingService) SetKeyFile(webKeyFile string) error {
 }
 
 func (s *SettingService) GetKeyFile() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_WEB_KEY_FILE"); envValue != "" {
+		return envValue, nil
+	}
 	return s.getString("webKeyFile")
 }
 
@@ -420,6 +562,17 @@ func (s *SettingService) SetBasePath(basePath string) error {
 }
 
 func (s *SettingService) GetBasePath() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_WEB_BASE_PATH"); envValue != "" {
+		basePath := envValue
+		if !strings.HasPrefix(basePath, "/") {
+			basePath = "/" + basePath
+		}
+		if !strings.HasSuffix(basePath, "/") {
+			basePath += "/"
+		}
+		return basePath, nil
+	}
 	basePath, err := s.getString("webBasePath")
 	if err != nil {
 		return "", err
@@ -464,10 +617,22 @@ func (s *SettingService) GetSubListen() (string, error) {
 }
 
 func (s *SettingService) GetSubPort() (int, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_SUB_PORT"); envValue != "" {
+		port, err := strconv.Atoi(envValue)
+		if err != nil {
+			return 0, common.NewErrorf("invalid XUI_SUB_PORT value: %v", envValue)
+		}
+		return port, nil
+	}
 	return s.getInt("subPort")
 }
 
 func (s *SettingService) GetSubPath() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_SUB_PATH"); envValue != "" {
+		return envValue, nil
+	}
 	return s.getString("subPath")
 }
 
@@ -476,6 +641,10 @@ func (s *SettingService) GetSubJsonPath() (string, error) {
 }
 
 func (s *SettingService) GetSubDomain() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_SUB_DOMAIN"); envValue != "" {
+		return envValue, nil
+	}
 	return s.getString("subDomain")
 }
 
@@ -484,6 +653,10 @@ func (s *SettingService) SetSubCertFile(subCertFile string) error {
 }
 
 func (s *SettingService) GetSubCertFile() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_SUB_CERT_FILE"); envValue != "" {
+		return envValue, nil
+	}
 	return s.getString("subCertFile")
 }
 
@@ -492,6 +665,10 @@ func (s *SettingService) SetSubKeyFile(subKeyFile string) error {
 }
 
 func (s *SettingService) GetSubKeyFile() (string, error) {
+	// Check environment variable first
+	if envValue := os.Getenv("XUI_SUB_KEY_FILE"); envValue != "" {
+		return envValue, nil
+	}
 	return s.getString("subKeyFile")
 }
 
@@ -535,6 +712,148 @@ func (s *SettingService) GetSubJsonRules() (string, error) {
 	return s.getString("subJsonRules")
 }
 
+func (s *SettingService) GetSubEncryptHappV2RayTun() (bool, error) {
+	return s.getBool("subEncryptHappV2RayTun")
+}
+
+func (s *SettingService) SetSubEncryptHappV2RayTun(value bool) error {
+	return s.setBool("subEncryptHappV2RayTun", value)
+}
+
+func (s *SettingService) GetSubOnlyHappV2RayTun() (bool, error) {
+	return s.getBool("subOnlyHappV2RayTun")
+}
+
+func (s *SettingService) SetSubOnlyHappV2RayTun(value bool) error {
+	return s.setBool("subOnlyHappV2RayTun", value)
+}
+
+func (s *SettingService) GetSubHideConfigLinks() (bool, error) {
+	return s.getBool("subHideConfigLinks")
+}
+
+func (s *SettingService) GetSubShowOnlyHappV2RayTun() (bool, error) {
+	return s.getBool("subShowOnlyHappV2RayTun")
+}
+
+func (s *SettingService) GetSubAutoRotateKeys() (bool, error) {
+	return s.getBool("subAutoRotateKeys")
+}
+
+func (s *SettingService) SetSubAutoRotateKeys(value bool) error {
+	return s.setBool("subAutoRotateKeys", value)
+}
+
+func (s *SettingService) GetSubProviderID() (string, error) {
+	return s.getString("subProviderID")
+}
+
+func (s *SettingService) GetSubProviderIDMethod() (string, error) {
+	method, err := s.getString("subProviderIDMethod")
+	if err != nil {
+		return "url", nil // Default to "url" for backward compatibility
+	}
+	if method == "" {
+		return "url", nil // Default to "url" if empty
+	}
+	return method, nil
+}
+
+func (s *SettingService) SetSubProviderIDMethod(value string) error {
+	validMethods := map[string]bool{
+		"url":    true,
+		"header": true,
+		"body":   true,
+		"none":   true,
+	}
+	if !validMethods[value] {
+		return common.NewErrorf("invalid subProviderIDMethod: %s (must be one of: url, header, body, none)", value)
+	}
+	return s.setString("subProviderIDMethod", value)
+}
+
+func (s *SettingService) GetSubPageTheme() (string, error) {
+	return s.getString("subPageTheme")
+}
+
+func (s *SettingService) SetSubPageTheme(theme string) error {
+	return s.setString("subPageTheme", theme)
+}
+
+func (s *SettingService) GetSubPageLogoUrl() (string, error) {
+	return s.getString("subPageLogoUrl")
+}
+
+func (s *SettingService) SetSubPageLogoUrl(url string) error {
+	return s.setString("subPageLogoUrl", url)
+}
+
+func (s *SettingService) GetSubPageBrandText() (string, error) {
+	return s.getString("subPageBrandText")
+}
+
+func (s *SettingService) SetSubPageBrandText(text string) error {
+	return s.setString("subPageBrandText", text)
+}
+
+func (s *SettingService) GetSubPageBackgroundUrl() (string, error) {
+	return s.getString("subPageBackgroundUrl")
+}
+
+func (s *SettingService) SetSubPageBackgroundUrl(url string) error {
+	return s.setString("subPageBackgroundUrl", url)
+}
+
+func (s *SettingService) SetSubHideConfigLinks(value bool) error {
+	return s.setBool("subHideConfigLinks", value)
+}
+
+// GetSubHeaders retrieves subscription headers configuration as JSON string
+func (s *SettingService) GetSubHeaders() (string, error) {
+	return s.getString("subHeaders")
+}
+
+// SetSubHeaders saves subscription headers configuration as JSON string
+func (s *SettingService) SetSubHeaders(headersJSON string) error {
+	return s.setString("subHeaders", headersJSON)
+}
+
+// GetSubHeadersParsed retrieves and parses subscription headers configuration
+func (s *SettingService) GetSubHeadersParsed() (*entity.SubscriptionHeaders, error) {
+	headersJSON, err := s.GetSubHeaders()
+	if err != nil {
+		return nil, err
+	}
+	
+	// If empty or "{}", return empty headers
+	if headersJSON == "" || headersJSON == "{}" {
+		return &entity.SubscriptionHeaders{}, nil
+	}
+	
+	var headers entity.SubscriptionHeaders
+	if err := json.Unmarshal([]byte(headersJSON), &headers); err != nil {
+		// If parsing fails, return empty headers instead of error
+		// This allows the system to continue working even with invalid JSON
+		return &entity.SubscriptionHeaders{}, nil
+	}
+	
+	return &headers, nil
+}
+
+// SetSubHeadersParsed saves subscription headers configuration from struct
+func (s *SettingService) SetSubHeadersParsed(headers *entity.SubscriptionHeaders) error {
+	if headers == nil {
+		return s.SetSubHeaders("{}")
+	}
+	
+	headersJSON, err := json.Marshal(headers)
+	if err != nil {
+		return fmt.Errorf("failed to marshal subscription headers: %w", err)
+	}
+	
+	return s.SetSubHeaders(string(headersJSON))
+}
+
 func (s *SettingService) GetDatepicker() (string, error) {
 	return s.getString("datepicker")
 }
@@ -563,13 +882,6 @@ func (s *SettingService) SetExternalTrafficInformURI(InformURI string) error {
 	return s.setString("externalTrafficInformURI", InformURI)
 }
 
-func (s *SettingService) GetIpLimitEnable() (bool, error) {
-	accessLogPath, err := xray.GetAccessLogPath()
-	if err != nil {
-		return false, err
-	}
-	return (accessLogPath != "none" && accessLogPath != ""), nil
-}
 
 // LDAP exported getters
 func (s *SettingService) GetLdapEnable() (bool, error) {
@@ -652,9 +964,69 @@ func (s *SettingService) GetLdapDefaultLimitIP() (int, error) {
 	return s.getInt("ldapDefaultLimitIP")
 }
 
+// GetMultiNodeMode returns whether multi-node mode is enabled.
+func (s *SettingService) GetMultiNodeMode() (bool, error) {
+	return s.getBool("multiNodeMode")
+}
+
+// SetMultiNodeMode sets the multi-node mode setting.
+func (s *SettingService) SetMultiNodeMode(enabled bool) error {
+	return s.setBool("multiNodeMode", enabled)
+}
+
+// GetHwidMode returns the HWID tracking mode.
+// Returns: "off", "client_header", or "legacy_fingerprint"
+func (s *SettingService) GetHwidMode() (string, error) {
+	mode, err := s.getString("hwidMode")
+	if err != nil {
+		return "client_header", err // Default to client_header on error
+	}
+	// Validate mode
+	validModes := map[string]bool{
+		"off":                true,
+		"client_header":     true,
+		"legacy_fingerprint": true,
+	}
+	if !validModes[mode] {
+		// Invalid mode, return default
+		return "client_header", nil
+	}
+	return mode, nil
+}
+
+// SetHwidMode sets the HWID tracking mode.
+// Valid values: "off", "client_header", "legacy_fingerprint"
+func (s *SettingService) SetHwidMode(mode string) error {
+	validModes := map[string]bool{
+		"off":                true,
+		"client_header":     true,
+		"legacy_fingerprint": true,
+	}
+	if !validModes[mode] {
+		return common.NewErrorf("invalid hwidMode: %s (must be one of: off, client_header, legacy_fingerprint)", mode)
+	}
+	return s.setString("hwidMode", mode)
+}
+
 func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 	if err := allSetting.CheckValid(); err != nil {
 		return err
+	}
+
+	// Settings that should only be configured via environment variables
+	// These are ignored when saving from web UI
+	envOnlySettings := map[string]bool{
+		"webPort":     true,
+		"webListen":   true,
+		"webDomain":   true,
+		"webBasePath": true,
+		"webCertFile": true,
+		"webKeyFile":  true,
+		"subPort":     true,
+		"subPath":     true,
+		"subDomain":   true,
+		"subCertFile": true,
+		"subKeyFile":  true,
 	}
 
 	v := reflect.ValueOf(allSetting).Elem()
@@ -663,19 +1035,71 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 	errs := make([]error, 0)
 	for _, field := range fields {
 		key := field.Tag.Get("json")
+		
+		// Skip settings that should only be configured via environment variables
+		if envOnlySettings[key] {
+			continue
+		}
+		
 		fieldV := v.FieldByName(field.Name)
-		value := fmt.Sprint(fieldV.Interface())
+		
+		// Handle boolean fields explicitly to ensure correct string representation
+		var value string
+		switch fieldV.Kind() {
+		case reflect.Bool:
+			value = strconv.FormatBool(fieldV.Bool())
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			value = strconv.FormatInt(fieldV.Int(), 10)
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+			value = strconv.FormatUint(fieldV.Uint(), 10)
+		case reflect.String:
+			value = fieldV.String()
+		default:
+			value = fmt.Sprint(fieldV.Interface())
+		}
+		
 		err := s.saveSetting(key, value)
 		if err != nil {
 			errs = append(errs, err)
 		}
 	}
+	
+	// Force clear cache after all settings are updated to ensure fresh data on next request
+	cache.InvalidateAllSettings()
+	
+	// Reinitialize logger and metrics exporter if Grafana settings changed
+	if allSetting.GrafanaEnable && allSetting.GrafanaLokiUrl != "" {
+		// Reinitialize with Loki - use DEBUG level when Grafana is enabled for full logging
+		logger.InitLoggerWithLoki(logging.DEBUG, allSetting.GrafanaLokiUrl, true, "")
+	} else {
+		// Reinitialize without Loki
+		var logLevel logging.Level
+		switch config.GetLogLevel() {
+		case config.Debug:
+			logLevel = logging.DEBUG
+		case config.Info:
+			logLevel = logging.INFO
+		case config.Notice:
+			logLevel = logging.NOTICE
+		case config.Warning:
+			logLevel = logging.WARNING
+		case config.Error:
+			logLevel = logging.ERROR
+		default:
+			logLevel = logging.INFO
+		}
+		logger.InitLogger(logLevel)
+	}
+	
+	// Initialize metrics exporter (metrics are exposed via /panel/metrics endpoint)
+	InitMetricsExporter()
+	
 	return common.Combine(errs...)
 }
 
 func (s *SettingService) GetDefaultXrayConfig() (any, error) {
 	var jsonData any
-	err := json.Unmarshal([]byte(xrayTemplateConfig), &jsonData)
+	err := json.Unmarshal([]byte(defaultXrayTemplateConfig), &jsonData)
 	if err != nil {
 		return nil, err
 	}
@@ -683,32 +1107,43 @@ func (s *SettingService) GetDefaultXrayConfig() (any, error) {
 }
 
 func (s *SettingService) GetDefaultSettings(host string) (any, error) {
-	type settingFunc func() (any, error)
-	settings := map[string]settingFunc{
-		"expireDiff":    func() (any, error) { return s.GetExpireDiff() },
-		"trafficDiff":   func() (any, error) { return s.GetTrafficDiff() },
-		"pageSize":      func() (any, error) { return s.GetPageSize() },
-		"defaultCert":   func() (any, error) { return s.GetCertFile() },
-		"defaultKey":    func() (any, error) { return s.GetKeyFile() },
-		"tgBotEnable":   func() (any, error) { return s.GetTgbotEnabled() },
-		"subEnable":     func() (any, error) { return s.GetSubEnable() },
-		"subJsonEnable": func() (any, error) { return s.GetSubJsonEnable() },
-		"subTitle":      func() (any, error) { return s.GetSubTitle() },
-		"subURI":        func() (any, error) { return s.GetSubURI() },
-		"subJsonURI":    func() (any, error) { return s.GetSubJsonURI() },
-		"remarkModel":   func() (any, error) { return s.GetRemarkModel() },
-		"datepicker":    func() (any, error) { return s.GetDatepicker() },
-		"ipLimitEnable": func() (any, error) { return s.GetIpLimitEnable() },
-	}
-
-	result := make(map[string]any)
-
-	for key, fn := range settings {
-		value, err := fn()
-		if err != nil {
-			return "", err
+	// Cache key includes host to support multi-domain setups
+	cacheKey := fmt.Sprintf("defaultSettings:%s", host)
+	var result map[string]any
+	
+	err := cache.GetOrSet(cacheKey, &result, cache.TTLSettings, func() (interface{}, error) {
+		// Cache miss - compute default settings
+		type settingFunc func() (any, error)
+		settings := map[string]settingFunc{
+			"expireDiff":    func() (any, error) { return s.GetExpireDiff() },
+			"trafficDiff":   func() (any, error) { return s.GetTrafficDiff() },
+			"pageSize":      func() (any, error) { return s.GetPageSize() },
+			"defaultCert":   func() (any, error) { return s.GetCertFile() },
+			"defaultKey":    func() (any, error) { return s.GetKeyFile() },
+			"tgBotEnable":   func() (any, error) { return s.GetTgbotEnabled() },
+			"subEnable":     func() (any, error) { return s.GetSubEnable() },
+			"subJsonEnable": func() (any, error) { return s.GetSubJsonEnable() },
+			"subTitle":      func() (any, error) { return s.GetSubTitle() },
+			"subURI":        func() (any, error) { return s.GetSubURI() },
+			"subJsonURI":    func() (any, error) { return s.GetSubJsonURI() },
+			"remarkModel":   func() (any, error) { return s.GetRemarkModel() },
+			"datepicker":    func() (any, error) { return s.GetDatepicker() },
 		}
-		result[key] = value
+
+		res := make(map[string]any)
+
+		for key, fn := range settings {
+			value, err := fn()
+			if err != nil {
+				return nil, err
+			}
+			res[key] = value
+		}
+		return res, nil
+	})
+	
+	if err != nil {
+		return nil, err
 	}
 
 	subEnable := result["subEnable"].(bool)
@@ -756,4 +1191,12 @@ func (s *SettingService) GetDefaultSettings(host string) (any, error) {
 	}
 
 	return result, nil
+}
+
+// GetGrafanaDashboard returns the Grafana dashboard JSON content
+func (s *SettingService) GetGrafanaDashboard() (string, error) {
+	if grafanaDashboardJSON == "" {
+		return "", errors.New("Grafana dashboard not found")
+	}
+	return grafanaDashboardJSON, nil
 }

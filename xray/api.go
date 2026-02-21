@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/mhsanaei/3x-ui/v2/logger"
@@ -58,6 +59,11 @@ func (x *XrayAPI) Init(apiPort int) error {
 	x.StatsServiceClient = &ssClient
 
 	return nil
+}
+
+// IsConnected checks if the gRPC connection is still active.
+func (x *XrayAPI) IsConnected() bool {
+	return x.isConnected && x.grpcClient != nil
 }
 
 // Close closes the gRPC connection and resets the XrayAPI client state.
@@ -204,6 +210,156 @@ func (x *XrayAPI) RemoveUser(inboundTag, email string) error {
 	return nil
 }
 
+// UpdateConfigFileAfterUserRemoval updates the Xray config file after removing a user via API.
+// This ensures the config file stays in sync with the running Xray instance.
+// processConfig should be the current config from the Xray process (via process.GetConfig()).
+func UpdateConfigFileAfterUserRemoval(processConfig *Config, inboundTag, email string) error {
+	if processConfig == nil {
+		return fmt.Errorf("process config is nil")
+	}
+
+	// Find the inbound by tag
+	for i := range processConfig.InboundConfigs {
+		if processConfig.InboundConfigs[i].Tag == inboundTag {
+			// Parse settings JSON
+			var settings map[string]interface{}
+			if err := json.Unmarshal(processConfig.InboundConfigs[i].Settings, &settings); err != nil {
+				return fmt.Errorf("failed to parse settings: %w", err)
+			}
+
+			// Get clients array
+			clients, ok := settings["clients"].([]interface{})
+			if !ok {
+				// Try to handle case where clients might be a different type
+				if clientsRaw, ok := settings["clients"]; ok {
+					if clientsArray, ok := clientsRaw.([]interface{}); ok {
+						clients = clientsArray
+					} else {
+						return fmt.Errorf("clients is not an array")
+					}
+				} else {
+					return nil // No clients to remove
+				}
+			}
+
+			// Remove user by email
+			found := false
+			newClients := make([]interface{}, 0, len(clients))
+			for _, client := range clients {
+				clientMap, ok := client.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				clientEmail, ok := clientMap["email"].(string)
+				if !ok {
+					continue
+				}
+				if strings.EqualFold(clientEmail, email) {
+					found = true
+					continue // Skip this client
+				}
+				newClients = append(newClients, client)
+			}
+
+			if !found {
+				logger.Debugf("User %s not found in config for inbound %s (may have been already removed)", email, inboundTag)
+				return nil // User not in config, that's OK
+			}
+
+			// Update settings with new clients array
+			settings["clients"] = newClients
+			updatedSettings, err := json.Marshal(settings)
+			if err != nil {
+				return fmt.Errorf("failed to marshal updated settings: %w", err)
+			}
+
+			processConfig.InboundConfigs[i].Settings = updatedSettings
+
+			// Save config to file
+			if _, err := WriteConfigFile(processConfig); err != nil {
+				return fmt.Errorf("failed to write config file: %w", err)
+			}
+
+			logger.Debugf("Config file updated after removing user %s from inbound %s", email, inboundTag)
+			return nil
+		}
+	}
+
+	logger.Debugf("Inbound %s not found in config", inboundTag)
+	return nil // Inbound not in config, that's OK
+}
+
+// UpdateConfigFileAfterUserAddition updates the Xray config file after adding a user via API.
+// This ensures the config file stays in sync with the running Xray instance.
+// processConfig should be the current config from the Xray process (via process.GetConfig()).
+func UpdateConfigFileAfterUserAddition(processConfig *Config, inboundTag string, user map[string]interface{}) error {
+	if processConfig == nil {
+		return fmt.Errorf("process config is nil")
+	}
+
+	userEmail, ok := user["email"].(string)
+	if !ok {
+		return fmt.Errorf("user email not found")
+	}
+
+	// Find the inbound by tag
+	for i := range processConfig.InboundConfigs {
+		if processConfig.InboundConfigs[i].Tag == inboundTag {
+			// Parse settings JSON
+			var settings map[string]interface{}
+			if err := json.Unmarshal(processConfig.InboundConfigs[i].Settings, &settings); err != nil {
+				return fmt.Errorf("failed to parse settings: %w", err)
+			}
+
+			// Get clients array
+			clients, ok := settings["clients"].([]interface{})
+			if !ok {
+				// Initialize clients array if it doesn't exist
+				clients = make([]interface{}, 0)
+			}
+
+			// Check if user already exists
+			for _, client := range clients {
+				clientMap, ok := client.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				clientEmail, ok := clientMap["email"].(string)
+				if !ok {
+					continue
+				}
+				if strings.EqualFold(clientEmail, userEmail) {
+					logger.Debugf("User %s already exists in config for inbound %s", userEmail, inboundTag)
+					return nil // User already in config, that's OK
+				}
+			}
+
+			// Add user to clients array
+			clients = append(clients, user)
+
+			// Update settings with new clients array
+			settings["clients"] = clients
+			updatedSettings, err := json.Marshal(settings)
+			if err != nil {
+				return fmt.Errorf("failed to marshal updated settings: %w", err)
+			}
+
+			processConfig.InboundConfigs[i].Settings = updatedSettings
+
+			// Save config to file
+			if _, err := WriteConfigFile(processConfig); err != nil {
+				return fmt.Errorf("failed to write config file: %w", err)
+			}
+
+			logger.Debugf("Config file updated after adding user %s to inbound %s", userEmail, inboundTag)
+			return nil
+		}
+	}
+
+	logger.Debugf("Inbound %s not found in config", inboundTag)
+	return nil // Inbound not in config, that's OK
+}
+
 // GetTraffic queries traffic statistics from the Xray core, optionally resetting counters.
 func (x *XrayAPI) GetTraffic(reset bool) ([]*Traffic, []*ClientTraffic, error) {
 	if x.grpcClient == nil {
@@ -240,6 +396,10 @@ func (x *XrayAPI) GetTraffic(reset bool) ([]*Traffic, []*ClientTraffic, error) {
 }
 
 // processTraffic aggregates a traffic stat into trafficMap using regex matches and value.
+// Note: In Xray API terminology:
+// - "downlink" = traffic from client to server → maps to Traffic.Down (from server perspective)
+// - "uplink" = traffic from server to client → maps to Traffic.Up (from server perspective)
+// For inbounds: downlink is what clients send (server receives), uplink is what server sends (clients receive)
 func processTraffic(matches []string, value int64, trafficMap map[string]*Traffic) {
 	isInbound := matches[1] == "inbound"
 	tag := matches[2]
@@ -259,14 +419,19 @@ func processTraffic(matches []string, value int64, trafficMap map[string]*Traffi
 		trafficMap[tag] = traffic
 	}
 
+	// Direct mapping: downlink → Down, uplink → Up
 	if isDown {
-		traffic.Down = value
+		traffic.Down = value   // downlink = traffic from clients to server
 	} else {
-		traffic.Up = value
+		traffic.Up = value      // uplink = traffic from server to clients
 	}
 }
 
 // processClientTraffic updates clientTrafficMap with upload/download values for a client email.
+// Note: In Xray API terminology:
+// - "downlink" = traffic from client to server → maps to ClientTraffic.Down
+// - "uplink" = traffic from server to client → maps to ClientTraffic.Up
+// This matches the server perspective and is consistent with processTraffic for inbounds.
 func processClientTraffic(matches []string, value int64, clientTrafficMap map[string]*ClientTraffic) {
 	email := matches[1]
 	isDown := matches[2] == "downlink"
@@ -277,10 +442,11 @@ func processClientTraffic(matches []string, value int64, clientTrafficMap map[st
 		clientTrafficMap[email] = traffic
 	}
 
+	// Direct mapping: downlink → Down, uplink → Up (consistent with processTraffic)
 	if isDown {
-		traffic.Down = value
+		traffic.Down = value  // downlink = traffic from client to server
 	} else {
-		traffic.Up = value
+		traffic.Up = value     // uplink = traffic from server to client
 	}
 }
 

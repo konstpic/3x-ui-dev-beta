@@ -6,11 +6,11 @@ class WebSocketClient {
     this.basePath = basePath;
     this.ws = null;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 10;
     this.reconnectDelay = 1000;
+    this.maxReconnectDelay = 30000; // Maximum delay of 30 seconds
     this.listeners = new Map();
     this.isConnected = false;
-    this.shouldReconnect = true;
+    this.shouldReconnect = true; // Always reconnect - no limit on attempts
   }
 
   connect() {
@@ -34,7 +34,7 @@ class WebSocketClient {
       this.ws.onopen = () => {
         console.log('WebSocket connected');
         this.isConnected = true;
-        this.reconnectAttempts = 0;
+        this.reconnectAttempts = 0; // Reset attempts on successful connection
         this.emit('connected');
       };
 
@@ -54,6 +54,11 @@ class WebSocketClient {
             return;
           }
           
+          // Debug logging for clients events
+          if (message.type === 'clients') {
+            console.log('[WebSocket] Received clients message:', message.type, 'payload length:', Array.isArray(message.payload) ? message.payload.length : 'not array');
+          }
+          
           this.handleMessage(message);
         } catch (e) {
           console.error('Failed to parse WebSocket message:', e);
@@ -70,16 +75,32 @@ class WebSocketClient {
         this.isConnected = false;
         this.emit('disconnected');
         
-        if (this.shouldReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
+        // Always try to reconnect - no limit on attempts
+        if (this.shouldReconnect) {
           this.reconnectAttempts++;
-          const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-          console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+          // Exponential backoff with maximum delay cap
+          const delay = Math.min(
+            this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+            this.maxReconnectDelay
+          );
+          console.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}, unlimited attempts)`);
           setTimeout(() => this.connect(), delay);
         }
       };
     } catch (e) {
       console.error('Failed to create WebSocket connection:', e);
       this.emit('error', e);
+      
+      // Retry connection on error - no limit on attempts
+      if (this.shouldReconnect) {
+        this.reconnectAttempts++;
+        const delay = Math.min(
+          this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+          this.maxReconnectDelay
+        );
+        console.log(`Retrying connection in ${delay}ms after error (attempt ${this.reconnectAttempts}, unlimited attempts)`);
+        setTimeout(() => this.connect(), delay);
+      }
     }
   }
 
@@ -113,13 +134,21 @@ class WebSocketClient {
 
   emit(event, ...args) {
     if (this.listeners.has(event)) {
-      this.listeners.get(event).forEach(callback => {
+      const callbacks = this.listeners.get(event);
+      if (event === 'clients' || event === 'traffic') {
+        console.log('[WebSocket] Emitting', event, 'event to', callbacks.length, 'listeners');
+      }
+      callbacks.forEach(callback => {
         try {
           callback(...args);
         } catch (e) {
-          console.error('Error in WebSocket event handler:', e);
+          console.error('Error in WebSocket event handler:', e, 'event:', event);
         }
       });
+    } else {
+      if (event === 'clients' || event === 'traffic') {
+        console.warn('[WebSocket] No listeners registered for event:', event);
+      }
     }
   }
 

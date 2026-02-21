@@ -1,14 +1,15 @@
 // Package config provides configuration management utilities for the 3x-ui panel,
-// including version information, logging levels, database paths, and environment variable handling.
+// including version information, logging levels, database connection, and environment variable handling.
 package config
 
 import (
 	_ "embed"
 	"fmt"
-	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -83,21 +84,89 @@ func getBaseDir() string {
 	return exeDir
 }
 
-// GetDBFolderPath returns the path to the database folder based on environment variables or platform defaults.
-func GetDBFolderPath() string {
-	dbFolderPath := os.Getenv("XUI_DB_FOLDER")
-	if dbFolderPath != "" {
-		return dbFolderPath
+// GetDBHost returns the PostgreSQL database host from environment variables or defaults to localhost.
+func GetDBHost() string {
+	host := os.Getenv("XUI_DB_HOST")
+	if host == "" {
+		return "localhost"
 	}
-	if runtime.GOOS == "windows" {
-		return getBaseDir()
-	}
-	return "/etc/x-ui"
+	return host
 }
 
-// GetDBPath returns the full path to the database file.
+// GetDBPort returns the PostgreSQL database port from environment variables or defaults to 5432.
+func GetDBPort() int {
+	port := os.Getenv("XUI_DB_PORT")
+	if port == "" {
+		return 5432
+	}
+	portInt, err := strconv.Atoi(port)
+	if err != nil {
+		return 5432
+	}
+	return portInt
+}
+
+// GetDBUser returns the PostgreSQL database user from environment variables.
+// This is a required parameter.
+func GetDBUser() string {
+	return os.Getenv("XUI_DB_USER")
+}
+
+// GetDBPassword returns the PostgreSQL database password from environment variables.
+// This is a required parameter.
+func GetDBPassword() string {
+	return os.Getenv("XUI_DB_PASSWORD")
+}
+
+// GetDBName returns the PostgreSQL database name from environment variables.
+// This is a required parameter.
+func GetDBName() string {
+	dbName := os.Getenv("XUI_DB_NAME")
+	if dbName == "" {
+		// Fallback to application name if not specified
+		return GetName()
+	}
+	return dbName
+}
+
+// GetDBSSLMode returns the PostgreSQL SSL mode from environment variables or defaults to disable.
+func GetDBSSLMode() string {
+	sslMode := os.Getenv("XUI_DB_SSLMODE")
+	if sslMode == "" {
+		return "disable"
+	}
+	return sslMode
+}
+
+// GetDBConnectionString returns a PostgreSQL connection string built from environment variables.
+// Format: postgres://user:password@host:port/dbname?sslmode=mode
+func GetDBConnectionString() string {
+	user := GetDBUser()
+	password := GetDBPassword()
+	host := GetDBHost()
+	port := GetDBPort()
+	dbname := GetDBName()
+	sslmode := GetDBSSLMode()
+
+	// URL encode password to handle special characters
+	encodedPassword := url.QueryEscape(password)
+
+	connStr := fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=%s",
+		url.QueryEscape(user),
+		encodedPassword,
+		host,
+		port,
+		url.QueryEscape(dbname),
+		url.QueryEscape(sslmode),
+	)
+
+	return connStr
+}
+
+// GetDBPath is kept for backward compatibility but now returns the connection string.
+// Deprecated: Use GetDBConnectionString() instead.
 func GetDBPath() string {
-	return fmt.Sprintf("%s/%s.db", GetDBFolderPath(), GetName())
+	return GetDBConnectionString()
 }
 
 // GetLogFolder returns the path to the log folder based on environment variables or platform defaults.
@@ -112,45 +181,7 @@ func GetLogFolder() string {
 	return "/var/log/x-ui"
 }
 
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
+// copyFile removed - no longer needed for PostgreSQL migration
 
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, in)
-	if err != nil {
-		return err
-	}
-
-	return out.Sync()
-}
-
-func init() {
-	if runtime.GOOS != "windows" {
-		return
-	}
-	if os.Getenv("XUI_DB_FOLDER") != "" {
-		return
-	}
-	oldDBFolder := "/etc/x-ui"
-	oldDBPath := fmt.Sprintf("%s/%s.db", oldDBFolder, GetName())
-	newDBFolder := GetDBFolderPath()
-	newDBPath := fmt.Sprintf("%s/%s.db", newDBFolder, GetName())
-	_, err := os.Stat(newDBPath)
-	if err == nil {
-		return // new exists
-	}
-	_, err = os.Stat(oldDBPath)
-	if os.IsNotExist(err) {
-		return // old does not exist
-	}
-	_ = copyFile(oldDBPath, newDBPath) // ignore error
-}
+// init function removed - no longer needed for PostgreSQL migration
+// The old SQLite file migration logic is no longer applicable

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"net/http"
 	"time"
 
 	"github.com/mhsanaei/3x-ui/v2/util/crypto"
@@ -22,9 +23,9 @@ type updateUserForm struct {
 
 // SettingController handles settings and user management operations.
 type SettingController struct {
-	settingService service.SettingService
-	userService    service.UserService
-	panelService   service.PanelService
+	settingService  service.SettingService
+	userService     service.UserService
+	panelService    service.PanelService
 }
 
 // NewSettingController creates a new SettingController and initializes its routes.
@@ -44,6 +45,10 @@ func (a *SettingController) initRouter(g *gin.RouterGroup) {
 	g.POST("/updateUser", a.updateUser)
 	g.POST("/restartPanel", a.restartPanel)
 	g.GET("/getDefaultJsonConfig", a.getDefaultXrayConfig)
+	g.GET("/grafana/dashboard", a.getGrafanaDashboard)
+
+	// Initialize migration controller
+	NewMigrationController(g)
 }
 
 // getAllSetting retrieves all current settings.
@@ -118,4 +123,16 @@ func (a *SettingController) getDefaultXrayConfig(c *gin.Context) {
 		return
 	}
 	jsonObj(c, defaultJsonConfig, nil)
+}
+
+// getGrafanaDashboard returns the Grafana dashboard JSON file for download.
+func (a *SettingController) getGrafanaDashboard(c *gin.Context) {
+	dashboardJSON, err := a.settingService.GetGrafanaDashboard()
+	if err != nil {
+		jsonMsg(c, "Failed to load Grafana dashboard", err)
+		return
+	}
+	c.Header("Content-Type", "application/json")
+	c.Header("Content-Disposition", "attachment; filename=3x-ui-grafana-dashboard.json")
+	c.String(http.StatusOK, dashboardJSON)
 }

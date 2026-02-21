@@ -45,10 +45,33 @@ func runWebServer() {
 
 	godotenv.Load()
 
-	err := database.InitDB(config.GetDBPath())
+	err := database.InitDB(config.GetDBConnectionString())
 	if err != nil {
 		log.Fatalf("Error initializing database: %v", err)
 	}
+
+	// Ensure xrayTemplateConfig is present and valid in the database.
+	// This is critical when the panel image is updated without applying DB migrations.
+	settingService := service.SettingService{}
+	if err := settingService.EnsureXrayTemplateConfigValid(); err != nil {
+		logger.Warningf("Failed to ensure xrayTemplateConfig is valid: %v", err)
+		// Do not abort startup; Xray-related operations may still try to recover later.
+	}
+
+	// Pre-generate Xray configuration file from database at startup.
+	// This ensures the config file is ready before Xray starts.
+	xrayService := service.NewXrayService()
+	if err := xrayService.EnsureXrayConfigFile(); err != nil {
+		logger.Warningf("Failed to pre-generate Xray config file: %v", err)
+		// Don't fail startup - Xray will attempt to generate config when it starts.
+	}
+
+	// Initialize Redis cache (embedded mode by default)
+	err = web.InitRedisCache("")
+	if err != nil {
+		log.Fatalf("Error initializing Redis cache: %v", err)
+	}
+	defer web.CloseRedisCache()
 
 	var server *web.Server
 	server = web.NewServer()
@@ -124,7 +147,7 @@ func runWebServer() {
 
 // resetSetting resets all panel settings to their default values.
 func resetSetting() {
-	err := database.InitDB(config.GetDBPath())
+	err := database.InitDB(config.GetDBConnectionString())
 	if err != nil {
 		fmt.Println("Failed to initialize database:", err)
 		return
@@ -211,7 +234,7 @@ func updateTgbotEnableSts(status bool) {
 
 // updateTgbotSetting updates Telegram bot settings including token, chat ID, and runtime schedule.
 func updateTgbotSetting(tgBotToken string, tgBotChatid string, tgBotRuntime string) {
-	err := database.InitDB(config.GetDBPath())
+	err := database.InitDB(config.GetDBConnectionString())
 	if err != nil {
 		fmt.Println("Error initializing database:", err)
 		return
@@ -249,7 +272,7 @@ func updateTgbotSetting(tgBotToken string, tgBotChatid string, tgBotRuntime stri
 
 // updateSetting updates various panel settings including port, credentials, base path, listen IP, and two-factor authentication.
 func updateSetting(port int, username string, password string, webBasePath string, listenIP string, resetTwoFactor bool) {
-	err := database.InitDB(config.GetDBPath())
+	err := database.InitDB(config.GetDBConnectionString())
 	if err != nil {
 		fmt.Println("Database initialization failed:", err)
 		return
@@ -308,7 +331,7 @@ func updateSetting(port int, username string, password string, webBasePath strin
 
 // updateCert updates the SSL certificate files for the panel.
 func updateCert(publicKey string, privateKey string) {
-	err := database.InitDB(config.GetDBPath())
+	err := database.InitDB(config.GetDBConnectionString())
 	if err != nil {
 		fmt.Println(err)
 		return
@@ -385,7 +408,7 @@ func GetListenIP(getListen bool) {
 func migrateDb() {
 	inboundService := service.InboundService{}
 
-	err := database.InitDB(config.GetDBPath())
+	err := database.InitDB(config.GetDBConnectionString())
 	if err != nil {
 		log.Fatal(err)
 	}
