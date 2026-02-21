@@ -119,19 +119,13 @@ jobs:
         run: |
           echo "${{ needs.prepare.outputs.version_for_file }}" > config/version
 
-      - name: Determine image tags
-        id: tags
+      - name: Build and push sharx image
+        env:
+          HARBOR_HOST: ${{ secrets.HARBOR_HOST }}
+          HARBOR_PROJECT: ${{ secrets.HARBOR_PROJECT }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          IS_BETA: ${{ needs.prepare.outputs.is_beta }}
         run: |
-          HARBOR_HOST="${{ secrets.HARBOR_HOST }}"
-          HARBOR_PROJECT="${{ secrets.HARBOR_PROJECT }}"
-          VERSION="${{ needs.prepare.outputs.version }}"
-          IS_BETA="${{ needs.prepare.outputs.is_beta }}"
-          
-          if [ -z "$HARBOR_HOST" ] || [ -z "$HARBOR_PROJECT" ]; then
-            echo "❌ Error: HARBOR_HOST or HARBOR_PROJECT is not set"
-            exit 1
-          fi
-          
           if [ "$IS_BETA" = "true" ]; then
             SHARX_TAG_VERSION="$HARBOR_HOST/$HARBOR_PROJECT/sharx:$VERSION"
             SHARX_TAG_LATEST="$HARBOR_HOST/$HARBOR_PROJECT/sharx:latest-beta"
@@ -140,12 +134,10 @@ jobs:
             SHARX_TAG_LATEST="$HARBOR_HOST/$HARBOR_PROJECT/sharx:latest"
           fi
           
-          echo "sharx_tag_version=$SHARX_TAG_VERSION" >> $GITHUB_OUTPUT
-          echo "sharx_tag_latest=$SHARX_TAG_LATEST" >> $GITHUB_OUTPUT
+          echo "✅ SharX tags: $SHARX_TAG_VERSION, $SHARX_TAG_LATEST"
           
-          echo "✅ SharX tags determined:"
-          echo "  Version: $SHARX_TAG_VERSION"
-          echo "  Latest: $SHARX_TAG_LATEST"
+          echo "SHARX_TAG_VERSION=$SHARX_TAG_VERSION" >> $GITHUB_ENV
+          echo "SHARX_TAG_LATEST=$SHARX_TAG_LATEST" >> $GITHUB_ENV
 
       - name: Build and push sharx image
         uses: docker/build-push-action@v6
@@ -154,8 +146,8 @@ jobs:
           file: ./Dockerfile
           push: true
           tags: |
-            ${{ steps.tags.outputs.sharx_tag_version }}
-            ${{ steps.tags.outputs.sharx_tag_latest }}
+            ${{ env.SHARX_TAG_VERSION }}
+            ${{ env.SHARX_TAG_LATEST }}
           # Build only for amd64 by default for faster builds
           # Change to "linux/amd64,linux/arm64,linux/arm/v7" for multi-arch
           platforms: linux/amd64
@@ -187,18 +179,12 @@ jobs:
           password: ${{ secrets.HARBOR_PASSWORD }}
 
       - name: Determine image tags
-        id: tags
+        env:
+          HARBOR_HOST: ${{ secrets.HARBOR_HOST }}
+          HARBOR_PROJECT: ${{ secrets.HARBOR_PROJECT }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          IS_BETA: ${{ needs.prepare.outputs.is_beta }}
         run: |
-          HARBOR_HOST="${{ secrets.HARBOR_HOST }}"
-          HARBOR_PROJECT="${{ secrets.HARBOR_PROJECT }}"
-          VERSION="${{ needs.prepare.outputs.version }}"
-          IS_BETA="${{ needs.prepare.outputs.is_beta }}"
-          
-          if [ -z "$HARBOR_HOST" ] || [ -z "$HARBOR_PROJECT" ]; then
-            echo "❌ Error: HARBOR_HOST or HARBOR_PROJECT is not set"
-            exit 1
-          fi
-          
           if [ "$IS_BETA" = "true" ]; then
             SHARXNODE_TAG_VERSION="$HARBOR_HOST/$HARBOR_PROJECT/sharxnode:$VERSION"
             SHARXNODE_TAG_LATEST="$HARBOR_HOST/$HARBOR_PROJECT/sharxnode:latest-beta"
@@ -207,12 +193,10 @@ jobs:
             SHARXNODE_TAG_LATEST="$HARBOR_HOST/$HARBOR_PROJECT/sharxnode:latest"
           fi
           
-          echo "sharxnode_tag_version=$SHARXNODE_TAG_VERSION" >> $GITHUB_OUTPUT
-          echo "sharxnode_tag_latest=$SHARXNODE_TAG_LATEST" >> $GITHUB_OUTPUT
+          echo "✅ SharXNode tags: $SHARXNODE_TAG_VERSION, $SHARXNODE_TAG_LATEST"
           
-          echo "✅ SharXNode tags determined:"
-          echo "  Version: $SHARXNODE_TAG_VERSION"
-          echo "  Latest: $SHARXNODE_TAG_LATEST"
+          echo "SHARXNODE_TAG_VERSION=$SHARXNODE_TAG_VERSION" >> $GITHUB_ENV
+          echo "SHARXNODE_TAG_LATEST=$SHARXNODE_TAG_LATEST" >> $GITHUB_ENV
 
       - name: Build and push sharxnode image
         uses: docker/build-push-action@v6
@@ -221,8 +205,8 @@ jobs:
           file: ./node/Dockerfile
           push: true
           tags: |
-            ${{ steps.tags.outputs.sharxnode_tag_version }}
-            ${{ steps.tags.outputs.sharxnode_tag_latest }}
+            ${{ env.SHARXNODE_TAG_VERSION }}
+            ${{ env.SHARXNODE_TAG_LATEST }}
           # Build only for amd64 by default for faster builds
           # Change to "linux/amd64,linux/arm64,linux/arm/v7" for multi-arch
           platforms: linux/amd64
