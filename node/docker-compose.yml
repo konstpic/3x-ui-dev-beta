@@ -3,7 +3,7 @@ services:
     build:
       context: ..
       dockerfile: node/Dockerfile
-    container_name: 3x-ui-node
+    container_name: sharx-node
     restart: unless-stopped
     #environment:
       #- NODE_API_KEY=test-key

@@ -1,8 +1,8 @@
 services:
   node:
     # Используем образ из Harbor вместо локальной сборки
-    image: registry.konstpic.ru/3x-ui/node:latest
-    container_name: 3x-ui-node
+    image: registry.konstpic.ru/sharx/node:latest
+    container_name: sharx-node
     restart: unless-stopped
     #environment:
       #- NODE_API_KEY=test-key

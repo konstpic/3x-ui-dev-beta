@@ -1,9 +1,9 @@
 services:
-  3xui:
+  sharx:
     build:
       context: .
       dockerfile: ./Dockerfile
-    container_name: 3xui_app
+    container_name: sharx_app
     # hostname: yourhostname
     ports:
       - "2053:2053"   # Web UI
@@ -37,14 +37,14 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - xui_network
+      - sharx_network
     tty: true
 #    network_mode: host
     restart: unless-stopped
 
   postgres:
     image: postgres:16-alpine
-    container_name: 3xui_postgres
+    container_name: sharx_postgres
     ports:
       - "5432:5432"
     environment:
@@ -54,7 +54,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - xui_network
+      - sharx_network
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U xui_user -d xui_db"]
@@ -64,7 +64,7 @@ services:
       start_period: 10s
 
 networks:
-  xui_network:
+  sharx_network:
     driver: bridge
 
 volumes:
