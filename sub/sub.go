@@ -15,13 +15,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/util/common"
-	webpkg "github.com/konstpic/sharx/v2/web"
-	"github.com/konstpic/sharx/v2/web/locale"
-	"github.com/konstpic/sharx/v2/web/middleware"
-	"github.com/konstpic/sharx/v2/web/network"
-	"github.com/konstpic/sharx/v2/web/service"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/util/common"
+	webpkg "github.com/konstpic/sharx-code/v2/web"
+	"github.com/konstpic/sharx-code/v2/web/locale"
+	"github.com/konstpic/sharx-code/v2/web/middleware"
+	"github.com/konstpic/sharx-code/v2/web/network"
+	"github.com/konstpic/sharx-code/v2/web/service"
 
 	"github.com/gin-gonic/gin"
 )

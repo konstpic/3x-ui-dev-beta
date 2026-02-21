@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/xray"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/xray"
 )
 
 // ClearLogsJob clears old log files to prevent disk space issues.

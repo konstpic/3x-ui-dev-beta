@@ -11,14 +11,14 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-json"
 
-	"github.com/konstpic/sharx/v2/database"
-	"github.com/konstpic/sharx/v2/database/model"
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/util/common"
-	"github.com/konstpic/sharx/v2/util/crypto"
-	"github.com/konstpic/sharx/v2/util/random"
-	"github.com/konstpic/sharx/v2/web/service"
-	"github.com/konstpic/sharx/v2/xray"
+	"github.com/konstpic/sharx-code/v2/database"
+	"github.com/konstpic/sharx-code/v2/database/model"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/util/common"
+	"github.com/konstpic/sharx-code/v2/util/crypto"
+	"github.com/konstpic/sharx-code/v2/util/random"
+	"github.com/konstpic/sharx-code/v2/web/service"
+	"github.com/konstpic/sharx-code/v2/xray"
 )
 
 // SubService provides business logic for generating subscription links and managing subscription data.

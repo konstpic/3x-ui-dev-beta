@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/konstpic/sharx/v2/web/service"
+	"github.com/konstpic/sharx-code/v2/web/service"
 
 	"github.com/shirou/gopsutil/v4/cpu"
 )

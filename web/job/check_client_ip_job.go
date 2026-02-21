@@ -12,11 +12,11 @@ import (
 	"sort"
 	"time"
 
-	"github.com/konstpic/sharx/v2/database"
-	"github.com/konstpic/sharx/v2/database/model"
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/web/service"
-	"github.com/konstpic/sharx/v2/xray"
+	"github.com/konstpic/sharx-code/v2/database"
+	"github.com/konstpic/sharx-code/v2/database/model"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/web/service"
+	"github.com/konstpic/sharx-code/v2/xray"
 )
 
 // CheckClientIpJob monitors client IP addresses from access logs and manages IP blocking based on configured limits.

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/konstpic/sharx/v2/logger"
+	"github.com/konstpic/sharx-code/v2/logger"
 	"github.com/redis/go-redis/v9"
 )
 

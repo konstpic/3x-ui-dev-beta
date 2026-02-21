@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/konstpic/sharx/v2/web/cache"
+	"github.com/konstpic/sharx-code/v2/web/cache"
 )
 
 // CacheMiddleware creates a middleware that caches HTTP responses.

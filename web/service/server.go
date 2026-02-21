@@ -20,12 +20,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/konstpic/sharx/v2/config"
-	"github.com/konstpic/sharx/v2/database"
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/util/common"
-	"github.com/konstpic/sharx/v2/util/sys"
-	"github.com/konstpic/sharx/v2/xray"
+	"github.com/konstpic/sharx-code/v2/config"
+	"github.com/konstpic/sharx-code/v2/database"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/util/common"
+	"github.com/konstpic/sharx-code/v2/util/sys"
+	"github.com/konstpic/sharx-code/v2/xray"
 
 	"github.com/google/uuid"
 	"github.com/shirou/gopsutil/v4/cpu"

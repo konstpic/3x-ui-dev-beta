@@ -5,10 +5,10 @@ import (
 
 	"strings"
 
-	"github.com/konstpic/sharx/v2/database/model"
-	"github.com/konstpic/sharx/v2/logger"
-	ldaputil "github.com/konstpic/sharx/v2/util/ldap"
-	"github.com/konstpic/sharx/v2/web/service"
+	"github.com/konstpic/sharx-code/v2/database/model"
+	"github.com/konstpic/sharx-code/v2/logger"
+	ldaputil "github.com/konstpic/sharx-code/v2/util/ldap"
+	"github.com/konstpic/sharx-code/v2/web/service"
 
 	"strconv"
 

@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/konstpic/sharx/v2/logger"
+	"github.com/konstpic/sharx-code/v2/logger"
 )
 
 // LogPusher sends logs to the panel in real-time.

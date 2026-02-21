@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/konstpic/sharx/v2/config"
+	"github.com/konstpic/sharx-code/v2/config"
 	"github.com/op/go-logging"
 )
 

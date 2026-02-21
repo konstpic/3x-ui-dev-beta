@@ -3,7 +3,7 @@ package xray
 import (
 	"bytes"
 
-	"github.com/konstpic/sharx/v2/util/json_util"
+	"github.com/konstpic/sharx-code/v2/util/json_util"
 )
 
 // InboundConfig represents an Xray inbound configuration.

@@ -7,9 +7,9 @@ import (
 	"runtime"
 	"sync"
 
-	"github.com/konstpic/sharx/v2/database/model"
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/xray"
+	"github.com/konstpic/sharx-code/v2/database/model"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/xray"
 
 	"go.uber.org/atomic"
 )

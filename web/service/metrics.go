@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/konstpic/sharx/v2/database"
-	"github.com/konstpic/sharx/v2/database/model"
+	"github.com/konstpic/sharx-code/v2/database"
+	"github.com/konstpic/sharx-code/v2/database/model"
 )
 
 var (

@@ -4,10 +4,10 @@ package controller
 import (
 	"strconv"
 
-	"github.com/konstpic/sharx/v2/database/model"
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/web/service"
-	"github.com/konstpic/sharx/v2/web/session"
+	"github.com/konstpic/sharx-code/v2/database/model"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/web/service"
+	"github.com/konstpic/sharx-code/v2/web/session"
 
 	"github.com/gin-gonic/gin"
 )

@@ -14,9 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/konstpic/sharx/v2/config"
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/util/common"
+	"github.com/konstpic/sharx-code/v2/config"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/util/common"
 )
 
 // GetBinaryName returns the Xray binary filename for the current OS and architecture.

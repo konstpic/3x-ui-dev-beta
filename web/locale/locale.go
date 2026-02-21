@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/konstpic/sharx/v2/logger"
+	"github.com/konstpic/sharx-code/v2/logger"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nicksnyder/go-i18n/v2/i18n"

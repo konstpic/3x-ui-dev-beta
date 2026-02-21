@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/konstpic/sharx/v2/util/common"
+	"github.com/konstpic/sharx-code/v2/util/common"
 )
 
 // Msg represents a standard API response message with success status, message text, and optional data object.

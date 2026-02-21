@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/web/global"
-	"github.com/konstpic/sharx/v2/web/service"
-	"github.com/konstpic/sharx/v2/web/websocket"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/web/global"
+	"github.com/konstpic/sharx-code/v2/web/service"
+	"github.com/konstpic/sharx-code/v2/web/websocket"
 
 	"github.com/gin-gonic/gin"
 )

@@ -7,12 +7,12 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/konstpic/sharx/v2/config"
-	"github.com/konstpic/sharx/v2/database"
-	"github.com/konstpic/sharx/v2/database/model"
-	"github.com/konstpic/sharx/v2/logger"
-	service "github.com/konstpic/sharx/v2/web/service"
-	"github.com/konstpic/sharx/v2/web/entity"
+	"github.com/konstpic/sharx-code/v2/config"
+	"github.com/konstpic/sharx-code/v2/database"
+	"github.com/konstpic/sharx-code/v2/database/model"
+	"github.com/konstpic/sharx-code/v2/logger"
+	service "github.com/konstpic/sharx-code/v2/web/service"
+	"github.com/konstpic/sharx-code/v2/web/entity"
 
 	"github.com/gin-gonic/gin"
 )

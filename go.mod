@@ -1,4 +1,4 @@
-module github.com/konstpic/sharx/v2
+module github.com/konstpic/sharx-code/v2
 
 // Local development - use local files instead of GitHub
 // These replace directives ensure we use local code during development
@@ -125,4 +125,4 @@ require (
 // Local development - use local files instead of GitHub
 // This ensures we use local code during development
 // Remove this when changes are pushed to GitHub
-replace github.com/konstpic/sharx/v2 => ./
+replace github.com/konstpic/sharx-code/v2 => ./

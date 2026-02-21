@@ -5,9 +5,9 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/web/service"
-	"github.com/konstpic/sharx/v2/web/session"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/web/service"
+	"github.com/konstpic/sharx-code/v2/web/session"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"

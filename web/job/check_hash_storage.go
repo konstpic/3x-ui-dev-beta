@@ -1,7 +1,7 @@
 package job
 
 import (
-	"github.com/konstpic/sharx/v2/web/service"
+	"github.com/konstpic/sharx-code/v2/web/service"
 )
 
 // CheckHashStorageJob periodically cleans up expired hash entries from the Telegram bot's hash storage.

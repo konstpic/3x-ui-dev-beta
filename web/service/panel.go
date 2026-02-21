@@ -5,7 +5,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/konstpic/sharx/v2/logger"
+	"github.com/konstpic/sharx-code/v2/logger"
 )
 
 // PanelService provides business logic for panel management operations.

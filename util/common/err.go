@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/konstpic/sharx/v2/logger"
+	"github.com/konstpic/sharx-code/v2/logger"
 )
 
 // NewErrorf creates a new error with formatted message.

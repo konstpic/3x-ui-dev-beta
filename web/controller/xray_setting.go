@@ -1,7 +1,7 @@
 package controller
 
 import (
-	"github.com/konstpic/sharx/v2/web/service"
+	"github.com/konstpic/sharx-code/v2/web/service"
 
 	"github.com/gin-gonic/gin"
 )

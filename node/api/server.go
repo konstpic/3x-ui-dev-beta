@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/konstpic/sharx/v2/logger"
-	nodeConfig "github.com/konstpic/sharx/v2/node/config"
-	nodeLogs "github.com/konstpic/sharx/v2/node/logs"
-	"github.com/konstpic/sharx/v2/node/xray"
+	"github.com/konstpic/sharx-code/v2/logger"
+	nodeConfig "github.com/konstpic/sharx-code/v2/node/config"
+	nodeLogs "github.com/konstpic/sharx-code/v2/node/logs"
+	"github.com/konstpic/sharx-code/v2/node/xray"
 	"github.com/gin-gonic/gin"
 )
 

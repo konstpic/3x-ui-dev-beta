@@ -5,10 +5,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/konstpic/sharx/v2/util/crypto"
-	"github.com/konstpic/sharx/v2/web/entity"
-	"github.com/konstpic/sharx/v2/web/service"
-	"github.com/konstpic/sharx/v2/web/session"
+	"github.com/konstpic/sharx-code/v2/util/crypto"
+	"github.com/konstpic/sharx-code/v2/web/entity"
+	"github.com/konstpic/sharx-code/v2/web/service"
+	"github.com/konstpic/sharx-code/v2/web/session"
 
 	"github.com/gin-gonic/gin"
 )

@@ -5,9 +5,9 @@ package controller
 import (
 	"net/http"
 
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/web/locale"
-	"github.com/konstpic/sharx/v2/web/session"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/web/locale"
+	"github.com/konstpic/sharx-code/v2/web/session"
 
 	"github.com/gin-gonic/gin"
 )

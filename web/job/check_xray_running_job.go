@@ -3,8 +3,8 @@
 package job
 
 import (
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/web/service"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/web/service"
 )
 
 // CheckXrayRunningJob monitors Xray process health and restarts it if it crashes.

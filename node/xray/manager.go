@@ -17,10 +17,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/konstpic/sharx/v2/config"
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/util/json_util"
-	"github.com/konstpic/sharx/v2/xray"
+	"github.com/konstpic/sharx-code/v2/config"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/util/json_util"
+	"github.com/konstpic/sharx-code/v2/xray"
 )
 
 // NodeStats represents traffic and online clients statistics from a node.

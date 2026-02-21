@@ -8,9 +8,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/konstpic/sharx/v2/config"
-	"github.com/konstpic/sharx/v2/database/model"
-	"github.com/konstpic/sharx/v2/util/crypto"
+	"github.com/konstpic/sharx-code/v2/config"
+	"github.com/konstpic/sharx-code/v2/database/model"
+	"github.com/konstpic/sharx-code/v2/util/crypto"
 
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"

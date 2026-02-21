@@ -3,7 +3,7 @@ package xray
 import (
 	"bytes"
 
-	"github.com/konstpic/sharx/v2/util/json_util"
+	"github.com/konstpic/sharx-code/v2/util/json_util"
 )
 
 // Config represents the complete Xray configuration structure.

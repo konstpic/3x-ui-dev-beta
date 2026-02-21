@@ -10,11 +10,11 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/node/api"
-	nodeConfig "github.com/konstpic/sharx/v2/node/config"
-	nodeLogs "github.com/konstpic/sharx/v2/node/logs"
-	"github.com/konstpic/sharx/v2/node/xray"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/node/api"
+	nodeConfig "github.com/konstpic/sharx-code/v2/node/config"
+	nodeLogs "github.com/konstpic/sharx-code/v2/node/logs"
+	"github.com/konstpic/sharx-code/v2/node/xray"
 	"github.com/op/go-logging"
 )
 

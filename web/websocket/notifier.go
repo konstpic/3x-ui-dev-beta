@@ -2,8 +2,8 @@
 package websocket
 
 import (
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/web/global"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/web/global"
 )
 
 // GetHub returns the global WebSocket hub instance

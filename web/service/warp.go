@@ -8,8 +8,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/konstpic/sharx/v2/logger"
-	"github.com/konstpic/sharx/v2/util/common"
+	"github.com/konstpic/sharx-code/v2/logger"
+	"github.com/konstpic/sharx-code/v2/util/common"
 )
 
 // WarpService provides business logic for Cloudflare WARP integration.
