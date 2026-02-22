@@ -354,22 +354,22 @@ jobs:
           else
             echo "⚠️  Release notes file not found: $RELEASE_NOTES_FILE, using default description"
             # Prepare default release body (variables already set above)
-            RELEASE_BODY=$(cat <<EOF
+            RELEASE_BODY=$(cat <<'HEREDOC_EOF'
 ## Release $TAG
 
 ### 🐳 Docker Images
 
 Images are available in Harbor:
 
-- **sharx**: \`$SHARX_TAG_VERSION\` / \`$SHARX_TAG_LATEST\`
-- **sharxnode**: \`$SHARXNODE_TAG_VERSION\` / \`$SHARXNODE_TAG_LATEST\`
+- **sharx**: `$SHARX_TAG_VERSION` / `$SHARX_TAG_LATEST`
+- **sharxnode**: `$SHARXNODE_TAG_VERSION` / `$SHARXNODE_TAG_LATEST`
 - **postgres**: $HARBOR_HOST/$HARBOR_PROJECT/postgres:16-alpine / $HARBOR_HOST/$HARBOR_PROJECT/postgres:latest
 
 ### 📦 Quick Start
 
-Update your \`docker-compose.yml\`:
+Update your `docker-compose.yml`:
 
-\`\`\`yaml
+```yaml
 services:
   sharx:
     image: $SHARX_TAG_LATEST
@@ -377,7 +377,7 @@ services:
     image: $SHARXNODE_TAG_LATEST
   postgres:
     image: $HARBOR_HOST/$HARBOR_PROJECT/postgres:latest
-\`\`\`
+```
 
 ### 📝 Installation
 
@@ -386,8 +386,10 @@ For detailed installation instructions, see the [README](https://github.com/kons
 ### 🔄 Changes
 
 See commit history for detailed changes.
-EOF
+HEREDOC_EOF
             )
+            # Expand variables in heredoc
+            RELEASE_BODY=$(eval "echo \"$RELEASE_BODY\"")
           fi
           
           # Create release using GitHub API
