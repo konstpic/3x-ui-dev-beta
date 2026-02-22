@@ -329,20 +329,20 @@ jobs:
           VERSION="${{ needs.prepare.outputs.version }}"
           IS_BETA="${{ needs.prepare.outputs.is_beta }}"
           
+          # Set variables needed for release body (used in both if and else blocks)
+          HARBOR_HOST="${{ secrets.HARBOR_HOST }}"
+          HARBOR_PROJECT="${{ secrets.HARBOR_PROJECT }}"
+          SHARX_TAG_VERSION="${{ steps.tags.outputs.sharx_tag_version }}"
+          SHARX_TAG_LATEST="${{ steps.tags.outputs.sharx_tag_latest }}"
+          SHARXNODE_TAG_VERSION="${{ steps.tags.outputs.sharxnode_tag_version }}"
+          SHARXNODE_TAG_LATEST="${{ steps.tags.outputs.sharxnode_tag_latest }}"
+          
           # Try to load release notes from release-notes/ directory
           RELEASE_NOTES_FILE="release-notes/$TAG.md"
           
           if [ -f "$RELEASE_NOTES_FILE" ]; then
             echo "📄 Found release notes file: $RELEASE_NOTES_FILE"
             RELEASE_BODY=$(cat "$RELEASE_NOTES_FILE")
-            
-            # Replace placeholders with actual values
-            HARBOR_HOST="${{ secrets.HARBOR_HOST }}"
-            HARBOR_PROJECT="${{ secrets.HARBOR_PROJECT }}"
-            SHARX_TAG_VERSION="${{ steps.tags.outputs.sharx_tag_version }}"
-            SHARX_TAG_LATEST="${{ steps.tags.outputs.sharx_tag_latest }}"
-            SHARXNODE_TAG_VERSION="${{ steps.tags.outputs.sharxnode_tag_version }}"
-            SHARXNODE_TAG_LATEST="${{ steps.tags.outputs.sharxnode_tag_latest }}"
             
             # Replace common placeholders
             RELEASE_BODY=$(echo "$RELEASE_BODY" | sed "s|{{HARBOR_HOST}}|$HARBOR_HOST|g")
@@ -353,9 +353,7 @@ jobs:
             RELEASE_BODY=$(echo "$RELEASE_BODY" | sed "s|{{SHARXNODE_TAG_LATEST}}|$SHARXNODE_TAG_LATEST|g")
           else
             echo "⚠️  Release notes file not found: $RELEASE_NOTES_FILE, using default description"
-            # Prepare default release body
-            HARBOR_HOST="${{ secrets.HARBOR_HOST }}"
-            HARBOR_PROJECT="${{ secrets.HARBOR_PROJECT }}"
+            # Prepare default release body (variables already set above)
             RELEASE_BODY=$(cat <<EOF
 ## Release $TAG
 
