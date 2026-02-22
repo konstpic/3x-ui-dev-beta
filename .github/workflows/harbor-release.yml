@@ -354,8 +354,8 @@ jobs:
           else
             echo "⚠️  Release notes file not found: $RELEASE_NOTES_FILE, using default description"
             # Prepare default release body (variables already set above)
-            # Use printf to avoid YAML parsing issues with special characters
-            RELEASE_BODY=$(printf '## Release %s\n\n### 🐳 Docker Images\n\nImages are available in Harbor:\n\n- **sharx**: `%s` / `%s`\n- **sharxnode**: `%s` / `%s`\n- **postgres**: %s/%s/postgres:16-alpine / %s/%s/postgres:latest\n\n### 📦 Quick Start\n\nUpdate your `docker-compose.yml`:\n\n```yaml\nservices:\n  sharx:\n    image: %s\n  sharxnode:\n    image: %s\n  postgres:\n    image: %s/%s/postgres:latest\n```\n\n### 📝 Installation\n\nFor detailed installation instructions, see the [README](https://github.com/konstpic/SharX#quick-start--быстрый-старт).\n\n### 🔄 Changes\n\nSee commit history for detailed changes.' \
+            # Use printf without backticks to avoid shell parsing issues
+            RELEASE_BODY=$(printf '## Release %s\n\n### 🐳 Docker Images\n\nImages are available in Harbor:\n\n- **sharx**: %s / %s\n- **sharxnode**: %s / %s\n- **postgres**: %s/%s/postgres:16-alpine / %s/%s/postgres:latest\n\n### 📦 Quick Start\n\nUpdate your docker-compose.yml:\n\n```yaml\nservices:\n  sharx:\n    image: %s\n  sharxnode:\n    image: %s\n  postgres:\n    image: %s/%s/postgres:latest\n```\n\n### 📝 Installation\n\nFor detailed installation instructions, see the [README](https://github.com/konstpic/SharX#quick-start--быстрый-старт).\n\n### 🔄 Changes\n\nSee commit history for detailed changes.' \
               "$TAG" \
               "$SHARX_TAG_VERSION" "$SHARX_TAG_LATEST" \
               "$SHARXNODE_TAG_VERSION" "$SHARXNODE_TAG_LATEST" \
