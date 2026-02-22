@@ -354,19 +354,25 @@ jobs:
             sed -i "s|{{SHARXNODE_TAG_VERSION}}|$SHARXNODE_TAG_VERSION|g" "$TEMP_FILE"
             sed -i "s|{{SHARXNODE_TAG_LATEST}}|$SHARXNODE_TAG_LATEST|g" "$TEMP_FILE"
             
-            RELEASE_BODY=$(cat "$TEMP_FILE")
+            # Read file content and escape for JSON using jq
+            RELEASE_BODY_JSON=$(jq -Rs . < "$TEMP_FILE")
             rm -f "$TEMP_FILE"
           else
             echo "⚠️  Release notes file not found: $RELEASE_NOTES_FILE, using default description"
             # Prepare default release body (variables already set above)
             # Use printf without backticks to avoid shell parsing issues
-            RELEASE_BODY=$(printf '## Release %s\n\n### 🐳 Docker Images\n\nImages are available in Harbor:\n\n- **sharx**: %s / %s\n- **sharxnode**: %s / %s\n- **postgres**: %s/%s/postgres:16-alpine / %s/%s/postgres:latest\n\n### 📦 Quick Start\n\nUpdate your docker-compose.yml:\n\n```yaml\nservices:\n  sharx:\n    image: %s\n  sharxnode:\n    image: %s\n  postgres:\n    image: %s/%s/postgres:latest\n```\n\n### 📝 Installation\n\nFor detailed installation instructions, see the [README](https://github.com/konstpic/SharX#quick-start--быстрый-старт).\n\n### 🔄 Changes\n\nSee commit history for detailed changes.' \
+            TEMP_FILE=$(mktemp)
+            printf '## Release %s\n\n### 🐳 Docker Images\n\nImages are available in Harbor:\n\n- **sharx**: %s / %s\n- **sharxnode**: %s / %s\n- **postgres**: %s/%s/postgres:16-alpine / %s/%s/postgres:latest\n\n### 📦 Quick Start\n\nUpdate your docker-compose.yml:\n\n```yaml\nservices:\n  sharx:\n    image: %s\n  sharxnode:\n    image: %s\n  postgres:\n    image: %s/%s/postgres:latest\n```\n\n### 📝 Installation\n\nFor detailed installation instructions, see the [README](https://github.com/konstpic/SharX#quick-start--быстрый-старт).\n\n### 🔄 Changes\n\nSee commit history for detailed changes.' \
               "$TAG" \
               "$SHARX_TAG_VERSION" "$SHARX_TAG_LATEST" \
               "$SHARXNODE_TAG_VERSION" "$SHARXNODE_TAG_LATEST" \
               "$HARBOR_HOST" "$HARBOR_PROJECT" "$HARBOR_HOST" "$HARBOR_PROJECT" \
               "$SHARX_TAG_LATEST" "$SHARXNODE_TAG_LATEST" \
-              "$HARBOR_HOST" "$HARBOR_PROJECT")
+              "$HARBOR_HOST" "$HARBOR_PROJECT" > "$TEMP_FILE"
+            
+            # Read file content and escape for JSON using jq
+            RELEASE_BODY_JSON=$(jq -Rs . < "$TEMP_FILE")
+            rm -f "$TEMP_FILE"
           fi
           
           # Create release using GitHub API
@@ -378,7 +384,7 @@ jobs:
             -d "{
               \"tag_name\": \"$TAG\",
               \"name\": \"Release $TAG\",
-              \"body\": $(echo "$RELEASE_BODY" | jq -Rs .),
+              \"body\": $RELEASE_BODY_JSON,
               \"draft\": false,
               \"prerelease\": $IS_BETA
             }")
@@ -407,7 +413,7 @@ jobs:
                 "https://api.github.com/repos/konstpic/SharX/releases/$RELEASE_ID" \
                 -d "{
                   \"name\": \"Release $TAG\",
-                  \"body\": $(echo "$RELEASE_BODY" | jq -Rs .),
+                  \"body\": $RELEASE_BODY_JSON,
                   \"draft\": false,
                   \"prerelease\": $IS_BETA
                 })
