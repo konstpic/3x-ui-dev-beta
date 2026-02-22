@@ -119,7 +119,7 @@ jobs:
         run: |
           echo "${{ needs.prepare.outputs.version_for_file }}" > config/version
 
-      - name: Build and push sharx image
+      - name: Determine image tags
         env:
           HARBOR_HOST: ${{ secrets.HARBOR_HOST }}
           HARBOR_PROJECT: ${{ secrets.HARBOR_PROJECT }}
