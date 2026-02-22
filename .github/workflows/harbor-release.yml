@@ -342,15 +342,20 @@ jobs:
           
           if [ -f "$RELEASE_NOTES_FILE" ]; then
             echo "📄 Found release notes file: $RELEASE_NOTES_FILE"
-            RELEASE_BODY=$(cat "$RELEASE_NOTES_FILE")
+            # Use temporary file to avoid shell parsing issues with special characters
+            TEMP_FILE=$(mktemp)
+            cat "$RELEASE_NOTES_FILE" > "$TEMP_FILE"
             
-            # Replace common placeholders
-            RELEASE_BODY=$(echo "$RELEASE_BODY" | sed "s|{{HARBOR_HOST}}|$HARBOR_HOST|g")
-            RELEASE_BODY=$(echo "$RELEASE_BODY" | sed "s|{{HARBOR_PROJECT}}|$HARBOR_PROJECT|g")
-            RELEASE_BODY=$(echo "$RELEASE_BODY" | sed "s|{{SHARX_TAG_VERSION}}|$SHARX_TAG_VERSION|g")
-            RELEASE_BODY=$(echo "$RELEASE_BODY" | sed "s|{{SHARX_TAG_LATEST}}|$SHARX_TAG_LATEST|g")
-            RELEASE_BODY=$(echo "$RELEASE_BODY" | sed "s|{{SHARXNODE_TAG_VERSION}}|$SHARXNODE_TAG_VERSION|g")
-            RELEASE_BODY=$(echo "$RELEASE_BODY" | sed "s|{{SHARXNODE_TAG_LATEST}}|$SHARXNODE_TAG_LATEST|g")
+            # Replace common placeholders using sed with proper escaping
+            sed -i "s|{{HARBOR_HOST}}|$HARBOR_HOST|g" "$TEMP_FILE"
+            sed -i "s|{{HARBOR_PROJECT}}|$HARBOR_PROJECT|g" "$TEMP_FILE"
+            sed -i "s|{{SHARX_TAG_VERSION}}|$SHARX_TAG_VERSION|g" "$TEMP_FILE"
+            sed -i "s|{{SHARX_TAG_LATEST}}|$SHARX_TAG_LATEST|g" "$TEMP_FILE"
+            sed -i "s|{{SHARXNODE_TAG_VERSION}}|$SHARXNODE_TAG_VERSION|g" "$TEMP_FILE"
+            sed -i "s|{{SHARXNODE_TAG_LATEST}}|$SHARXNODE_TAG_LATEST|g" "$TEMP_FILE"
+            
+            RELEASE_BODY=$(cat "$TEMP_FILE")
+            rm -f "$TEMP_FILE"
           else
             echo "⚠️  Release notes file not found: $RELEASE_NOTES_FILE, using default description"
             # Prepare default release body (variables already set above)
