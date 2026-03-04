@@ -167,6 +167,15 @@
     dataIndex: "id",
     width: 30,
     responsive: ["xs"],
+    sorter: (a, b) => a.id - b.id,
+    defaultSortOrder: 'ascend',
+    customHeaderCell: () => {
+      return {
+        style: {
+          whiteSpace: 'nowrap'
+        }
+      };
+    },
   }, {
     title: '{{ i18n "pages.nodes.operate" }}',
     align: 'center',
@@ -178,11 +187,25 @@
     width: 120,
     dataIndex: "name",
     scopedSlots: { customRender: 'name' },
+    sorter: (a, b) => {
+      const nameA = (a.name || '').toLowerCase();
+      const nameB = (b.name || '').toLowerCase();
+      if (nameA < nameB) return -1;
+      if (nameA > nameB) return 1;
+      return 0;
+    },
   }, {
     title: '{{ i18n "pages.nodes.address" }}',
     align: 'left',
     width: 200,
     dataIndex: "address",
+    sorter: (a, b) => {
+      const addrA = (a.address || '').toLowerCase();
+      const addrB = (b.address || '').toLowerCase();
+      if (addrA < addrB) return -1;
+      if (addrA > addrB) return 1;
+      return 0;
+    },
   }, {
     title: '{{ i18n "pages.nodes.status" }}',
     align: 'center',
@@ -757,6 +780,11 @@
   
   .ant-tag {
     min-height: 22px;
+  }
+  
+  /* Prevent ID column header from wrapping */
+  .nodes-table .ant-table-thead > tr > th:first-child {
+    white-space: nowrap;
   }
 </style>
 {{template "page/body_end" .}}
