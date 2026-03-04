@@ -493,23 +493,32 @@ func (s *ClientService) UpdateClient(userId int, client *model.ClientEntity) (bo
 	// Note: InboundIds is a slice, so we need to check if it was explicitly set
 	// We'll always update if InboundIds is not nil (even if empty array means remove all)
 	if client.InboundIds != nil {
+		logger.Debugf("UpdateClient: updating inbound assignments for client %d, inboundIds=%v (len=%d)", client.Id, client.InboundIds, len(client.InboundIds))
 		// Remove existing assignments
 		err = tx.Where("client_id = ?", client.Id).Delete(&model.ClientInboundMapping{}).Error
 		if err != nil {
+			logger.Errorf("UpdateClient: failed to delete existing inbound mappings for client %d: %v", client.Id, err)
 			return false, err
 		}
+		logger.Debugf("UpdateClient: deleted existing inbound mappings for client %d", client.Id)
 
 		// Add new assignments (if any)
 		if len(client.InboundIds) > 0 {
 			err = s.AssignClientToInbounds(tx, client.Id, client.InboundIds)
 			if err != nil {
+				logger.Errorf("UpdateClient: failed to assign client %d to inbounds: %v", client.Id, err)
 				return false, err
 			}
+			logger.Debugf("UpdateClient: assigned client %d to inbounds: %v", client.Id, client.InboundIds)
 			// Track new inbound IDs for settings update
 			for _, inboundId := range client.InboundIds {
 				affectedInboundIds[inboundId] = true
 			}
+		} else {
+			logger.Debugf("UpdateClient: client %d has empty inboundIds array, all connections removed", client.Id)
 		}
+	} else {
+		logger.Debugf("UpdateClient: inboundIds is nil for client %d, keeping existing assignments", client.Id)
 	}
 	
 	// Traffic statistics are now stored directly in ClientEntity table

@@ -5,6 +5,10 @@ axios.interceptors.request.use(
     (config) => {
         if (config.data instanceof FormData) {
             config.headers['Content-Type'] = 'multipart/form-data';
+        } else if (config.headers && config.headers['Content-Type'] === 'application/json') {
+            // If Content-Type is explicitly set to JSON, send as JSON (don't convert to form-urlencoded)
+            // This allows empty arrays to be properly sent
+            config.data = JSON.stringify(config.data);
         } else {
             config.data = Qs.stringify(config.data, {
                 arrayFormat: 'repeat',

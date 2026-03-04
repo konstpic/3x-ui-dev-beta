@@ -859,11 +859,21 @@
             client.expiryTime = 0;
           }
           
+          // Ensure inboundIds is always an array (even if empty) to allow removing all connections
+          if (!Array.isArray(client.inboundIds)) {
+            client.inboundIds = client.inboundIds ? [client.inboundIds] : [];
+          }
+          
+          // Send as JSON to ensure empty arrays are properly handled
           let msg;
           if (isEdit) {
-            msg = await HttpUtil.post(`/panel/client/update/${client.id}`, client);
+            msg = await HttpUtil.post(`/panel/client/update/${client.id}`, client, {
+              headers: { 'Content-Type': 'application/json' }
+            });
           } else {
-            msg = await HttpUtil.post('/panel/client/add', client);
+            msg = await HttpUtil.post('/panel/client/add', client, {
+              headers: { 'Content-Type': 'application/json' }
+            });
           }
           
           if (msg.success) {

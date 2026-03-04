@@ -229,7 +229,7 @@ func (a *ClientController) updateClient(c *gin.Context) {
 	}
 	
 	// Extract inboundIds from JSON or form data
-	var inboundIdsFromJSON []int
+	var inboundIdsFromJSON []int = nil // nil means not provided, empty array means remove all
 	var hasInboundIdsInJSON bool
 	
 	if c.ContentType() == "application/json" {
@@ -242,7 +242,13 @@ func (a *ClientController) updateClient(c *gin.Context) {
 				// Check for inboundIds array
 				if inboundIdsVal, ok := jsonData["inboundIds"]; ok {
 					hasInboundIdsInJSON = true
-					if inboundIdsArray, ok := inboundIdsVal.([]interface{}); ok {
+					// Handle null explicitly - null means remove all connections
+					if inboundIdsVal == nil {
+						inboundIdsFromJSON = []int{} // Empty array means remove all
+						logger.Debugf("UpdateClient: inboundIds is null, setting to empty array")
+					} else if inboundIdsArray, ok := inboundIdsVal.([]interface{}); ok {
+						// Array (can be empty)
+						inboundIdsFromJSON = []int{} // Initialize as empty array
 						for _, val := range inboundIdsArray {
 							if num, ok := val.(float64); ok {
 								inboundIdsFromJSON = append(inboundIdsFromJSON, int(num))
@@ -250,12 +256,19 @@ func (a *ClientController) updateClient(c *gin.Context) {
 								inboundIdsFromJSON = append(inboundIdsFromJSON, num)
 							}
 						}
+						logger.Debugf("UpdateClient: inboundIds array parsed, length=%d, values=%v", len(inboundIdsFromJSON), inboundIdsFromJSON)
 					} else if num, ok := inboundIdsVal.(float64); ok {
 						// Single number instead of array
-						inboundIdsFromJSON = append(inboundIdsFromJSON, int(num))
+						inboundIdsFromJSON = []int{int(num)}
+						logger.Debugf("UpdateClient: inboundIds is single number: %d", int(num))
 					} else if num, ok := inboundIdsVal.(int); ok {
-						inboundIdsFromJSON = append(inboundIdsFromJSON, num)
+						inboundIdsFromJSON = []int{num}
+						logger.Debugf("UpdateClient: inboundIds is single int: %d", num)
+					} else {
+						logger.Warningf("UpdateClient: inboundIds has unexpected type: %T, value: %v", inboundIdsVal, inboundIdsVal)
 					}
+				} else {
+					logger.Debugf("UpdateClient: inboundIds key not found in JSON")
 				}
 			}
 			// Restore body for ShouldBind
@@ -472,12 +485,26 @@ func (a *ClientController) updateClient(c *gin.Context) {
 	
 	// Set inboundIds from JSON if available
 	if hasInboundIdsInJSON {
+		// Ensure empty array is not nil (empty array means remove all, nil means not provided)
+		if inboundIdsFromJSON == nil {
+			inboundIdsFromJSON = []int{} // Convert nil to empty array
+		}
 		client.InboundIds = inboundIdsFromJSON
-		logger.Debugf("UpdateClient: extracted inboundIds from JSON: %v", inboundIdsFromJSON)
+		logger.Debugf("UpdateClient: extracted inboundIds from JSON: %v (len=%d, nil=%v)", inboundIdsFromJSON, len(inboundIdsFromJSON), inboundIdsFromJSON == nil)
 	} else {
 		// Try to get from form data
+		// Check if inboundIds key exists in form (even if empty array)
+		// This allows us to distinguish between "not provided" and "explicitly empty"
 		inboundIdsStr := c.PostFormArray("inboundIds")
-		if len(inboundIdsStr) > 0 {
+		// Check if the key was explicitly provided by checking PostForm map
+		// For arrays, GetPostForm may not work, so we check PostForm directly
+		inboundIdsKeyExists := false
+		if c.Request.PostForm != nil {
+			_, inboundIdsKeyExists = c.Request.PostForm["inboundIds"]
+		}
+		
+		if inboundIdsKeyExists {
+			// Key exists - process the array (even if empty, this means remove all)
 			var inboundIds []int
 			for _, idStr := range inboundIdsStr {
 				if idStr != "" {
@@ -486,8 +513,9 @@ func (a *ClientController) updateClient(c *gin.Context) {
 					}
 				}
 			}
+			// Set inboundIds (empty array means remove all connections)
 			client.InboundIds = inboundIds
-			logger.Debugf("UpdateClient: extracted inboundIds from form: %v", inboundIds)
+			logger.Debugf("UpdateClient: extracted inboundIds from form: %v (explicitly set, empty=%v)", inboundIds, len(inboundIds) == 0)
 		} else {
 			logger.Debugf("UpdateClient: inboundIds not provided, keeping existing assignments")
 		}
