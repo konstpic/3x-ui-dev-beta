@@ -109,10 +109,24 @@
     try {
       const element = document.getElementById(elementId);
       if (element) {
-        new QRious({ element: element, value, size: 220 });
+        // For encrypted URLs (happ://crypt4/ or v2raytun://crypt/), use higher error correction
+        // and larger size due to long base64 strings (500+ characters)
+        const isEncrypted = value && (
+          value.startsWith('happ://crypt') || 
+          value.startsWith('v2raytun://crypt')
+        );
+        
+        const qrOptions = {
+          element: element,
+          value: value,
+          size: isEncrypted ? 320 : 220, // Larger size for encrypted URLs
+          errorCorrectionLevel: isEncrypted ? 'H' : 'M' // High error correction for encrypted URLs
+        };
+        
+        new QRious(qrOptions);
       }
     } catch (e) {
-      console.warn(e);
+      console.warn('[Subscription] QR code generation error:', e);
     }
   }
 
@@ -191,13 +205,16 @@
         console.info('[Subscription] Drawing dual encrypted QR codes for Happ and V2RayTun');
       } else {
         // Draw default QR code(s)
-      drawQR(this.app.subUrl);
-      try {
-        const elJson = document.getElementById('qrcode-subjson');
-        if (elJson && this.app.subJsonUrl) {
-          new QRious({ element: elJson, value: this.app.subJsonUrl, size: 220 });
+        drawQR(this.app.subUrl);
+        try {
+          const elJson = document.getElementById('qrcode-subjson');
+          if (elJson && this.app.subJsonUrl) {
+            // Use drawQR function for consistency (it handles encrypted URLs properly)
+            drawQR(this.app.subJsonUrl, 'qrcode-subjson');
+          }
+        } catch (e) { 
+          console.warn('[Subscription] Failed to draw JSON QR code:', e);
         }
-      } catch (e) { /* ignore */ }
       }
       this._onResize = () => { this.viewportWidth = window.innerWidth; };
       window.addEventListener('resize', this._onResize);
